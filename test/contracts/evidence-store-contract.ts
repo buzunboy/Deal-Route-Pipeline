@@ -1,0 +1,56 @@
+import { describe, it, expect } from 'vitest';
+import type { EvidenceStore } from '../../src/application/ports/index.js';
+import type { EvidenceCapture } from '../../src/domain/index.js';
+
+/**
+ * Shared contract suite for the EvidenceStore port. Every adapter (local-fs, s3,
+ * the in-memory fake) must pass this, so any implementation is substitutable
+ * behind the port (LSP, `testing.md`: adapter contract tests).
+ */
+export function evidenceStoreContract(
+  name: string,
+  makeStore: () => EvidenceStore | Promise<EvidenceStore>,
+): void {
+  describe(`EvidenceStore contract: ${name}`, () => {
+    const capture: EvidenceCapture = {
+      sourceUrl: 'https://www.telekom.de/magenta-tv',
+      screenshot: new Uint8Array([137, 80, 78, 71]),
+      html: '<html><body>Disney+ inklusive</body></html>',
+      termsText: 'Disney+ ist im Tarif enthalten.',
+      capturedAt: '2026-06-19T00:00:00.000Z',
+      contentHash: 'abc123',
+    };
+
+    it('save returns an Evidence with an id and resolved refs', async () => {
+      const store = await makeStore();
+      const ev = await store.save(capture);
+      expect(ev.id).toBeTruthy();
+      expect(ev.source_url).toBe(capture.sourceUrl);
+      expect(ev.screenshot_ref).toBeTruthy();
+      expect(ev.html_ref).toBeTruthy();
+      expect(ev.terms_ref).toBeTruthy();
+      expect(ev.content_hash).toBe('abc123');
+    });
+
+    it('get returns a previously saved bundle', async () => {
+      const store = await makeStore();
+      const saved = await store.save(capture);
+      const fetched = await store.get(saved.id);
+      expect(fetched).not.toBeNull();
+      expect(fetched!.id).toBe(saved.id);
+      expect(fetched!.captured_at).toBe(capture.capturedAt);
+    });
+
+    it('get returns null for an unknown id', async () => {
+      const store = await makeStore();
+      expect(await store.get('00000000-0000-0000-0000-000000000000')).toBeNull();
+    });
+
+    it('assigns distinct ids to separate saves (write-once bundles)', async () => {
+      const store = await makeStore();
+      const a = await store.save(capture);
+      const b = await store.save(capture);
+      expect(a.id).not.toBe(b.id);
+    });
+  });
+}

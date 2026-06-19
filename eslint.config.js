@@ -17,12 +17,31 @@ export default [
         ecmaVersion: 2022,
         sourceType: 'module',
       },
+      // Node runtime globals. TypeScript (with @types/node) already verifies these
+      // far more accurately than the core `no-undef` rule, which we disable below.
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        Buffer: 'readonly',
+        fetch: 'readonly',
+        crypto: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        globalThis: 'readonly',
+        NodeJS: 'readonly',
+        URL: 'readonly',
+      },
     },
     plugins: {
       '@typescript-eslint': tseslint,
     },
     rules: {
       ...tseslint.configs.recommended.rules,
+      // TypeScript handles undefined-identifier checking; the core rule produces
+      // false positives on type-only names (e.g. the NodeJS namespace).
+      'no-undef': 'off',
       // The `const Foo = z.object(...)` + `type Foo = z.infer<...>` idiom shares a
       // name across the value and type namespaces (a deliberate, widespread zod
       // pattern). Both the core and TS `no-redeclare` rules misflag it; genuine
