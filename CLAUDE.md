@@ -3,6 +3,7 @@
 The crawl / LLM-extraction / verification / monitoring service for **DealRoute** (a verified search engine for subscription bundles, Germany v1). It turns web sources into evidence-backed **deal records** that a human approves before publish. Standalone repo — the landing page and the production admin panel live in separate repos.
 
 > Full design: `docs/DealRoute_Crawl_Pipeline_Plan.md` · Seed sources: `docs/DealRoute_Seed_List_DE.md` (read on demand).
+> Phase C plan + roadmap + remaining audit gaps + recommended build sequence: `docs/DealRoute_Phase_C_and_Roadmap.md` (read before Phase C / unattended-run work).
 > Detailed standards auto-load from `.claude/rules/` — `architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`.
 
 ## Non-negotiable invariants (always)
