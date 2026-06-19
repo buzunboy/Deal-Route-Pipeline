@@ -84,7 +84,7 @@ export class Container {
       config.fetcher.userAgent,
       config.fetcher.timeoutMs,
     );
-    this.review = new ReviewUseCase(this.db, this.evidenceStore, this.clock, this.logger);
+    this.review = new ReviewUseCase(this.db, this.clock, this.logger);
     this.monitor = new MonitorSourceUseCase(
       this.fetcher,
       this.db,

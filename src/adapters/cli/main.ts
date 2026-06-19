@@ -5,6 +5,7 @@ import { seedImport } from './commands/seed-import.js';
 import { crawl } from './commands/crawl.js';
 import { monitor } from './commands/monitor.js';
 import { review } from './commands/review.js';
+import { serve } from './commands/serve.js';
 
 const DEFAULT_SEED_PATH = 'docs/DealRoute_Seed_List_DE.md';
 
@@ -25,6 +26,7 @@ Commands:
   review reject <id> <approver>       Reject a candidate → archived
   review proposals                    List open field proposals
   review manual                       List open manual-capture tasks
+  serve                               Start the review API + thin test page (durable admin contract)
   discover [query]                    (Phase B/C) bounded agentic discovery — not enabled in Phase A
   help                                Show this help
 
@@ -72,6 +74,10 @@ async function main(): Promise<void> {
     }
     case 'review': {
       await runReview(config, rest);
+      break;
+    }
+    case 'serve': {
+      await serve(config);
       break;
     }
     case 'discover': {

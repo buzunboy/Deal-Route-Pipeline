@@ -5,7 +5,7 @@ import {
   type ManualCaptureTask,
   type FieldProposalRecord,
 } from '../../domain/index.js';
-import type { Database, EvidenceStore, Clock, Logger } from '../ports/index.js';
+import type { Database, Clock, Logger } from '../ports/index.js';
 
 /** A candidate joined with its evidence, for the review API/console. */
 export interface CandidateView {
@@ -17,11 +17,14 @@ export interface CandidateView {
  * Human-in-the-loop review. This is the ONLY path by which a deal becomes
  * `published`. Nothing auto-publishes (v1 trust invariant): publication requires
  * an explicit approve call carrying the approver's identity.
+ *
+ * Evidence metadata is resolved from the `evidence` repository (where the crawl
+ * pipeline records each bundle's pointers) — not the artifact store — so review
+ * does not depend on where screenshots/HTML physically live.
  */
 export class ReviewUseCase {
   constructor(
     private readonly db: Database,
-    private readonly evidenceStore: EvidenceStore,
     private readonly clock: Clock,
     private readonly logger: Logger,
   ) {}
@@ -32,7 +35,7 @@ export class ReviewUseCase {
     return Promise.all(
       deals.map(async (deal) => ({
         deal,
-        evidence: deal.evidence_id ? await this.evidenceStore.get(deal.evidence_id) : null,
+        evidence: deal.evidence_id ? await this.db.evidence.getById(deal.evidence_id) : null,
       })),
     );
   }

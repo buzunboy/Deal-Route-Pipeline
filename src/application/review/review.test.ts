@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { ReviewUseCase } from './review.js';
 import { DealStatus, type DealRecord } from '../../domain/index.js';
 import { InMemoryDb } from '../../../test/fakes/in-memory-db.js';
-import { FakeEvidenceStore, FixedClock, FakeLogger } from '../../../test/fakes/fakes.js';
+import { FixedClock, FakeLogger } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
 import { randomUUID } from 'node:crypto';
+import type { Evidence } from '../../domain/index.js';
 
 function makeCandidate(db: InMemoryDb, evidenceId: string): Promise<DealRecord> {
   const deal: DealRecord = {
@@ -22,24 +23,24 @@ function makeCandidate(db: InMemoryDb, evidenceId: string): Promise<DealRecord> 
 
 describe('ReviewUseCase', () => {
   let db: InMemoryDb;
-  let evidenceStore: FakeEvidenceStore;
   let uc: ReviewUseCase;
 
   beforeEach(() => {
     db = new InMemoryDb();
-    evidenceStore = new FakeEvidenceStore();
-    uc = new ReviewUseCase(db, evidenceStore, new FixedClock(), new FakeLogger());
+    uc = new ReviewUseCase(db, new FixedClock(), new FakeLogger());
   });
 
   it('lists candidates joined with their evidence', async () => {
-    const ev = await evidenceStore.save({
-      sourceUrl: 'https://x.de',
-      screenshot: new Uint8Array(),
-      html: '<html>',
-      termsText: 't',
-      capturedAt: '2026-06-19T00:00:00.000Z',
-      contentHash: 'h',
-    });
+    const ev: Evidence = {
+      id: randomUUID(),
+      source_url: 'https://x.de',
+      screenshot_ref: 's',
+      html_ref: 'h',
+      terms_ref: 't',
+      captured_at: '2026-06-19T00:00:00.000Z',
+      content_hash: 'h',
+    };
+    await db.evidence.insert(ev);
     await makeCandidate(db, ev.id);
 
     const views = await uc.listCandidates();
