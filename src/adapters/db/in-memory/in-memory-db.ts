@@ -9,6 +9,8 @@ import {
   type FieldProposalRecord,
   type Change,
   type DealStatus,
+  type ReviewRecord,
+  type SubscriptionCatalogEntry,
 } from '../../../domain/index.js';
 import type {
   Database,
@@ -19,6 +21,8 @@ import type {
   ManualCaptureRepository,
   FieldProposalRepository,
   ChangeRepository,
+  ReviewRepository,
+  SubscriptionCatalogRepository,
 } from '../../../application/ports/index.js';
 
 /**
@@ -35,6 +39,8 @@ export class InMemoryDb implements Database {
   manualCapture: ManualCaptureRepository = new InMemoryManualCaptureRepo();
   fieldProposals: FieldProposalRepository = new InMemoryFieldProposalRepo();
   changes: ChangeRepository = new InMemoryChangeRepo();
+  reviews: ReviewRepository = new InMemoryReviewRepo();
+  catalog: SubscriptionCatalogRepository = new InMemoryCatalogRepo();
 }
 
 class InMemorySourceRepo implements SourceRepository {
@@ -174,5 +180,31 @@ class InMemoryChangeRepo implements ChangeRepository {
       .sort((a, b) => b.change.detected_at.localeCompare(a.change.detected_at) || b.seq - a.seq)
       .slice(0, limit)
       .map((e) => ({ ...e.change }));
+  }
+}
+
+class InMemoryReviewRepo implements ReviewRepository {
+  private reviews: { review: ReviewRecord; seq: number }[] = [];
+  private seq = 0;
+  async insert(r: ReviewRecord): Promise<void> {
+    this.reviews.push({ review: { ...r }, seq: this.seq++ });
+  }
+  async listForDeal(dealId: string, limit: number): Promise<ReviewRecord[]> {
+    // Newest first; insertion sequence breaks equal-timestamp ties (fixed clock).
+    return this.reviews
+      .filter((e) => e.review.deal_id === dealId)
+      .sort((a, b) => b.review.decided_at.localeCompare(a.review.decided_at) || b.seq - a.seq)
+      .slice(0, limit)
+      .map((e) => ({ ...e.review }));
+  }
+}
+
+class InMemoryCatalogRepo implements SubscriptionCatalogRepository {
+  private store = new Map<string, SubscriptionCatalogEntry>();
+  async upsert(e: SubscriptionCatalogEntry): Promise<void> {
+    this.store.set(e.service, { ...e });
+  }
+  async list(): Promise<SubscriptionCatalogEntry[]> {
+    return [...this.store.values()].map((e) => ({ ...e }));
   }
 }

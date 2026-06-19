@@ -6,6 +6,9 @@ import type {
   Llm,
   LlmRequest,
   LlmResponse,
+  LlmRole,
+  FeedReader,
+  FeedItem,
   EvidenceStore,
   Clock,
   Logger,
@@ -79,6 +82,26 @@ export class FakeLlm implements Llm {
       usage: { inputTokens: 100, outputTokens: 50, costEur: 0.001 },
       model: 'fake-model',
     };
+  }
+}
+
+/** Llm fake that returns a different scripted response per role (triage vs extract). */
+export class RoleAwareFakeLlm implements Llm {
+  constructor(private readonly byRole: Partial<Record<LlmRole, string>>) {}
+  async complete(request: LlmRequest): Promise<LlmResponse> {
+    return {
+      text: this.byRole[request.role] ?? '{}',
+      usage: { inputTokens: 100, outputTokens: 50, costEur: 0.001 },
+      model: 'fake-model',
+    };
+  }
+}
+
+/** FeedReader fake: returns scripted items per feed URL. */
+export class FakeFeedReader implements FeedReader {
+  constructor(private readonly feeds: Record<string, FeedItem[]>) {}
+  async read(url: string): Promise<FeedItem[]> {
+    return (this.feeds[url] ?? []).map((i) => ({ ...i }));
   }
 }
 

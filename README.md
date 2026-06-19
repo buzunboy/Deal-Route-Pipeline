@@ -96,6 +96,9 @@ serve                        Review API + thin test page
 discover <url> [--max-pages N] [--dry-run]
                              Lane B: bounded same-site discovery → candidates + proposed
                              novel domains (capped by pages/€/time; nothing auto-publishes)
+ingest --source <id> | --community-due [--max-items N] [--dry-run]
+                             Lane B (Tier 3): community RSS feed → triage → extract relevant
+                             leads → candidates + proposed merchant sources
 ```
 
 ## Review API (durable contract for the future admin panel)
@@ -104,6 +107,7 @@ discover <url> [--max-pages N] [--dry-run]
 GET  /api/candidates                    list candidates + evidence
 POST /api/candidates/:id/approve        { approver }          → publish
 POST /api/candidates/:id/reject         { approver, reason? } → archive
+GET  /api/candidates/:id/reviews        decision audit history (who/what/when/why)
 GET  /api/field-proposals               recurring unknown conditions
 GET  /api/manual-capture-tasks          login-gated / blocked offers
 GET  /api/health

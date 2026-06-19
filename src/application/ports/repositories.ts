@@ -7,6 +7,8 @@ import type {
   Change,
   Evidence,
   DealStatus,
+  ReviewRecord,
+  SubscriptionCatalogEntry,
 } from '../../domain/index.js';
 
 /**
@@ -67,6 +69,19 @@ export interface ChangeRepository {
   recentForSource(sourceId: string, limit: number): Promise<Change[]>;
 }
 
+export interface ReviewRepository {
+  /** Append a review decision (immutable audit log). */
+  insert(review: ReviewRecord): Promise<void>;
+  /** Decision history for one deal, newest first. */
+  listForDeal(dealId: string, limit: number): Promise<ReviewRecord[]>;
+}
+
+export interface SubscriptionCatalogRepository {
+  upsert(entry: SubscriptionCatalogEntry): Promise<void>;
+  /** All catalog services (drives Tier-3 community keyword matching). */
+  list(): Promise<SubscriptionCatalogEntry[]>;
+}
+
 /** Aggregate handed to the composition root; groups the focused repositories. */
 export interface Database {
   sources: SourceRepository;
@@ -76,4 +91,6 @@ export interface Database {
   manualCapture: ManualCaptureRepository;
   fieldProposals: FieldProposalRepository;
   changes: ChangeRepository;
+  reviews: ReviewRepository;
+  catalog: SubscriptionCatalogRepository;
 }

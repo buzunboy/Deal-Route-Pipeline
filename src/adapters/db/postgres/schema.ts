@@ -152,3 +152,18 @@ export const changes = pgTable('changes', {
   currentHash: text('current_hash'),
   detectedAt: timestamp('detected_at', { withTimezone: true, mode: 'string' }).notNull(),
 });
+
+// Append-only audit log of human review decisions (who/what/when/why).
+export const reviews = pgTable(
+  'reviews',
+  {
+    id: uuid('id').primaryKey(),
+    dealId: uuid('deal_id').notNull(),
+    action: text('action').notNull(),
+    approver: text('approver').notNull(),
+    reason: text('reason'),
+    decidedAt: timestamp('decided_at', { withTimezone: true, mode: 'string' }).notNull(),
+  },
+  // The sole access path is the deal-scoped, time-ordered history (listForDeal).
+  (t) => ({ dealIdx: index('reviews_deal_idx').on(t.dealId, t.decidedAt) }),
+);

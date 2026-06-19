@@ -65,6 +65,24 @@ describe('ReviewUseCase', () => {
     expect(updated.status).toBe('rejected');
   });
 
+  it('writes an immutable review audit row on approve and reject', async () => {
+    const approved = await makeCandidate(db, randomUUID());
+    await uc.approve(approved.id, 'alice');
+    const aHistory = await uc.listReviews(approved.id);
+    expect(aHistory).toHaveLength(1);
+    expect(aHistory[0]).toMatchObject({ action: 'approve', approver: 'alice', reason: null });
+
+    const rejected = await makeCandidate(db, randomUUID());
+    await uc.reject(rejected.id, 'bob', 'duplicate of an existing route');
+    const rHistory = await uc.listReviews(rejected.id);
+    expect(rHistory).toHaveLength(1);
+    expect(rHistory[0]).toMatchObject({
+      action: 'reject',
+      approver: 'bob',
+      reason: 'duplicate of an existing route',
+    });
+  });
+
   it('refuses to publish without an approver identity (no anonymous publish)', async () => {
     const deal = await makeCandidate(db, randomUUID());
     await expect(uc.approve(deal.id, '   ')).rejects.toThrow(/approver/);

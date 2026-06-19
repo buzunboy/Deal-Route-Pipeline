@@ -1,0 +1,1 @@
+CREATE INDEX "reviews_deal_idx" ON "reviews" USING btree ("deal_id","decided_at");

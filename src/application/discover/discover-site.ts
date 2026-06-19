@@ -1,13 +1,10 @@
-import { createHash } from 'node:crypto';
 import {
-  ManualCaptureReason,
   extractLinks,
   registrableDomain,
   hostOf,
   scoreCandidateUrl,
   normalizeUrl,
   type Vocabulary,
-  type Source,
 } from '../../domain/index.js';
 import type {
   Fetcher,
@@ -21,10 +18,7 @@ import type {
 } from '../ports/index.js';
 import { ExtractUseCase } from '../extract/extract.js';
 import { CandidateSink } from '../crawl/candidate-sink.js';
-import { newId } from '../shared/id.js';
-
-/** Days between re-crawls assigned to a discovered (tier-4) source once approved. */
-const DISCOVERED_SOURCE_CADENCE_DAYS = 3;
+import { LaneBSupport, type ProposedDomain } from './lane-b-support.js';
 
 export interface DiscoverSiteInput {
   /** Seed URL to start discovery from (also defines the primary in-scope domain). */
@@ -55,7 +49,8 @@ export interface DiscoverSiteResult {
  * domains as *proposed sources* a human must approve before they are ever crawled
  * (`docs/DealRoute_Crawl_Pipeline_Plan.md` §6 / guardrails). Never auto-publishes;
  * never follows a novel domain; respects the politeness/robots guardrails of the
- * injected `Fetcher` (a `PoliteFetcher` in production).
+ * injected `Fetcher` (a `PoliteFetcher` in production). Shared Lane-B edge logic
+ * (evidence, manual capture, proposing sources) lives in `LaneBSupport`.
  *
  * The run is CAPPED three ways — max pages, max € (LLM cost), and max wall-clock —
  * and stops at the first cap hit, reporting which. login/captcha/anti-bot pages
@@ -63,10 +58,11 @@ export interface DiscoverSiteResult {
  */
 export class DiscoverSiteUseCase {
   private readonly sink: CandidateSink;
+  private readonly support: LaneBSupport;
 
   constructor(
     private readonly fetcher: Fetcher,
-    private readonly evidenceStore: EvidenceStore,
+    evidenceStore: EvidenceStore,
     private readonly db: Database,
     private readonly extract: ExtractUseCase,
     private readonly clock: Clock,
@@ -76,6 +72,7 @@ export class DiscoverSiteUseCase {
     private readonly fetchTimeoutMs: number,
   ) {
     this.sink = new CandidateSink(db, clock, logger);
+    this.support = new LaneBSupport(evidenceStore, db, clock, logger);
   }
 
   async execute(input: DiscoverSiteInput): Promise<DiscoverSiteResult> {
@@ -86,7 +83,7 @@ export class DiscoverSiteUseCase {
     const queue: string[] = [normalizeUrl(input.startUrl)];
     const queued = new Set(queue);
     const visited = new Set<string>();
-    const proposed = new Map<string, ProposedSource>(); // keyed by registrable domain
+    const proposed = new Map<string, ProposedDomain>(); // keyed by registrable domain
 
     let pagesFetched = 0;
     let candidatesFound = 0;
@@ -136,9 +133,9 @@ export class DiscoverSiteUseCase {
         this.logger.info('discovery: skipped by robots.txt', { url });
         continue;
       }
-      if (isBlockedOutcome(fetched)) {
+      if (this.support.isBlockedOutcome(fetched)) {
         routedToManualCapture++;
-        await this.routeToManualCapture(url, fetched, dryRun);
+        await this.support.routeToManualCapture(url, fetched, dryRun);
         continue;
       }
       if (fetched.outcome !== 'ok' || fetched.text.trim() === '') {
@@ -163,7 +160,7 @@ export class DiscoverSiteUseCase {
         if (!dryRun) {
           // Evidence is captured BEFORE persisting the candidate (evidence-required
           // invariant). Dry-run writes nothing — not even evidence files.
-          const evidence = await this.captureEvidence(fetched);
+          const evidence = await this.support.captureEvidence(fetched);
           await this.sink.persist(extraction.candidates, evidence);
         }
         if (extraction.candidates.length > 0) {
@@ -203,7 +200,7 @@ export class DiscoverSiteUseCase {
     }
 
     const proposedSources = [...proposed.values()];
-    if (!dryRun) await this.persistProposedSources(proposedSources);
+    if (!dryRun) await this.support.persistProposedSources(proposedSources);
 
     this.logger.info('discovery complete', {
       startUrl: input.startUrl,
@@ -245,7 +242,7 @@ export class DiscoverSiteUseCase {
   }
 
   private recordProposal(
-    proposed: Map<string, ProposedSource>,
+    proposed: Map<string, ProposedDomain>,
     url: string,
     startUrl: string,
   ): void {
@@ -256,89 +253,4 @@ export class DiscoverSiteUseCase {
       rationale: `Linked from ${hostOf(startUrl) ?? startUrl} during discovery; novel domain requires human approval before crawling.`,
     });
   }
-
-  private async captureEvidence(fetched: FetchResult) {
-    const evidence = await this.evidenceStore.save({
-      sourceUrl: fetched.finalUrl,
-      screenshot: fetched.screenshot,
-      html: fetched.html,
-      termsText: fetched.text,
-      capturedAt: this.clock.nowIso(),
-      contentHash: sha256(fetched.text),
-    });
-    await this.db.evidence.insert(evidence);
-    return evidence;
-  }
-
-  private async routeToManualCapture(
-    url: string,
-    fetched: FetchResult,
-    dryRun: boolean,
-  ): Promise<void> {
-    const reason =
-      fetched.outcome === 'login_required'
-        ? ManualCaptureReason.enum.login_required
-        : fetched.outcome === 'captcha'
-          ? ManualCaptureReason.enum.captcha
-          : ManualCaptureReason.enum.anti_bot_blocked;
-    this.logger.info('discovery: routing blocked page to manual capture', { url, reason });
-    if (dryRun) return;
-    await this.db.manualCapture.insert({
-      id: newId(),
-      source_id: null, // discovery has no registered source row for this URL
-      source_url: url,
-      reason,
-      created_at: this.clock.nowIso(),
-      status: 'open',
-      note: null,
-    });
-  }
-
-  /**
-   * Persist novel domains as `pending_approval`, tier-4 `discovered` sources, so a
-   * human approves them into the deterministic crawl (the source-promotion loop).
-   * Deduped by registrable domain against existing sources so we never re-propose.
-   */
-  private async persistProposedSources(proposals: ProposedSource[]): Promise<void> {
-    if (proposals.length === 0) return;
-    const known = new Set<string>();
-    for (const status of ['active', 'pending_approval', 'disabled'] as const) {
-      for (const s of await this.db.sources.listByStatus(status)) {
-        const d = registrableDomain(s.url);
-        if (d !== null) known.add(d);
-      }
-    }
-    for (const p of proposals) {
-      const domain = registrableDomain(p.url);
-      if (domain === null || known.has(domain)) continue;
-      known.add(domain);
-      const source: Source = {
-        id: newId(),
-        url: p.url,
-        type: 'discovered',
-        tier: 4,
-        country: 'DE',
-        subscription_service: null,
-        cadence_days: DISCOVERED_SOURCE_CADENCE_DAYS,
-        reliability_score: 0.5,
-        status: 'pending_approval',
-        last_seen: null,
-        next_due: null,
-      };
-      await this.db.sources.upsert(source);
-      this.logger.info('discovery: proposed novel source (pending approval)', { url: p.url });
-    }
-  }
-}
-
-function isBlockedOutcome(fetched: FetchResult): boolean {
-  return (
-    fetched.outcome === 'login_required' ||
-    fetched.outcome === 'captcha' ||
-    fetched.outcome === 'blocked'
-  );
-}
-
-function sha256(text: string): string {
-  return createHash('sha256').update(text, 'utf8').digest('hex');
 }

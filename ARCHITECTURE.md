@@ -65,10 +65,19 @@ contract runs only when `DATABASE_URL_TEST` is set.
   ordered by a domain-agnostic "likely-offer-page" score so a small budget reaches deal pages
   before navigation chrome. A `NoopBrowserAgent` still backs the `BrowserAgent` port for the
   fully-agentic Phase C lane (search-driven discovery), droppable in without editing callers.
+- **Lane B — community ingestion (Tier 3):** `IngestCommunityUseCase` (`ingest --source <id>`)
+  reads a community source's **RSS/Atom feed** (the `FeedReader` port) as a stream of *leads*,
+  applies a cheap catalog-keyword pre-filter, runs a per-item **LLM triage** (relevant
+  subscription deal? — output validated at the boundary by `parseTriageResult`), and only then
+  fetches + extracts the relevant leads via the Lane-A path. Merchant domains are proposed for
+  approval. Same caps (items/€/time) and guardrails as discovery; the shared `LaneBSupport`
+  holds the common edge logic (evidence, manual-capture routing, novel-domain proposal) so the
+  two Lane-B entrypoints can't drift on a guardrail.
 - **Shared path:** validate → dedupe/canonicalize → capture evidence → **candidate queue** →
-  human approve/reject (review API/CLI) → publish → monitor/diff → re-queue or auto-expire.
-  Lane A and Lane B share one persist implementation (`CandidateSink`) so the dedupe /
-  content-change / proposal rules live in exactly one place.
+  human approve/reject (review API/CLI, logged to the append-only `reviews` audit table) →
+  publish → monitor/diff → re-queue or auto-expire. Lane A and Lane B share one persist
+  implementation (`CandidateSink`) so the dedupe / content-change / proposal rules live in
+  exactly one place.
 
 ## Trust invariants (enforced in code, covered by tests)
 

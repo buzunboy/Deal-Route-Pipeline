@@ -26,10 +26,20 @@ export async function seedImport(config: Config, path: string, dryRun: boolean):
 
   const container = new Container(config, { usePersistence: true });
   try {
+    for (const entry of catalog) {
+      await container.db.catalog.upsert({
+        service: entry.service,
+        category: entry.category,
+        provider_url: entry.providerUrl,
+        country: config.country as 'DE',
+      });
+    }
     for (const s of sources) {
       await container.db.sources.upsert(s);
     }
-    console.log(`\nImported ${sources.length} sources into the registry.`);
+    console.log(
+      `\nImported ${catalog.length} catalog services and ${sources.length} sources into the registry.`,
+    );
   } finally {
     await container.shutdown();
   }

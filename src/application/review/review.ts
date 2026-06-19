@@ -7,8 +7,10 @@ import {
   type Evidence,
   type ManualCaptureTask,
   type FieldProposalRecord,
+  type ReviewRecord,
 } from '../../domain/index.js';
 import type { Database, Clock, Logger } from '../ports/index.js';
+import { newId } from '../shared/id.js';
 
 /** A candidate joined with its evidence, for the review API/console. */
 export interface CandidateView {
@@ -58,6 +60,9 @@ export class ReviewUseCase {
     this.assertReviewable(deal);
 
     const at = this.clock.nowIso();
+    // Log-before-act: append the audit row FIRST, so the worst case on a mid-call
+    // failure is an orphan review row — never a published deal with no audit trail.
+    await this.recordReview(dealId, 'approve', approver, null, at);
     await this.db.deals.updateStatus(dealId, DealStatus.enum.published, approver, at);
     this.logger.info('deal approved → published', { dealId, approver });
     return { ...deal, status: DealStatus.enum.published, verified_by: approver, verified_at: at };
@@ -65,9 +70,9 @@ export class ReviewUseCase {
 
   /**
    * Reject a candidate → rejected (archived). Requires an approver (symmetric with
-   * approve — no anonymous state changes). The rejection reason is recorded in the
-   * record's `attributes` (an open JSONB area) so the decision is auditable
-   * without inventing a column.
+   * approve — no anonymous state changes). The rejection reason is recorded both in
+   * the immutable `reviews` audit log and on the record's `attributes` (an open
+   * JSONB area) for at-a-glance context, without inventing a column.
    */
   async reject(dealId: string, approver: string, reason?: string): Promise<DealRecord> {
     this.assertApprover(approver, 'reject');
@@ -75,15 +80,41 @@ export class ReviewUseCase {
     this.assertReviewable(deal);
 
     const at = this.clock.nowIso();
-    if (reason && reason.trim() !== '') {
+    const trimmedReason = reason && reason.trim() !== '' ? reason.trim() : null;
+    // Log-before-act (see approve): the audit row is the durable record of the
+    // decision, written before any status mutation.
+    await this.recordReview(dealId, 'reject', approver, trimmedReason, at);
+    if (trimmedReason !== null) {
       await this.db.deals.update({
         ...deal,
-        attributes: { ...deal.attributes, rejection_reason: reason },
+        attributes: { ...deal.attributes, rejection_reason: trimmedReason },
       });
     }
     await this.db.deals.updateStatus(dealId, DealStatus.enum.rejected, approver, at);
-    this.logger.info('deal rejected → archived', { dealId, approver, reason });
+    this.logger.info('deal rejected → archived', { dealId, approver, reason: trimmedReason });
     return { ...deal, status: DealStatus.enum.rejected, verified_by: approver, verified_at: at };
+  }
+
+  /** The append-only decision history for one deal (newest first). */
+  async listReviews(dealId: string, limit = 50): Promise<ReviewRecord[]> {
+    return this.db.reviews.listForDeal(dealId, limit);
+  }
+
+  private async recordReview(
+    dealId: string,
+    action: ReviewRecord['action'],
+    approver: string,
+    reason: string | null,
+    at: string,
+  ): Promise<void> {
+    await this.db.reviews.insert({
+      id: newId(),
+      deal_id: dealId,
+      action,
+      approver,
+      reason,
+      decided_at: at,
+    });
   }
 
   private assertApprover(approver: string, action: string): void {

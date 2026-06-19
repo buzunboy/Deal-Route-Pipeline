@@ -3,10 +3,12 @@ import {
   ExtractUseCase,
   CrawlSourceUseCase,
   DiscoverSiteUseCase,
+  IngestCommunityUseCase,
   ReviewUseCase,
   MonitorSourceUseCase,
   SystemClock,
   type Fetcher,
+  type FeedReader,
   type Llm,
   type EvidenceStore,
   type Database,
@@ -23,6 +25,7 @@ import { StubLlm } from '../adapters/llm/stub-llm.js';
 import { PlaywrightFetcher } from '../adapters/fetcher/playwright-fetcher.js';
 import { FirecrawlFetcher } from '../adapters/fetcher/firecrawl-fetcher.js';
 import { PoliteFetcher } from '../adapters/fetcher/polite-fetcher.js';
+import { RssFeedReader } from '../adapters/feed/rss-feed-reader.js';
 import { InMemoryDb } from '../adapters/db/in-memory/in-memory-db.js';
 import { PostgresDb } from '../adapters/db/postgres/postgres-db.js';
 import { InMemoryQueue } from '../adapters/queue/in-memory-queue.js';
@@ -47,6 +50,7 @@ export class Container {
   readonly logger: Logger;
   readonly clock: Clock;
   readonly fetcher: Fetcher;
+  readonly feedReader: FeedReader;
   readonly llm: Llm;
   readonly evidenceStore: EvidenceStore;
   readonly db: Database;
@@ -56,6 +60,7 @@ export class Container {
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
   readonly discoverSite: DiscoverSiteUseCase;
+  readonly ingestCommunity: IngestCommunityUseCase;
   readonly review: ReviewUseCase;
   readonly monitor: MonitorSourceUseCase;
 
@@ -70,6 +75,7 @@ export class Container {
     this.clock = new SystemClock();
 
     this.fetcher = this.buildFetcher(config);
+    this.feedReader = new RssFeedReader(config.fetcher.timeoutMs);
     this.llm = this.buildLlm(config);
     this.evidenceStore = this.buildEvidenceStore(config);
     this.db = this.buildDatabase(config, usePersistence);
@@ -89,6 +95,19 @@ export class Container {
     );
     this.discoverSite = new DiscoverSiteUseCase(
       this.fetcher,
+      this.evidenceStore,
+      this.db,
+      this.extract,
+      this.clock,
+      this.logger,
+      this.vocabulary,
+      config.fetcher.userAgent,
+      config.fetcher.timeoutMs,
+    );
+    this.ingestCommunity = new IngestCommunityUseCase(
+      this.fetcher,
+      this.feedReader,
+      this.llm,
       this.evidenceStore,
       this.db,
       this.extract,

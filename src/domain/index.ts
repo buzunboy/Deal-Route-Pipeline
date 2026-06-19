@@ -8,3 +8,5 @@ export * from './crawl/index.js';
 export * from './proposals/index.js';
 export * from './monitoring/index.js';
 export * from './discovery/index.js';
+export * from './review/index.js';
+export * from './catalog/index.js';

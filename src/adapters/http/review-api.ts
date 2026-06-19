@@ -32,6 +32,7 @@ export interface ReviewApiOptions {
  *   GET  /api/candidates                 → [{ deal, evidence }]
  *   POST /api/candidates/:id/approve      { approver }            → { deal }
  *   POST /api/candidates/:id/reject       { approver, reason? }   → { deal }
+ *   GET  /api/candidates/:id/reviews      → [ReviewRecord]   (audit history)
  *   GET  /api/field-proposals            → [FieldProposalRecord]
  *   GET  /api/manual-capture-tasks       → [ManualCaptureTask]
  */
@@ -90,6 +91,11 @@ export class ReviewApi {
     }
     if (method === 'GET' && path === '/api/manual-capture-tasks') {
       return sendJson(res, 200, await this.review.listManualCaptureTasks());
+    }
+
+    const reviews = path.match(/^\/api\/candidates\/([^/]+)\/reviews$/);
+    if (method === 'GET' && reviews) {
+      return sendJson(res, 200, await this.review.listReviews(decodeURIComponent(reviews[1]!)));
     }
 
     const approve = path.match(/^\/api\/candidates\/([^/]+)\/approve$/);

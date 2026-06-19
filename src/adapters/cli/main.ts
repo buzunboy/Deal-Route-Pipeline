@@ -7,6 +7,7 @@ import { monitor } from './commands/monitor.js';
 import { review } from './commands/review.js';
 import { serve } from './commands/serve.js';
 import { discover } from './commands/discover.js';
+import { ingest } from './commands/ingest.js';
 
 const DEFAULT_SEED_PATH = 'docs/DealRoute_Seed_List_DE.md';
 
@@ -30,6 +31,9 @@ Commands:
   serve                               Start the review API + thin test page (durable admin contract)
   discover <url> [--max-pages N]      Lane B: bounded same-site discovery → candidates + proposed
           [--dry-run]                 novel domains (capped by pages/€/time; nothing auto-publishes)
+  ingest --source <id>                Lane B (Tier 3): read a community RSS feed → triage →
+          | --community-due           extract relevant leads → candidates + proposed sources
+          [--max-items N] [--dry-run]
   help                                Show this help
 
 Configuration is read from the environment (.env). See .env.example.`;
@@ -91,6 +95,20 @@ async function main(): Promise<void> {
       await discover(config, {
         startUrl: rest.find((a) => !a.startsWith('--')),
         maxPages,
+        dryRun: rest.includes('--dry-run'),
+      });
+      break;
+    }
+    case 'ingest': {
+      const maxItemsRaw = flag(rest, '--max-items');
+      const maxItems = maxItemsRaw !== undefined ? Number(maxItemsRaw) : undefined;
+      if (maxItems !== undefined && (!Number.isInteger(maxItems) || maxItems <= 0)) {
+        return fail('--max-items must be a positive integer.');
+      }
+      await ingest(config, {
+        sourceId: flag(rest, '--source'),
+        due: rest.includes('--community-due'),
+        maxItems,
         dryRun: rest.includes('--dry-run'),
       });
       break;

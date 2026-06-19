@@ -10,8 +10,14 @@ import type {
   ManualCaptureRepository,
   FieldProposalRepository,
   ChangeRepository,
+  ReviewRepository,
+  SubscriptionCatalogRepository,
 } from '../../../application/ports/index.js';
-import { ChangeSchema } from '../../../domain/index.js';
+import {
+  ChangeSchema,
+  ReviewRecordSchema,
+  SubscriptionCatalogEntrySchema,
+} from '../../../domain/index.js';
 import type {
   Source,
   DealRecord,
@@ -21,6 +27,8 @@ import type {
   FieldProposalRecord,
   Change,
   DealStatus,
+  ReviewRecord,
+  SubscriptionCatalogEntry,
 } from '../../../domain/index.js';
 import * as schema from './schema.js';
 import { dealToRow, rowToDeal } from './mappers.js';
@@ -42,6 +50,8 @@ export class PostgresDb implements Database {
   readonly manualCapture: ManualCaptureRepository;
   readonly fieldProposals: FieldProposalRepository;
   readonly changes: ChangeRepository;
+  readonly reviews: ReviewRepository;
+  readonly catalog: SubscriptionCatalogRepository;
 
   private constructor(
     private readonly pool: pg.Pool,
@@ -54,6 +64,8 @@ export class PostgresDb implements Database {
     this.manualCapture = new PgManualCaptureRepo(db);
     this.fieldProposals = new PgFieldProposalRepo(db);
     this.changes = new PgChangeRepo(db);
+    this.reviews = new PgReviewRepo(db);
+    this.catalog = new PgCatalogRepo(db);
   }
 
   static connect(connectionString: string): PostgresDb {
@@ -285,6 +297,65 @@ function rowToChange(r: typeof schema.changes.$inferSelect): Change {
     current_hash: r.currentHash,
     detected_at: r.detectedAt,
   });
+}
+
+class PgReviewRepo implements ReviewRepository {
+  constructor(private readonly db: Db) {}
+  async insert(r: ReviewRecord): Promise<void> {
+    await this.db.insert(schema.reviews).values({
+      id: r.id,
+      dealId: r.deal_id,
+      action: r.action,
+      approver: r.approver,
+      reason: r.reason,
+      decidedAt: r.decided_at,
+    });
+  }
+  async listForDeal(dealId: string, limit: number): Promise<ReviewRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.reviews)
+      .where(eq(schema.reviews.dealId, dealId))
+      .orderBy(desc(schema.reviews.decidedAt), desc(schema.reviews.id))
+      .limit(limit);
+    // Re-validate the free-text `action` column at the boundary (matches rowToChange).
+    return rows.map((r) =>
+      ReviewRecordSchema.parse({
+        id: r.id,
+        deal_id: r.dealId,
+        action: r.action,
+        approver: r.approver,
+        reason: r.reason,
+        decided_at: r.decidedAt,
+      }),
+    );
+  }
+}
+
+class PgCatalogRepo implements SubscriptionCatalogRepository {
+  constructor(private readonly db: Db) {}
+  async upsert(entry: SubscriptionCatalogEntry): Promise<void> {
+    const e = SubscriptionCatalogEntrySchema.parse(entry); // validate at the boundary
+    const row = {
+      service: e.service,
+      category: e.category,
+      providerUrl: e.provider_url,
+      country: e.country,
+    };
+    await this.db
+      .insert(schema.subscriptionCatalog)
+      .values(row)
+      .onConflictDoUpdate({ target: schema.subscriptionCatalog.service, set: row });
+  }
+  async list(): Promise<SubscriptionCatalogEntry[]> {
+    const rows = await this.db.select().from(schema.subscriptionCatalog);
+    return rows.map((r) => ({
+      service: r.service,
+      category: r.category,
+      provider_url: r.providerUrl,
+      country: r.country as SubscriptionCatalogEntry['country'],
+    }));
+  }
 }
 
 // ── row mappers (small, table-local) ─────────────────────────────────────────
