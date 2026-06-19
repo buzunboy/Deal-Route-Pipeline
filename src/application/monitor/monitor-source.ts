@@ -16,8 +16,10 @@ export interface MonitorSourceResult {
 /**
  * Re-verify a source on its cadence (or on demand): fetch, diff the price/terms
  * region against the last evidence hash, and act on the result:
- *  - content changed → record a change, re-extract + re-queue (CrawlSource),
- *    keeping the OLD evidence (never overwritten);
+ *  - content changed → record a change, then re-crawl (CrawlSource), which
+ *    captures a FRESH evidence bundle. Old bundles are write-once and are never
+ *    deleted or overwritten, so prior evidence remains available; the new
+ *    candidate links the new bundle.
  *  - page gone/blocked → mark matching published deals expired (auto-expire);
  *  - unchanged → just record it.
  *

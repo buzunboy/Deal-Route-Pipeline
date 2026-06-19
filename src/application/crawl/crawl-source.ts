@@ -40,7 +40,10 @@ export interface CrawlSourceResult {
  *
  * A single source failure is logged and contained — it never throws past here
  * and never crashes a batch (`architecture.md`: resilience). Nothing is ever
- * published; candidates land in the queue for human review.
+ * published; candidates are persisted in a pre-approval state (`candidate`, or
+ * `in_review` when flagged) for human review. (The `Queue` port exists for the
+ * job scheduler that invokes this use-case; this method writes candidates
+ * directly — see the deferred follow-up to route crawl jobs through the queue.)
  */
 export class CrawlSourceUseCase {
   constructor(

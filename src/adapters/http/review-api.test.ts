@@ -122,7 +122,8 @@ describe('ReviewApi (HTTP integration)', () => {
       body: '{ not json',
     });
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/malformed/i);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/malformed/i);
     expect((await db.deals.getById(deal.id))!.status).toBe('candidate');
   });
 
