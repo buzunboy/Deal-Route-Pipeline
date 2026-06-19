@@ -16,7 +16,7 @@ import type {
 } from '../ports/index.js';
 import { ExtractUseCase, type ExtractedCandidate } from '../extract/extract.js';
 import { newId } from '../shared/id.js';
-import { reliabilityAfter, nextDueWithBackoffIso, isReliabilityLow } from './source-policy.js';
+import { applyCrawlOutcome } from './source-policy.js';
 import { CandidateSink } from './candidate-sink.js';
 
 export interface CrawlSourceInput {
@@ -246,24 +246,22 @@ export class CrawlSourceUseCase {
   }
 
   private async updateSourceAfterCrawl(source: Source, success: boolean): Promise<void> {
-    const reliability = reliabilityAfter(source.reliability_score, success);
     // Reliability decides cadence (plan §7): a flaky source backs off so we stop
-    // hammering an unreliable origin and wasting budget on it. Healthy sources are
-    // unaffected (1x their base cadence).
-    const updated: Source = {
-      ...source,
-      reliability_score: reliability,
-      last_seen: success ? this.clock.nowIso() : source.last_seen,
-      next_due: nextDueWithBackoffIso(this.clock.now(), source.cadence_days, reliability),
-    };
+    // hammering an unreliable origin and wasting budget on it. The same shared
+    // policy drives the monitor loop, so the two lanes can't diverge.
+    const { source: updated, reliabilityLow } = applyCrawlOutcome(
+      source,
+      success,
+      this.clock.now(),
+    );
 
     // Surface a persistently-failing source so a human notices (ops signal). The
     // source keeps trying on the backed-off cadence — no auto status change in v1.
-    if (isReliabilityLow(reliability)) {
+    if (reliabilityLow) {
       this.logger.warn('crawl: source reliability low — backing off cadence', {
         sourceId: source.id,
         url: source.url,
-        reliability,
+        reliability: updated.reliability_score,
         nextDue: updated.next_due,
       });
     }

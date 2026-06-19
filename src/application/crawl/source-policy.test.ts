@@ -6,9 +6,11 @@ import {
   backoffMultiplier,
   effectiveCadenceDays,
   isReliabilityLow,
+  applyCrawlOutcome,
   RELIABILITY_FLAG_THRESHOLD,
   MAX_BACKOFF_MULTIPLIER,
 } from './source-policy.js';
+import { makeSource } from '../../../test/factories/source.js';
 
 describe('reliabilityAfter', () => {
   it('raises on success, clamped at 1', () => {
@@ -76,5 +78,40 @@ describe('isReliabilityLow', () => {
   it('flags below the threshold', () => {
     expect(isReliabilityLow(RELIABILITY_FLAG_THRESHOLD - 0.01)).toBe(true);
     expect(isReliabilityLow(RELIABILITY_FLAG_THRESHOLD)).toBe(false);
+  });
+});
+
+describe('applyCrawlOutcome (shared crawl + monitor policy)', () => {
+  const now = new Date('2026-06-19T00:00:00.000Z');
+
+  it('on success: raises reliability, refreshes last_seen, backs off cadence by the new score', () => {
+    const src = makeSource({ reliability_score: 0.5, cadence_days: 3, last_seen: null });
+    const { source, reliabilityLow } = applyCrawlOutcome(src, true, now);
+    expect(source.reliability_score).toBeCloseTo(0.55, 10);
+    expect(source.last_seen).toBe(now.toISOString());
+    // backoffMultiplier(0.55) = round(1 + 0.45*4 = 2.8) = 3 → 9 days.
+    expect(source.next_due).toBe(nextDueWithBackoffIso(now, 3, 0.55));
+    expect(reliabilityLow).toBe(false);
+  });
+
+  it('on failure: lowers reliability, KEEPS the prior last_seen (we did not see it), backs off', () => {
+    const prior = '2026-06-10T00:00:00.000Z';
+    const src = makeSource({ reliability_score: 0.5, cadence_days: 3, last_seen: prior });
+    const { source } = applyCrawlOutcome(src, false, now);
+    expect(source.reliability_score).toBeCloseTo(0.3, 10);
+    expect(source.last_seen).toBe(prior); // unchanged — a failed pass is not a sighting
+    expect(source.next_due).toBe(nextDueWithBackoffIso(now, 3, 0.3));
+  });
+
+  it('flags reliabilityLow once the new score is below the threshold', () => {
+    const src = makeSource({ reliability_score: 0.3 }); // → 0.1 on failure (< 0.3)
+    expect(applyCrawlOutcome(src, false, now).reliabilityLow).toBe(true);
+  });
+
+  it('does not mutate the input source (pure)', () => {
+    const src = makeSource({ reliability_score: 0.5 });
+    const before = { ...src };
+    applyCrawlOutcome(src, false, now);
+    expect(src).toEqual(before);
   });
 });

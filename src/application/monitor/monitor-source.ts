@@ -8,12 +8,21 @@ import {
 } from '../../domain/index.js';
 import type { Fetcher, Database, Clock, Logger, FetchResult } from '../ports/index.js';
 import { CrawlSourceUseCase } from '../crawl/crawl-source.js';
-import { nextDueIso } from '../crawl/source-policy.js';
+import { nextDueWithBackoffIso, applyCrawlOutcome } from '../crawl/source-policy.js';
 import { newId } from '../shared/id.js';
 
 export interface MonitorSourceInput {
   sourceId: string;
 }
+
+/**
+ * The reliability disposition of a monitor pass (plan §7):
+ *  - `success`  — the source responded (unchanged / content_changed): raise reliability.
+ *  - `failure`  — unreachable / infra error: lower reliability + back off + flag.
+ *  - `neutral`  — a blocked wall (manual-capture route, NOT a failure — §9) or a
+ *                 robots-disallowed decline: no reliability change, but still reschedule.
+ */
+type MonitorDisposition = 'success' | 'failure' | 'neutral';
 
 export interface MonitorSourceResult {
   change: Change;
@@ -64,6 +73,18 @@ export class MonitorSourceUseCase {
 
   async execute(input: MonitorSourceInput): Promise<MonitorSourceResult> {
     const source = await this.requireSource(input.sourceId);
+    // Reliability disposition for THIS pass (plan §7: repeated failures lower
+    // reliability + flag; reliability decides cadence). Set by each branch:
+    //  - 'success'  → the source responded (unchanged / content_changed): raise it.
+    //  - 'failure'  → unreachable / infra error: lower it + back off + flag.
+    //  - 'neutral'  → blocked wall (manual-capture route, NOT a failure — plan §9)
+    //                 or robots-disallowed (a deliberate decline): no reliability
+    //                 change, but still advance the schedule off the back-off curve.
+    // The content_changed branch re-crawls via CrawlSource, which OWNS the source
+    // reliability/next_due update — so we must NOT also advance here (would clobber
+    // the back-off next_due the re-crawl just wrote). `scheduledByRecrawl` guards it.
+    let disposition: MonitorDisposition = 'neutral';
+    let scheduledByRecrawl = false;
     try {
       const fetched = await this.fetcher.fetch(source.url, {
         timeoutMs: this.fetchTimeoutMs,
@@ -73,41 +94,84 @@ export class MonitorSourceUseCase {
       if (fetched.outcome === 'robots_disallowed') {
         // robots.txt now disallows this path — neither a disappearance nor a block.
         // Record `unchanged` (no diff possible) and leave published deals intact.
+        // Neutral: a deliberate decline isn't a reliability failure.
         this.logger.info('monitor: skipped by robots.txt (not expiring)', { sourceId: source.id });
         const change = this.recordChange(source, 'unchanged', null, null);
         await this.db.changes.insert(change);
         return { change, reQueued: false, routedToManualCapture: false, expired: 0 };
       }
-      if (isBlockedOutcome(fetched)) return await this.handleBlocked(source, fetched);
-      if (fetched.outcome !== 'ok') return await this.handleUnreachable(source);
+      if (isBlockedOutcome(fetched)) {
+        // A block stays NEUTRAL (manual-capture route, not a fetch failure — §9).
+        return await this.handleBlocked(source, fetched);
+      }
+      if (fetched.outcome !== 'ok') {
+        disposition = 'failure';
+        return await this.handleUnreachable(source);
+      }
 
-      return await this.handleOk(source, fetched);
+      const result = await this.handleOk(source, fetched);
+      // content_changed re-crawled (which set reliability + next_due); unchanged did
+      // not. Either way the source responded → success disposition.
+      disposition = 'success';
+      scheduledByRecrawl = result.reQueued;
+      return result;
     } catch (err) {
       // Contain any repository/re-crawl failure so one bad source never crashes a
       // `monitor --due` batch. Record an `error` change — NOT `disappeared` — so an
       // infrastructure blip can never count toward auto-expiry of verified deals.
+      // This IS a fetch/infra failure → lower reliability.
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error('monitor failed', { sourceId: source.id, error: message });
+      disposition = 'failure';
       const change = this.recordChange(source, 'error', null, null);
       await this.safeInsert(change);
       return { change, reQueued: false, routedToManualCapture: false, expired: 0 };
     } finally {
-      // Advance the recheck cadence on EVERY pass (success, blocked, unreachable,
-      // error) so an unchanged source isn't perpetually `due` and re-fetched every
-      // tick. The content_changed path also re-crawls, which advances next_due too;
-      // a double-advance is harmless (cadence is a floor, not exact).
-      await this.advanceSchedule(source);
+      // Advance reliability + cadence on every pass EXCEPT when a re-crawl already
+      // owned the update (else we'd clobber its back-off next_due with a stale one).
+      if (!scheduledByRecrawl) await this.advanceSchedule(source, disposition);
     }
   }
 
-  /** Bump last_seen + next_due by the source's cadence (best-effort; never throws). */
-  private async advanceSchedule(source: Source): Promise<void> {
+  /**
+   * Apply the pass's reliability disposition + reschedule off the back-off curve
+   * (plan §7), via the SAME shared policy the crawl lane uses so the two can't
+   * diverge. Best-effort — a schedule-write failure is logged, never thrown (it must
+   * not crash a `monitor --due` batch).
+   *
+   *  - success/failure → `applyCrawlOutcome` raises/lowers reliability + backs off
+   *    cadence; a sub-threshold source logs the human-attention warning.
+   *  - neutral (blocked / robots) → no reliability change, but still advance
+   *    `next_due` off the back-off curve at the CURRENT reliability so the source
+   *    isn't perpetually due, without rewarding or penalising the pass.
+   */
+  private async advanceSchedule(source: Source, disposition: MonitorDisposition): Promise<void> {
     try {
-      await this.db.sources.update({
-        ...source,
-        last_seen: this.clock.nowIso(),
-        next_due: nextDueIso(this.clock.now(), source.cadence_days),
-      });
+      let updated: Source;
+      if (disposition === 'neutral') {
+        // `last_seen` is deliberately left untouched — a wall/decline is not a
+        // sighting of the offer. Selection is by `next_due`, so this is safe.
+        updated = {
+          ...source,
+          next_due: nextDueWithBackoffIso(
+            this.clock.now(),
+            source.cadence_days,
+            source.reliability_score,
+          ),
+        };
+      } else {
+        const outcome = applyCrawlOutcome(source, disposition === 'success', this.clock.now());
+        updated = outcome.source;
+        if (outcome.reliabilityLow) {
+          this.logger.warn('monitor: source reliability low — backing off cadence', {
+            sourceId: source.id,
+            url: source.url,
+            reliability: updated.reliability_score,
+            nextDue: updated.next_due,
+          });
+        }
+      }
+      await this.db.sources.update(updated);
     } catch (err) {
       this.logger.error('monitor: failed to advance source schedule', {
         sourceId: source.id,

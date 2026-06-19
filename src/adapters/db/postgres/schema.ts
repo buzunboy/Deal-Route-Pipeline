@@ -118,7 +118,8 @@ export const crawlRuns = pgTable(
     // runs under a stable sentinel (see CostSummary).
     sourceId: uuid('source_id'),
     // Which lane produced this run: 'crawl' (Lane A) | 'discover' | 'ingest'
-    // (Lane B) | 'monitor'. Lets the run ledger + cost stats break down by lane.
+    // (Lane B). Lets the run ledger + cost stats break down by lane. (Monitor is
+    // deliberately not a kind — it makes no LLM call of its own; see CrawlRunKind.)
     runKind: text('run_kind').notNull(),
     status: text('status').notNull(),
     startedAt: timestamp('started_at', { withTimezone: true, mode: 'string' }).notNull(),

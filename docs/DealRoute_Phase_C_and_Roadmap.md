@@ -77,7 +77,15 @@ it safe and actually useful, and some are trust-critical regardless of Phase C.
    a sub-threshold source logs a warning. Unit + contract + integration tested.
    _(The field-proposal upsert was already a single atomic SQL statement from
    `f995bef`; the dedupe race + SCAN_LIMIT cliff + monitor next_due were fixed in
-   the audit pass.)_
+   the audit pass.)_ **Follow-up (post-audit):** the reliability/back-off policy
+   now also drives the MONITOR loop — extracted into a shared `applyCrawlOutcome`
+   (`crawl/source-policy.ts`) so crawl + monitor can't diverge: a monitor pass that
+   is unreachable/errors lowers reliability + backs off + flags; a `blocked` wall
+   stays neutral (manual-capture route, not a failure — §9); a content-changed
+   re-crawl owns the schedule (the monitor no longer clobbers its back-off next_due).
+   Unit + integration tested. (Originally the monitor used flat cadence and never
+   touched reliability — the §7 "repeated failures lower reliability + flag" signal
+   was Lane-A-only.)
 3. **Pre-C-3 — Cost & observability spine. ✅ DONE.** Phase C is the expensive,
    agentic lane; before turning it on we built: per-run cost surfaced/aggregated
    (`stats`); every lane logging a `crawl_runs` row (the agentic lane was invisible

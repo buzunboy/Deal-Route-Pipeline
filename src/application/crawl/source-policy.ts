@@ -3,6 +3,8 @@
  * crawl use-case so it is unit-testable in isolation.
  */
 
+import type { Source } from '../../domain/index.js';
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Reliability nudge per crawl: successes raise it, failures lower it, clamped. */
@@ -67,6 +69,41 @@ export function nextDueWithBackoffIso(
 
 export function isReliabilityLow(score: number): boolean {
   return score < RELIABILITY_FLAG_THRESHOLD;
+}
+
+/** The post-crawl source mutation + whether it now warrants a human-attention flag. */
+export interface CrawlOutcomeUpdate {
+  source: Source;
+  /** True when the new reliability is below the flag threshold (caller logs/alerts). */
+  reliabilityLow: boolean;
+}
+
+/**
+ * Apply a crawl/re-verify outcome to a source's reliability + schedule — the ONE
+ * place both Lane A (crawl) and monitoring derive the post-pass source state, so
+ * the two can't drift on the reliability/back-off policy (plan §7). Pure: given the
+ * source, the outcome, and `now`, returns the updated source (no I/O, no clock).
+ *
+ *  - `success` raises reliability and refreshes `last_seen`; failure lowers it and
+ *    keeps the prior `last_seen` (we did NOT see the source this pass).
+ *  - `next_due` always uses the reliability-aware back-off curve, so a flaky source
+ *    is scheduled further out (stops hammering an unreliable origin / wasting budget).
+ *
+ * NB a `blocked` page (login/captcha/anti-bot wall) is NOT a reliability failure —
+ * it's a manual-capture route (plan §9). Callers pass it through as a non-mutating
+ * schedule advance, not as `success:false`.
+ */
+export function applyCrawlOutcome(source: Source, success: boolean, now: Date): CrawlOutcomeUpdate {
+  const reliability = reliabilityAfter(source.reliability_score, success);
+  return {
+    source: {
+      ...source,
+      reliability_score: reliability,
+      last_seen: success ? now.toISOString() : source.last_seen,
+      next_due: nextDueWithBackoffIso(now, source.cadence_days, reliability),
+    },
+    reliabilityLow: isReliabilityLow(reliability),
+  };
 }
 
 function clamp01(value: number): number {

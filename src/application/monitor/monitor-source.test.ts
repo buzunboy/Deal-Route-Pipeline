@@ -185,4 +185,87 @@ describe('MonitorSourceUseCase', () => {
     expect((await env.db.deals.getById(deal.id))!.status).toBe('published');
     expect(await env.db.manualCapture.listOpen(10)).toHaveLength(1);
   });
+
+  // ── Reliability / cadence on the monitor path (plan §7) ──────────────────────
+
+  it('lowers reliability and backs off cadence on an unreachable pass', async () => {
+    // reliabilityAfter(0.5, false) = 0.3 → backoffMultiplier(0.3) = 4 → 3*4 = 12 days.
+    const fetcher = new FakeFetcher({ outcome: 'error', text: '' });
+    const env = build(fetcher); // source.reliability_score = 0.5, cadence_days = 3
+    await env.db.sources.upsert(source);
+    await seedPublishedDeal(env.db, env.evidenceStore, source.url, sha256(PAGE_TEXT));
+
+    await env.monitor.execute({ sourceId: source.id });
+
+    const updated = await env.db.sources.getById(source.id);
+    expect(updated!.reliability_score).toBeCloseTo(0.3, 10);
+    const expectedDueMs = env.clock.now().getTime() + 12 * 24 * 60 * 60 * 1000;
+    expect(Date.parse(updated!.next_due!)).toBe(expectedDueMs);
+  });
+
+  it('raises reliability on a successful unchanged pass', async () => {
+    // reliabilityAfter(0.5, true) = 0.55.
+    const fetcher = new FakeFetcher({ text: PAGE_TEXT });
+    const env = build(fetcher);
+    await env.db.sources.upsert(source);
+    await seedPublishedDeal(env.db, env.evidenceStore, source.url, sha256(PAGE_TEXT));
+
+    await env.monitor.execute({ sourceId: source.id });
+
+    const updated = await env.db.sources.getById(source.id);
+    expect(updated!.reliability_score).toBeCloseTo(0.55, 10);
+  });
+
+  it('a blocked pass does NOT change reliability (manual-capture route, not a failure)', async () => {
+    const fetcher = new FakeFetcher({ outcome: 'blocked', text: '' });
+    const env = build(fetcher);
+    await env.db.sources.upsert(source);
+    await seedPublishedDeal(env.db, env.evidenceStore, source.url, sha256(PAGE_TEXT));
+
+    await env.monitor.execute({ sourceId: source.id });
+
+    const updated = await env.db.sources.getById(source.id);
+    // Reliability unchanged at the seeded 0.5; schedule still advanced off the
+    // back-off curve at that reliability (backoffMultiplier(0.5)=3 → 9 days).
+    expect(updated!.reliability_score).toBe(0.5);
+    const expectedDueMs = env.clock.now().getTime() + 9 * 24 * 60 * 60 * 1000;
+    expect(Date.parse(updated!.next_due!)).toBe(expectedDueMs);
+  });
+
+  it('flags a source that falls below the reliability threshold on repeated failures', async () => {
+    // 0.5 → 0.3 → 0.1 (< RELIABILITY_FLAG_THRESHOLD 0.3) after two failures.
+    const fetcher = new FakeFetcher({ outcome: 'error', text: '' });
+    const env = build(fetcher);
+    await env.db.sources.upsert(source);
+    await seedPublishedDeal(env.db, env.evidenceStore, source.url, sha256(PAGE_TEXT));
+
+    await env.monitor.execute({ sourceId: source.id });
+    await env.monitor.execute({ sourceId: source.id });
+
+    const updated = await env.db.sources.getById(source.id);
+    expect(updated!.reliability_score).toBeCloseTo(0.1, 10);
+    expect(updated!.reliability_score).toBeLessThan(0.3); // below the flag threshold
+  });
+
+  it('does not clobber the re-crawl back-off next_due on a content-changed pass', async () => {
+    // content_changed → CrawlSource re-crawls (a SUCCESS re-fetch here), which owns
+    // reliability + next_due. The monitor finally must NOT overwrite that with a
+    // stale, separately-computed schedule. Reliability ends at the re-crawl's value
+    // (0.5 → 0.55), and next_due matches the re-crawl's back-off, applied ONCE.
+    const fetcher = new FakeFetcher({ text: PAGE_TEXT + ' Jetzt 6 Monate gratis!' });
+    const env = build(fetcher);
+    await env.db.sources.upsert(source);
+    await seedPublishedDeal(env.db, env.evidenceStore, source.url, sha256('OLD CONTENT'));
+
+    const result = await env.monitor.execute({ sourceId: source.id });
+    expect(result.reQueued).toBe(true);
+
+    const updated = await env.db.sources.getById(source.id);
+    // The re-crawl applied success once: 0.5 → 0.55 (NOT 0.6, which a double-apply
+    // by the monitor finally would produce).
+    expect(updated!.reliability_score).toBeCloseTo(0.55, 10);
+    // next_due is the re-crawl's back-off schedule: backoffMultiplier(0.55)=3 → 9 days.
+    const expectedDueMs = env.clock.now().getTime() + 9 * 24 * 60 * 60 * 1000;
+    expect(Date.parse(updated!.next_due!)).toBe(expectedDueMs);
+  });
 });
