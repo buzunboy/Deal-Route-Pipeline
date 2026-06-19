@@ -52,5 +52,23 @@ export function evidenceStoreContract(
       const b = await store.save(capture);
       expect(a.id).not.toBe(b.id);
     });
+
+    // Trust invariant: evidence is required before any candidate. A hollow capture
+    // (empty screenshot/html/terms bytes) is NOT evidence — every adapter must
+    // reject it at save() time rather than persist a bundle that get() can't load.
+    it('save rejects a hollow capture with an empty screenshot', async () => {
+      const store = await makeStore();
+      await expect(store.save({ ...capture, screenshot: new Uint8Array() })).rejects.toThrow();
+    });
+
+    it('save rejects a hollow capture with empty HTML', async () => {
+      const store = await makeStore();
+      await expect(store.save({ ...capture, html: '' })).rejects.toThrow();
+    });
+
+    it('save rejects a hollow capture with empty terms text', async () => {
+      const store = await makeStore();
+      await expect(store.save({ ...capture, termsText: '' })).rejects.toThrow();
+    });
   });
 }

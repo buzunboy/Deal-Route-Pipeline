@@ -56,7 +56,7 @@ async function seedPublishedDeal(
 ): Promise<DealRecord> {
   const ev = await evidenceStore.save({
     sourceUrl,
-    screenshot: new Uint8Array(),
+    screenshot: new Uint8Array([137, 80, 78, 71]),
     html: '<html>',
     termsText: PAGE_TEXT,
     capturedAt: '2026-06-19T00:00:00.000Z',

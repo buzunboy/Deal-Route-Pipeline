@@ -13,6 +13,7 @@ import type {
   Clock,
   Logger,
 } from '../../src/application/ports/index.js';
+import { assertCaptureComplete } from '../../src/domain/index.js';
 import type { Evidence, EvidenceCapture } from '../../src/domain/index.js';
 
 /** Fetcher fake: returns a scripted result. Default is a clean OK page. */
@@ -113,6 +114,10 @@ export class FakeFeedReader implements FeedReader {
 export class FakeEvidenceStore implements EvidenceStore {
   public saved: Evidence[] = [];
   async save(capture: EvidenceCapture): Promise<Evidence> {
+    // Mirror the production store: reject a hollow capture before "persisting" it,
+    // so the fake stays substitutable under the contract (LSP) and tests relying
+    // on the fake can't accidentally pin a candidate to empty evidence.
+    assertCaptureComplete(capture);
     const id = randomUUID();
     const evidence: Evidence = {
       id,

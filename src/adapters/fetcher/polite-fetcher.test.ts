@@ -1,9 +1,48 @@
 import { describe, it, expect } from 'vitest';
 import { parseRobots, PoliteFetcher } from './polite-fetcher.js';
+import type { RobotsClient, RobotsResponse } from './polite-fetcher.js';
 import type { Fetcher, FetchResult } from '../../application/ports/index.js';
 import { FakeLogger } from '../../../test/fakes/fakes.js';
 
 const UA = 'DealRouteBot/0.1';
+
+/** Inner fetcher that records every URL it is asked to fetch. */
+function countingInner(result: Partial<FetchResult> = {}): Fetcher & { calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    async fetch(url: string): Promise<FetchResult> {
+      calls.push(url);
+      return {
+        outcome: 'ok',
+        url,
+        finalUrl: url,
+        text: 'ok',
+        html: '<html></html>',
+        screenshot: new Uint8Array([1]),
+        ...result,
+      };
+    },
+  };
+}
+
+/** Scripted RobotsClient: map of `${origin}/robots.txt` → body (or `notFound`). */
+function scriptedRobots(
+  byUrl: Record<string, string | { notFound: true }>,
+): RobotsClient & { calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    async fetch(url: string): Promise<RobotsResponse> {
+      calls.push(url);
+      const entry = byUrl[url];
+      if (entry === undefined || (typeof entry !== 'string' && entry.notFound)) {
+        return { ok: false, text: async () => '' };
+      }
+      return { ok: true, text: async () => entry as string };
+    },
+  };
+}
 
 describe('parseRobots', () => {
   it('applies wildcard Disallow rules to our agent', () => {
@@ -90,5 +129,98 @@ describe('PoliteFetcher redirect handling', () => {
     const res = await pf.fetch('https://host.de/start');
     expect(res.outcome).toBe('ok');
     expect(res.finalUrl).toBe('https://host.de/start');
+  });
+});
+
+describe('PoliteFetcher robots.txt runtime (injected RobotsClient)', () => {
+  const base = (robots: RobotsClient) => ({
+    respectRobotsTxt: true,
+    minIntervalMs: 0,
+    userAgent: UA,
+    logger: new FakeLogger(),
+    robotsClient: robots,
+  });
+
+  it('a Disallow short-circuits without ever calling inner.fetch', async () => {
+    const robots = scriptedRobots({ 'https://host.de/robots.txt': 'User-agent: *\nDisallow: /' });
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base(robots));
+    const res = await pf.fetch('https://host.de/secret');
+    expect(res.outcome).toBe('robots_disallowed');
+    expect(inner.calls).toEqual([]); // never fetched the disallowed page
+  });
+
+  it('an Allow lets the request through to inner.fetch', async () => {
+    const robots = scriptedRobots({
+      'https://host.de/robots.txt': 'User-agent: *\nDisallow: /admin',
+    });
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base(robots));
+    const res = await pf.fetch('https://host.de/angebote');
+    expect(res.outcome).toBe('ok');
+    expect(inner.calls).toEqual(['https://host.de/angebote']);
+  });
+
+  it('missing robots.txt fails open (allowed) and still hits inner.fetch', async () => {
+    const robots = scriptedRobots({ 'https://host.de/robots.txt': { notFound: true } });
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base(robots));
+    const res = await pf.fetch('https://host.de/anything');
+    expect(res.outcome).toBe('ok');
+    expect(inner.calls).toEqual(['https://host.de/anything']);
+  });
+
+  it('caches robots.txt per origin (one fetch for repeated hits to the same host)', async () => {
+    const robots = scriptedRobots({
+      'https://host.de/robots.txt': 'User-agent: *\nDisallow: /admin',
+    });
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base(robots));
+    await pf.fetch('https://host.de/a');
+    await pf.fetch('https://host.de/b');
+    expect(robots.calls).toEqual(['https://host.de/robots.txt']); // fetched once, cached
+  });
+
+  it('a redirect to a disallowed final URL discards the fetched content', async () => {
+    const robots = scriptedRobots({
+      // The requested origin allows everything…
+      'https://good.de/robots.txt': 'User-agent: *\nDisallow:',
+      // …but the redirect destination disallows the landing path.
+      'https://tracker.de/robots.txt': 'User-agent: *\nDisallow: /landing',
+    });
+    const inner = countingInner({ finalUrl: 'https://tracker.de/landing' });
+    const pf = new PoliteFetcher(inner, base(robots));
+    const res = await pf.fetch('https://good.de/start');
+    // We did fetch (the redirect was only known after), but robots forbids the
+    // destination, so the content is discarded and reported as disallowed.
+    expect(inner.calls).toEqual(['https://good.de/start']);
+    expect(res.outcome).toBe('robots_disallowed');
+    expect(res.finalUrl).toBe('https://tracker.de/landing');
+    expect(res.html).toBe('');
+  });
+});
+
+describe('PoliteFetcher per-host throttle', () => {
+  const base = () => ({
+    respectRobotsTxt: false,
+    minIntervalMs: 50,
+    userAgent: UA,
+    logger: new FakeLogger(),
+  });
+
+  it('throttles a second hit to the SAME host but not a different host', async () => {
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base());
+
+    const t0 = Date.now();
+    await pf.fetch('https://host-a.de/1'); // first hit, no wait
+    await pf.fetch('https://host-b.de/1'); // different host, no wait
+    const afterCrossHost = Date.now() - t0;
+    expect(afterCrossHost).toBeLessThan(50); // cross-host pair did not throttle
+
+    const t1 = Date.now();
+    await pf.fetch('https://host-a.de/2'); // same host as the first → must wait
+    const sameHostWait = Date.now() - t1;
+    expect(sameHostWait).toBeGreaterThanOrEqual(40); // ~minIntervalMs (allow scheduler slack)
   });
 });

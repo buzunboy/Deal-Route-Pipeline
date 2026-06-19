@@ -1,3 +1,4 @@
+import { frameUntrusted } from '../../domain/index.js';
 import type { FeedItem } from '../ports/index.js';
 
 /**
@@ -29,13 +30,11 @@ When unsure, prefer relevant=false — a missed lead is cheaper than a wasted ex
 
 export function buildTriagePrompt(input: TriagePromptInput): { system: string; user: string } {
   const services = input.catalogServices.map((s) => `- ${s}`).join('\n');
+  const feedItem = `Title: ${input.item.title}\nSummary: ${input.item.summary}\nLink: ${input.item.link}`;
   const user = `Catalog services (match against these):
 ${services}
 
-Feed item:
-Title: ${input.item.title}
-Summary: ${input.item.summary}
-Link: ${input.item.link}
+${frameUntrusted('FEED ITEM', feedItem)}
 
 Return STRICT JSON: { "relevant": boolean, "service": string|null, "reason": string }`;
   return { system: SYSTEM, user };

@@ -1,7 +1,12 @@
 import { mkdir, writeFile, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { EvidenceSchema, type Evidence, type EvidenceCapture } from '../../domain/index.js';
+import {
+  EvidenceSchema,
+  assertCaptureComplete,
+  type Evidence,
+  type EvidenceCapture,
+} from '../../domain/index.js';
 import type { EvidenceStore } from '../../application/ports/index.js';
 
 /**
@@ -45,6 +50,13 @@ export class LocalFsEvidenceStore implements EvidenceStore {
   constructor(private readonly baseDir: string) {}
 
   async save(capture: EvidenceCapture): Promise<Evidence> {
+    // Reject a hollow capture BEFORE writing — the same way get()/verifyBundleComplete
+    // rejects it on read. A fetcher can return an ok-fetch with an empty screenshot
+    // (e.g. Firecrawl omits it), which would otherwise persist a candidate whose
+    // evidence get() later rejects as unloadable. Fail loudly at the chokepoint so
+    // no candidate is ever pinned to evidence that can't be loaded back.
+    assertCaptureComplete(capture);
+
     const id = randomUUID();
     const finalDir = join(this.baseDir, id);
     // Staging dir is a sibling under the SAME base dir, so the final `rename` is a

@@ -1,4 +1,4 @@
-import type { Vocabulary } from '../../domain/index.js';
+import { frameUntrusted, type Vocabulary } from '../../domain/index.js';
 
 /**
  * Build the system + user prompt for the extraction LLM. The prompt is data: it
@@ -76,10 +76,8 @@ ${target}
 Known condition vocabulary keys (map conditions to these when they fit):
 ${vocabList}
 
-PAGE TEXT (extract only from this; quotes must be verbatim substrings of it):
-"""
-${input.pageText}
-"""
+Extract only from the PAGE TEXT below; quotes must be verbatim substrings of it.
+${frameUntrusted('PAGE TEXT', input.pageText)}
 
 Return STRICT JSON: { "deals": [ <deal>, ... ] } following the DealRoute schema.`;
 

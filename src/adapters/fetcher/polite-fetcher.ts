@@ -3,6 +3,25 @@ import type { Logger } from '../../application/ports/index.js';
 import { withTimeout } from '../shared/retry.js';
 
 /**
+ * The minimal robots.txt fetch the politeness layer needs. A thin seam over
+ * global `fetch` so the robots path is unit-testable without real network — the
+ * composition root injects the default (global fetch); tests inject a scripted
+ * client. Deliberately narrow (just what {@link PoliteFetcher.loadRobots} uses).
+ */
+export interface RobotsClient {
+  fetch(url: string, init: { headers: Record<string, string> }): Promise<RobotsResponse>;
+}
+export interface RobotsResponse {
+  ok: boolean;
+  text(): Promise<string>;
+}
+
+/** Default RobotsClient: the platform global `fetch`. */
+export const globalFetchRobotsClient: RobotsClient = {
+  fetch: (url, init) => fetch(url, init),
+};
+
+/**
  * Politeness decorator around any `Fetcher` (Decorator pattern, behind the port).
  * Enforces the public-crawling guardrails the config promises:
  *  - **robots.txt**: when enabled, fetch + cache each origin's robots.txt and
@@ -17,6 +36,8 @@ export class PoliteFetcher implements Fetcher {
   private readonly lastHitAt = new Map<string, number>();
   private readonly robotsCache = new Map<string, RobotsRules | null>();
 
+  private readonly robotsClient: RobotsClient;
+
   constructor(
     private readonly inner: Fetcher,
     private readonly opts: {
@@ -24,8 +45,12 @@ export class PoliteFetcher implements Fetcher {
       minIntervalMs: number;
       userAgent: string;
       logger: Logger;
+      /** Injected for tests; defaults to global fetch in the composition root. */
+      robotsClient?: RobotsClient;
     },
-  ) {}
+  ) {
+    this.robotsClient = opts.robotsClient ?? globalFetchRobotsClient;
+  }
 
   async fetch(url: string, options?: FetchOptions): Promise<FetchResult> {
     if (this.opts.respectRobotsTxt && !(await this.isAllowed(url))) {
@@ -84,7 +109,9 @@ export class PoliteFetcher implements Fetcher {
   private async loadRobots(origin: string): Promise<RobotsRules | null> {
     try {
       const res = await withTimeout(
-        fetch(`${origin}/robots.txt`, { headers: { 'user-agent': this.opts.userAgent } }),
+        this.robotsClient.fetch(`${origin}/robots.txt`, {
+          headers: { 'user-agent': this.opts.userAgent },
+        }),
         5000,
       );
       if (!res.ok) return null;

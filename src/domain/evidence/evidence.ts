@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { InvariantViolation } from '../errors/index.js';
 
 /**
  * An immutable evidence bundle captured at crawl time for a single fetched page.
@@ -33,4 +34,27 @@ export interface EvidenceCapture {
   termsText: string;
   capturedAt: string;
   contentHash: string;
+}
+
+/**
+ * Reject a hollow capture before any EvidenceStore persists it. The trust
+ * invariant is "evidence required before any candidate" — a bundle missing its
+ * screenshot/HTML/terms bytes is not evidence. A fetcher can return an ok-fetch
+ * with an empty screenshot (e.g. Firecrawl omits the field), which would persist
+ * a candidate pinned to a bundle that `get()`/`verifyBundleComplete` later reject
+ * as unloadable. Validating at `save()` instead means the failure surfaces at
+ * capture time, not at review time. Pure + store-agnostic so every EvidenceStore
+ * adapter enforces it identically (substitutability).
+ */
+export function assertCaptureComplete(capture: EvidenceCapture): void {
+  const empties: string[] = [];
+  if (capture.screenshot.byteLength === 0) empties.push('screenshot');
+  if (capture.html.length === 0) empties.push('html');
+  if (capture.termsText.length === 0) empties.push('termsText');
+  if (empties.length > 0) {
+    throw new InvariantViolation(
+      `Evidence capture is hollow: empty ${empties.join(', ')}. Refusing to persist evidence that cannot be loaded back.`,
+      { sourceUrl: capture.sourceUrl, empty: empties },
+    );
+  }
 }
