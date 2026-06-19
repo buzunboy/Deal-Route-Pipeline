@@ -1,11 +1,19 @@
 /**
- * Recover the JSON payload from a model reply. Models sometimes wrap JSON in a
- * ```json fence (occasionally with a missing closing fence on a truncated reply),
- * append prose after it, or emit invalid backslash escapes (e.g. the German
- * gender-star "Nutzer\*innen"). We (1) unwrap a fenced block, closed or not,
- * (2) else take the first balanced top-level object, then (3) repair invalid JSON
- * string escapes. This only UN-WRAPS and REPAIRS shape; the boundary parser still
- * validates every field — we never trust raw output.
+ * Recover the JSON payload from a model reply.
+ *
+ * LLMs copying verbatim source text into JSON strings produce several recurring
+ * malformations that make `JSON.parse` reject the whole document:
+ *  - wrapping the JSON in a ```json fence (sometimes unterminated on a truncated
+ *    reply) and/or appending prose after it;
+ *  - invalid backslash escapes, e.g. the German gender-star "Nutzer\*innen";
+ *  - UNESCAPED inner double-quotes, e.g. copying  „DB Navigator"  into a value,
+ *    which prematurely closes the string;
+ *  - raw control characters (literal newlines/tabs) inside a string.
+ *
+ * We (1) unwrap any fence, (2) else take the first balanced top-level object,
+ * then (3) run a string-aware repair that fixes the above. This only UN-WRAPS and
+ * REPAIRS shape so the document parses; the boundary schema still validates every
+ * field afterwards — we never trust raw output, this just makes it parseable.
  */
 export function recoverJsonText(text: string): string {
   const trimmed = text.trim();
@@ -19,20 +27,81 @@ export function recoverJsonText(text: string): string {
     const candidate = open ? open[1]!.trim() : trimmed;
     body = firstBalancedObject(candidate) ?? candidate;
   }
-  return repairInvalidEscapes(body);
+  return repairJsonStrings(body);
 }
 
+const VALID_ESCAPES = '"\\/bfnrtu';
+/** After a real closing quote, the next non-space char is one of these. */
+const STRUCTURAL_AFTER_STRING = new Set([',', '}', ']', ':']);
+
 /**
- * JSON permits only \" \\ \/ \b \f \n \r \t \uXXXX as backslash escapes. Models
- * copying verbatim source text sometimes emit others (e.g. "\*"); JSON.parse then
- * rejects the whole document. We drop the stray backslash before such a character
- * so the literal survives, leaving valid escapes untouched.
+ * Single-pass, string-aware repair. Walks the text tracking whether we're inside
+ * a JSON string and rewrites only the known LLM mistakes:
+ *  - a backslash before a non-JSON-escape char → drop the backslash (keep the char);
+ *  - a raw control character inside a string → escape it (\n, \t, …);
+ *  - a bare `"` inside a string that is NOT the terminator (the next non-space
+ *    char isn't structural) → escape it to `\"`.
+ * Structure outside strings is left untouched.
  */
-function repairInvalidEscapes(json: string): string {
-  return json.replace(/\\(.)/g, (match, next: string) => {
-    if (next === 'u') return match; // \uXXXX — leave the unicode escape intact
-    return '"\\/bfnrt'.includes(next) ? match : next;
-  });
+function repairJsonStrings(json: string): string {
+  let out = '';
+  let inString = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i]!;
+
+    if (!inString) {
+      out += ch;
+      if (ch === '"') inString = true;
+      continue;
+    }
+
+    // Inside a string.
+    if (ch === '\\') {
+      const next = json[i + 1];
+      if (next !== undefined && VALID_ESCAPES.includes(next)) {
+        out += ch + next; // valid escape — keep the pair
+        i++;
+      } else if (next !== undefined) {
+        out += next; // invalid escape (e.g. \*) — drop the backslash, keep char
+        i++;
+      } else {
+        out += '\\\\'; // trailing lone backslash — escape it
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      // Is this the string terminator, or an unescaped inner quote? It terminates
+      // only if the next non-space char is structural (or end of input).
+      let j = i + 1;
+      while (
+        j < json.length &&
+        (json[j] === ' ' || json[j] === '\t' || json[j] === '\n' || json[j] === '\r')
+      ) {
+        j++;
+      }
+      const nextSig = json[j];
+      if (nextSig === undefined || STRUCTURAL_AFTER_STRING.has(nextSig)) {
+        out += '"'; // genuine terminator
+        inString = false;
+      } else {
+        out += '\\"'; // inner quote the model forgot to escape
+      }
+      continue;
+    }
+
+    const code = ch.charCodeAt(0);
+    if (code < 0x20) {
+      // Raw control char inside a string is invalid JSON — escape it.
+      out +=
+        { 8: '\\b', 9: '\\t', 10: '\\n', 12: '\\f', 13: '\\r' }[code] ??
+        `\\u${code.toString(16).padStart(4, '0')}`;
+      continue;
+    }
+
+    out += ch;
+  }
+  return out;
 }
 
 /** Return the first balanced `{ … }` block in `text`, or null if none. */

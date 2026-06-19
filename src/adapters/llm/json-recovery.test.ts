@@ -43,6 +43,30 @@ describe('recoverJsonText', () => {
     expect(recoverable('{"s":"a\\\\*b"}')).toEqual({ s: 'a\\*b' });
   });
 
+  it('escapes an unescaped inner double-quote (German typographic quote copied verbatim)', () => {
+    // Real mydealz failure: …App „DB Navigator" oder… — the closing " was bare,
+    // prematurely terminating the string. The next char is text, not structural.
+    const raw = '{"source_quote":"über die App „DB Navigator" oder die Website"}';
+    expect(recoverable(raw)).toEqual({
+      source_quote: 'über die App „DB Navigator" oder die Website',
+    });
+  });
+
+  it('still treats a real closing quote as the terminator', () => {
+    expect(recoverable('{"a":"x","b":"y"}')).toEqual({ a: 'x', b: 'y' });
+  });
+
+  it('escapes a raw control character (literal newline) inside a string', () => {
+    const raw = '{"terms":"line one\nline two"}';
+    expect(recoverable(raw)).toEqual({ terms: 'line one\nline two' });
+  });
+
+  it('handles an inner quote immediately before a comma vs mid-text', () => {
+    // Here the inner quote IS followed by a comma → it's the terminator; the
+    // value is just `say ` and `,"b"` continues. (Documents the heuristic.)
+    expect(recoverable('{"a":"say ","b":"ok"}')).toEqual({ a: 'say ', b: 'ok' });
+  });
+
   it('leaves genuinely-unrecoverable text for the boundary parser to reject', () => {
     // Not JSON at all → returned as-is; downstream JSON.parse throws (by design).
     const out = recoverJsonText('totally not json');
