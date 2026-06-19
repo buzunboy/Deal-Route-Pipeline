@@ -5,5 +5,6 @@ export * from './repositories.js';
 export * from './queue.js';
 export * from './clock.js';
 export * from './browser-agent.js';
+export * from './search-provider.js';
 export * from './feed-reader.js';
 export * from './logger.js';

@@ -26,6 +26,15 @@ const ConfigSchema = z.object({
     userAgent: z.string().min(1),
     firecrawlApiKey: z.string().optional(),
   }),
+  // Tier-4 broad-discovery search backend (Phase C, C-1). `stub` is the offline
+  // off-switch (no network, like the noop browser agent); `api` is the real
+  // dedicated search API (Brave); `firecrawl` reuses the Firecrawl key. The
+  // composition root fails loudly if a real provider is selected without its key.
+  search: z.object({
+    provider: z.enum(['stub', 'api', 'firecrawl']),
+    apiKey: z.string().optional(),
+    resultsPerQuery: z.coerce.number().int().positive(),
+  }),
   evidence: z.object({
     kind: z.enum(['local', 's3']),
     localDir: z.string().min(1),
@@ -116,6 +125,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       timeoutMs: env.FETCH_TIMEOUT_MS ?? '30000',
       userAgent: env.FETCH_USER_AGENT ?? 'DealRouteBot/0.1',
       firecrawlApiKey: emptyToUndefined(env.FIRECRAWL_API_KEY),
+    },
+    search: {
+      // Default to the real API when a key is configured, else the offline stub —
+      // so Tier-4 never reaches the open web until a key is explicitly provided.
+      provider: env.SEARCH_PROVIDER ?? (emptyToUndefined(env.SEARCH_API_KEY) ? 'api' : 'stub'),
+      apiKey: emptyToUndefined(env.SEARCH_API_KEY),
+      resultsPerQuery: env.SEARCH_RESULTS_PER_QUERY ?? '10',
     },
     evidence: {
       kind: env.EVIDENCE_STORE ?? 'local',

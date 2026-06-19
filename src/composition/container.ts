@@ -17,6 +17,7 @@ import {
   type Database,
   type Logger,
   type Clock,
+  type SearchProvider,
 } from '../application/index.js';
 import { SEED_VOCABULARY, type Vocabulary } from '../domain/index.js';
 import { ConsoleLogger } from '../adapters/logger/console-logger.js';
@@ -27,6 +28,9 @@ import { StubLlm } from '../adapters/llm/stub-llm.js';
 import { PlaywrightFetcher } from '../adapters/fetcher/playwright-fetcher.js';
 import { FirecrawlFetcher } from '../adapters/fetcher/firecrawl-fetcher.js';
 import { PoliteFetcher } from '../adapters/fetcher/polite-fetcher.js';
+import { StubSearchProvider } from '../adapters/search/stub-search-provider.js';
+import { BraveSearchProvider } from '../adapters/search/brave-search-provider.js';
+import { FirecrawlSearchProvider } from '../adapters/search/firecrawl-search-provider.js';
 import { RssFeedReader } from '../adapters/feed/rss-feed-reader.js';
 import { InMemoryDb } from '../adapters/db/in-memory/in-memory-db.js';
 import { PostgresDb } from '../adapters/db/postgres/postgres-db.js';
@@ -54,6 +58,7 @@ export interface ContainerOptions {
     feedReader?: FeedReader;
     llm?: Llm;
     clock?: Clock;
+    searchProvider?: SearchProvider;
   };
 }
 
@@ -67,6 +72,7 @@ export class Container {
   readonly evidenceStore: EvidenceStore;
   readonly db: Database;
   readonly vocabulary: Vocabulary;
+  readonly searchProvider: SearchProvider;
 
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
@@ -94,6 +100,7 @@ export class Container {
     this.llm = overrides.llm ?? this.buildLlm(config);
     this.evidenceStore = this.buildEvidenceStore(config);
     this.db = this.buildDatabase(config, usePersistence);
+    this.searchProvider = overrides.searchProvider ?? this.buildSearchProvider(config);
     // NB: there is intentionally no job queue wired here. v1 runs as external
     // cron invoking the CLI (`crawl --due`, `monitor --due`, `ingest
     // --community-due`) — see README "Deployment". The `Queue` port + pg-boss/
@@ -177,6 +184,24 @@ export class Container {
       userAgent: config.fetcher.userAgent,
       logger: this.logger,
     });
+  }
+
+  private buildSearchProvider(config: Config): SearchProvider {
+    // `stub` is the offline off-switch (default when no key is configured), so
+    // Tier-4 broad discovery never reaches the open web until explicitly enabled.
+    if (config.search.provider === 'stub') return new StubSearchProvider();
+    if (config.search.provider === 'firecrawl') {
+      // Reuses the existing Firecrawl key (the scrape adapter's key), so a missing
+      // one fails loudly here rather than at first search.
+      if (!config.fetcher.firecrawlApiKey) {
+        throw new Error('SEARCH_PROVIDER=firecrawl requires FIRECRAWL_API_KEY.');
+      }
+      return new FirecrawlSearchProvider(config.fetcher.firecrawlApiKey);
+    }
+    if (!config.search.apiKey) {
+      throw new Error('SEARCH_PROVIDER=api requires SEARCH_API_KEY.');
+    }
+    return new BraveSearchProvider(config.search.apiKey);
   }
 
   private buildLlm(config: Config): Llm {

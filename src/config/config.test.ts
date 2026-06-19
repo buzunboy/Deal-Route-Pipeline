@@ -1,0 +1,45 @@
+import { describe, it, expect } from 'vitest';
+import { loadConfig } from './config.js';
+
+/**
+ * Config is the boundary where env → typed config; the search-backend selection
+ * has real trust weight (the wrong default could reach the open web), so pin it.
+ * We pass an explicit env record rather than mutating process.env.
+ */
+function env(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return { LLM_PROVIDER: 'stub', ...overrides };
+}
+
+describe('loadConfig — search backend selection', () => {
+  it('defaults to the offline stub when no SEARCH_API_KEY is set', () => {
+    const cfg = loadConfig(env());
+    expect(cfg.search.provider).toBe('stub');
+    expect(cfg.search.resultsPerQuery).toBe(10);
+  });
+
+  it('defaults to the real api when SEARCH_API_KEY is configured', () => {
+    const cfg = loadConfig(env({ SEARCH_API_KEY: 'brave-key' }));
+    expect(cfg.search.provider).toBe('api');
+    expect(cfg.search.apiKey).toBe('brave-key');
+  });
+
+  it('honours an explicit SEARCH_PROVIDER override', () => {
+    const cfg = loadConfig(env({ SEARCH_PROVIDER: 'firecrawl', FIRECRAWL_API_KEY: 'fc' }));
+    expect(cfg.search.provider).toBe('firecrawl');
+  });
+
+  it('treats an empty SEARCH_API_KEY as unset (stays on stub)', () => {
+    const cfg = loadConfig(env({ SEARCH_API_KEY: '   ' }));
+    expect(cfg.search.provider).toBe('stub');
+    expect(cfg.search.apiKey).toBeUndefined();
+  });
+
+  it('parses a custom SEARCH_RESULTS_PER_QUERY', () => {
+    const cfg = loadConfig(env({ SEARCH_RESULTS_PER_QUERY: '5' }));
+    expect(cfg.search.resultsPerQuery).toBe(5);
+  });
+
+  it('rejects a non-positive SEARCH_RESULTS_PER_QUERY', () => {
+    expect(() => loadConfig(env({ SEARCH_RESULTS_PER_QUERY: '0' }))).toThrow();
+  });
+});
