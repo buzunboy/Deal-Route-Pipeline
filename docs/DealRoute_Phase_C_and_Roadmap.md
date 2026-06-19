@@ -78,11 +78,12 @@ it safe and actually useful, and some are trust-critical regardless of Phase C.
    _(The field-proposal upsert was already a single atomic SQL statement from
    `f995bef`; the dedupe race + SCAN_LIMIT cliff + monitor next_due were fixed in
    the audit pass.)_
-3. **Pre-C-3 — Cost & observability spine.** Phase C is the expensive, agentic
-   lane; before turning it on you want: per-run cost already logged on `crawl_runs`
-   surfaced/aggregated; a daily/€-budget guard across a discovery batch (not just
-   per-run); structured run metrics (candidates, proposals, cost, stop-reason)
-   queryable. Cheap to add now, essential for a "rate/cost-limited agentic" lane.
+3. **Pre-C-3 — Cost & observability spine. ✅ DONE.** Phase C is the expensive,
+   agentic lane; before turning it on we built: per-run cost surfaced/aggregated
+   (`stats`); every lane logging a `crawl_runs` row (the agentic lane was invisible
+   before); a daily/€-budget guard across a discovery batch (`DAILY_BUDGET_EUR`,
+   default €10/day, distinct from the per-run cap); structured run metrics
+   (kind/candidates/proposals/cost/stop-reason) queryable via `stats --runs`.
    - ✅ **Cost-aggregation CLI (part 1) DONE.** `CostSummary` domain type +
      `roundEur` (half-up to cents) + `CrawlRunRepository.costSummary({since,until})`
      (half-open window, UTC day buckets) implemented on BOTH adapters and pinned by
@@ -90,8 +91,26 @@ it safe and actually useful, and some are trust-critical regardless of Phase C.
      `crawl_runs(started_at)` btree index (migration `0006`); `MetricsUseCase` wired
      in the Container; `stats [--since] [--until]` CLI. The in-memory and Postgres
      adapters produce bit-for-bit identical summaries (same rounding, sort, bucketing).
-   - ⬜ **Still to do in Pre-C-3:** the daily/€-budget guard across a discovery batch,
-     and the structured run-metrics surface (candidates/proposals/cost/stop-reason).
+   - ✅ **Structured run-metrics surface (part 2) DONE.** EVERY lane now logs a
+     `crawl_runs` row — Lane A inline, the bounded Lane-B lanes (`discover`/`ingest`)
+     via a shared `RunRecorder` — closing the gap where the agentic lane's cost was
+     invisible to `stats`. `crawl_runs` gained `run_kind` (crawl|discover|ingest),
+     `proposals_produced`, `stopped_reason`; `source_id` is now nullable (Lane-B runs
+     have no source row) and folds under a shared `SOURCELESS_RUN_BUCKET` sentinel in
+     the per-source breakdown (migration `0007`, backfill-safe). `CrawlRunRepository`
+     gained `spentSince` + `recentRuns` (both adapters, contract-pinned); `stats
+     --runs` lists recent runs (kind/candidates/proposals/cost/stop-reason).
+   - ✅ **Daily/€-budget guard (part 3) DONE.** A `DailyBudgetGuard` enforces an
+     aggregate €/UTC-day ceiling (`DAILY_BUDGET_EUR`, default **€10/day**; 0 disables)
+     across a discovery/ingest batch — distinct from the per-run `AgentBudget` cap. It
+     reads spend-so-far-today from the run ledger and stops before a run would push past
+     the ceiling (recording `stopped_reason='daily_budget_cap'`-style stop in the CLI),
+     and clamps each run's per-run €-cap to the remaining headroom so one run can't
+     overshoot either. Pure rules in `domain/metrics/daily-budget`. Also folded in the
+     parked Lane-B polish: `discover`'s mid-loop cost/time re-check (was loop-top only,
+     overshooting by one extraction) and a bounded discovery frontier (`FRONTIER_HEADROOM`).
+   - **Pre-C-3 is now COMPLETE** — the cost & observability spine is in place; Phase C
+     can run on a schedule against the open web with cost bounded per-run AND per-day.
 4. **Phase C — agentic broad discovery (Tier 4).** See §4.
 5. **Post-C — product-completeness toward the goal.** See §5.
 
@@ -143,11 +162,15 @@ the high-severity trust/scale issues were fixed in `3e8aecb`).
   consider a stricter parser or a repair-retry.
 
 **Lane-B polish (→ with Phase C, since C shares the lane):**
-- `discover` cost cap is checked only at loop top (overshoots by one extraction);
-  mirror the `ingest` mid-loop guard.
-- `discover` frontier (queue + visited sets) grows with total in-domain links,
-  not with `maxPages` — bound the frontier for very large sites.
-- Monitor batch has no aggregate cost budget across many changed sources.
+- ✅ `discover` cost cap was checked only at loop top (overshot by one extraction);
+  now mirrors the `ingest` mid-loop guard (re-checks €/time right before extracting).
+- ✅ `discover` frontier (queue + visited sets) grew with total in-domain links;
+  now bounded at `maxPages * FRONTIER_HEADROOM` for very large sites.
+- Monitor batch has no aggregate cost budget across many changed sources. (Monitor
+  makes no LLM call of its own — its diff is a hash compare and any re-crawl is a
+  separate Lane-A run with its own cost row — so it's intentionally NOT a
+  `crawl_runs` kind; its per-pass outcome lives, richer, in the `changes` table. The
+  daily-budget guard does cover the re-crawl cost via that Lane-A row.)
 - Dedupe key omits source/origin — two sources reporting the same route can churn
   duplicate `in_review` candidates. Decide: is that intended canonicalization
   (one offer regardless of who reports it) or should provenance split them?

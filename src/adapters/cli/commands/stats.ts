@@ -1,14 +1,19 @@
 import { Container } from '../../../composition/container.js';
+import { DEFAULT_RUNS_LIMIT } from '../../../application/index.js';
 import type { Config } from '../../../config/index.js';
 
 /**
- * `stats [--since YYYY-MM-DD] [--until YYYY-MM-DD]` — aggregate the per-run
- * `crawl_runs.cost_eur` already logged by the pipeline into a cost summary (total,
- * per UTC day, per source). The window is half-open: `since` inclusive, `until`
- * exclusive (each is a UTC-midnight Date validated by main.ts before we get here).
- * Read-only; prints to the console.
+ * `stats [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--runs]` — aggregate the
+ * per-run `crawl_runs.cost_eur` already logged by the pipeline into a cost summary
+ * (total, per UTC day, per source), and with `--runs` also list recent runs
+ * (kind/status/candidates/proposals/cost/stop-reason). The window is half-open:
+ * `since` inclusive, `until` exclusive (each a UTC-midnight Date validated by
+ * main.ts before we get here). Read-only; prints to the console.
  */
-export async function stats(config: Config, args: { since?: Date; until?: Date }): Promise<void> {
+export async function stats(
+  config: Config,
+  args: { since?: Date; until?: Date; runs?: boolean },
+): Promise<void> {
   const container = new Container(config, { usePersistence: true });
   try {
     const s = await container.metrics.costSummary(args);
@@ -33,6 +38,27 @@ export async function stats(config: Config, args: { since?: Date; until?: Date }
     } else {
       for (const src of s.per_source) {
         console.log(`  ${src.source_id}  €${src.cost_eur.toFixed(2)}  (${src.run_count} runs)`);
+      }
+    }
+
+    if (args.runs) {
+      const runs = await container.metrics.recentRuns(args);
+      // The use-case caps at DEFAULT_RUNS_LIMIT (50); if we got exactly that many the
+      // list may be truncated, so say so rather than implying it's the complete set.
+      const truncated = runs.length === DEFAULT_RUNS_LIMIT ? ' — capped, may be more' : '';
+      console.log(`\nRecent runs (newest first, ${runs.length}${truncated}):`);
+      if (runs.length === 0) {
+        console.log('  (none)');
+      } else {
+        for (const r of runs) {
+          const when = r.started_at.slice(0, 19).replace('T', ' ');
+          const stop = r.stopped_reason ?? (r.error ? `error: ${r.error}` : '-');
+          console.log(
+            `  ${when}  ${r.run_kind.padEnd(8)} ${r.status.padEnd(9)} ` +
+              `cand=${r.candidates_produced} prop=${r.proposals_produced} ` +
+              `€${r.cost_eur.toFixed(4)}  ${stop}`,
+          );
+        }
       }
     }
   } finally {

@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { hasDb, applyMigrations, resetDb, makeContainer } from './harness.js';
-import { ScriptedFetcher, RoleAwareFakeLlm } from '../fakes/fakes.js';
+import { ScriptedFetcher, RoleAwareFakeLlm, FakeFeedReader, FixedClock } from '../fakes/fakes.js';
+import { makeLlmDeal } from '../factories/deal.js';
+import { makeSource } from '../factories/source.js';
 import { randomUUID } from 'node:crypto';
+import { utcDayStart } from '../../src/domain/index.js';
 import type { Container } from '../../src/composition/container.js';
 import type { CrawlRun } from '../../src/domain/index.js';
 
@@ -19,11 +22,14 @@ function makeRun(sourceId: string, startedAt: string, costEur: number): CrawlRun
   return {
     id: randomUUID(),
     source_id: sourceId,
+    run_kind: 'crawl',
     status: 'succeeded',
     started_at: startedAt,
     finished_at: null,
     candidates_produced: 0,
+    proposals_produced: 0,
     cost_eur: costEur,
+    stopped_reason: null,
     error: null,
   };
 }
@@ -100,5 +106,120 @@ suite('Pre-C-3 cost aggregation (Container + Postgres)', () => {
       until: new Date('2030-01-02T00:00:00.000Z'),
     });
     expect(summary).toEqual({ total_eur: 0, run_count: 0, per_day: [], per_source: [] });
+  });
+
+  // ---- Lane-B run-metrics: discover/ingest now write a crawl_runs row ----
+
+  const FEED = 'https://www.mydealz.de/rss';
+  const DEAL_PAGE = 'https://www.telekom.de/magenta-disney';
+  const PAGE = 'Disney+ ist im Tarif MagentaTV SmartStream enthalten.';
+
+  it('an ingest run persists an ingest crawl_runs row (cost/candidates/proposals/stop-reason)', async () => {
+    container = makeContainer({
+      clock: new FixedClock(new Date('2026-06-19T12:00:00.000Z')),
+      feedReader: new FakeFeedReader({
+        [FEED]: [
+          {
+            title: 'Disney+ gratis bei Telekom',
+            link: DEAL_PAGE,
+            summary: 'Disney+ inklusive gratis',
+            publishedAt: null,
+          },
+        ],
+      }),
+      llm: new RoleAwareFakeLlm({
+        discovery: JSON.stringify({ relevant: true, service: 'Disney+', reason: 'bundle' }),
+        extraction: JSON.stringify({ deals: [makeLlmDeal()] }),
+      }),
+      fetcher: new ScriptedFetcher({ [DEAL_PAGE]: { text: PAGE, html: '<html></html>' } }),
+    });
+    const source = makeSource({ url: FEED, type: 'community', tier: 3 });
+    await container.db.sources.upsert(source);
+    await container.db.catalog.upsert({
+      service: 'Disney+',
+      category: 'streaming',
+      provider_url: 'https://www.disneyplus.com/de-de',
+      country: 'DE',
+    });
+
+    await container.ingestCommunity.execute({
+      sourceId: source.id,
+      maxItems: 20,
+      budget: { maxSteps: 20, maxSeconds: 300, maxCostEur: 1 },
+    });
+
+    // The run is now in the ledger — readable via recentRuns, attributed to the
+    // community source, with the Lane-B kind + a clean stop-reason.
+    const runs = await container.metrics.recentRuns({});
+    expect(runs).toHaveLength(1);
+    const run = runs[0]!;
+    expect(run.run_kind).toBe('ingest');
+    expect(run.source_id).toBe(source.id);
+    expect(run.status).toBe('succeeded');
+    expect(run.candidates_produced).toBe(1);
+    expect(run.proposals_produced).toBe(1);
+    expect(run.stopped_reason).toBe('completed');
+    expect(run.cost_eur).toBeGreaterThan(0);
+
+    // And its cost is now visible to BOTH the daily-guard sum and stats — the lane
+    // that was invisible before this change.
+    const spent = await container.db.crawlRuns.spentSince(
+      utcDayStart(new Date('2026-06-19T12:00:00.000Z')),
+    );
+    expect(spent).toBe(run.cost_eur);
+    const summary = await container.metrics.costSummary({});
+    expect(summary.run_count).toBe(1);
+    expect(summary.total_eur).toBe(run.cost_eur);
+  });
+
+  it('a discover run persists a null-source discover row that recentRuns round-trips', async () => {
+    const START = 'https://www.telekom.de/start';
+    container = makeContainer({
+      clock: new FixedClock(new Date('2026-06-19T08:00:00.000Z')),
+      // A page whose only link is OFF the start domain → one proposed source, no
+      // further fetches. Extraction yields one candidate.
+      fetcher: new ScriptedFetcher({
+        [START]: {
+          text: PAGE,
+          html: '<a href="https://novel-merchant.de/offer">deal</a>',
+        },
+      }),
+      llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [makeLlmDeal()] }) }),
+    });
+
+    await container.discoverSite.execute({
+      startUrl: START,
+      maxPages: 5,
+      budget: { maxSteps: 5, maxSeconds: 300, maxCostEur: 1 },
+    });
+
+    const runs = await container.metrics.recentRuns({});
+    expect(runs).toHaveLength(1);
+    const run = runs[0]!;
+    expect(run.run_kind).toBe('discover');
+    expect(run.source_id).toBeNull(); // Lane B has no source row
+    expect(run.proposals_produced).toBe(1);
+    expect(run.candidates_produced).toBe(1);
+
+    // The null-source run folds under the sentinel bucket in costSummary.
+    const summary = await container.metrics.costSummary({});
+    expect(summary.per_source).toHaveLength(1);
+    expect(summary.per_source[0]!.source_id).toBe('(sourceless)');
+  });
+
+  it('the daily-budget guard reports exhausted once prior runs reach the ceiling', async () => {
+    // Ceiling €5/day; pre-load €6 of runs earlier today → guard must report not-ok.
+    container = makeContainer(
+      { fetcher: new ScriptedFetcher({}), llm: new RoleAwareFakeLlm({}) },
+      { DAILY_BUDGET_EUR: '5.00' },
+    );
+    const today = utcDayStart(new Date());
+    const at = new Date(today.getTime() + 3600_000).toISOString();
+    await container.db.crawlRuns.insert(makeRun(randomUUID(), at, 6.0));
+
+    const check = await container.dailyBudgetGuard.check();
+    expect(check.ok).toBe(false);
+    expect(check.remainingEur).toBe(0);
+    expect(check.spentTodayEur).toBe(6.0);
   });
 });

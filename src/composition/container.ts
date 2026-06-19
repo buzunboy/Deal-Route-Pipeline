@@ -8,6 +8,7 @@ import {
   SourceReviewUseCase,
   MonitorSourceUseCase,
   MetricsUseCase,
+  DailyBudgetGuard,
   SystemClock,
   type Fetcher,
   type FeedReader,
@@ -75,6 +76,7 @@ export class Container {
   readonly sourceReview: SourceReviewUseCase;
   readonly monitor: MonitorSourceUseCase;
   readonly metrics: MetricsUseCase;
+  readonly dailyBudgetGuard: DailyBudgetGuard;
 
   /** Adapters needing teardown (browser, pools). Closed by `shutdown()`. */
   private readonly closables: { close(): Promise<void> }[] = [];
@@ -146,6 +148,12 @@ export class Container {
       config.fetcher.timeoutMs,
     );
     this.metrics = new MetricsUseCase(this.db, this.logger);
+    this.dailyBudgetGuard = new DailyBudgetGuard(
+      this.db,
+      this.clock,
+      this.logger,
+      config.agent.dailyBudgetEur,
+    );
   }
 
   private buildFetcher(config: Config): Fetcher {

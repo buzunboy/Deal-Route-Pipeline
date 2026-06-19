@@ -17,11 +17,13 @@ import type {
 } from '../../../application/ports/index.js';
 import {
   ChangeSchema,
+  CrawlRunSchema,
   ReviewRecordSchema,
   SourceReviewRecordSchema,
   SubscriptionCatalogEntrySchema,
   CostSummarySchema,
   eurFromMicros,
+  SOURCELESS_RUN_BUCKET,
 } from '../../../domain/index.js';
 import type {
   Source,
@@ -321,6 +323,36 @@ class PgCrawlRunRepo extends PgRepo implements CrawlRunRepository {
       this.db.update(schema.crawlRuns).set(toRunRow(r)).where(eq(schema.crawlRuns.id, r.id)),
     );
   }
+  async recentRuns(filter: { since?: Date; until?: Date; limit: number }): Promise<CrawlRun[]> {
+    const predicates: SQL[] = [];
+    if (filter.since) predicates.push(gte(schema.crawlRuns.startedAt, filter.since.toISOString()));
+    if (filter.until) predicates.push(lt(schema.crawlRuns.startedAt, filter.until.toISOString()));
+    const where = predicates.length > 0 ? and(...predicates) : undefined;
+    return this.run('crawlRuns.recentRuns', async () => {
+      const rows = await this.db
+        .select()
+        .from(schema.crawlRuns)
+        .where(where)
+        // Newest first; id desc is the deterministic tiebreaker (matches in-memory).
+        .orderBy(desc(schema.crawlRuns.startedAt), desc(schema.crawlRuns.id))
+        .limit(filter.limit);
+      // Boundary discipline: re-validate each row through the schema before use.
+      return rows.map((r) => fromRunRow(r));
+    });
+  }
+  async spentSince(since: Date): Promise<number> {
+    // Exact integer micro-euro sum (numeric, order-independent), rounded once to
+    // cents — identical convention to costSummary so the guard agrees with stats.
+    return this.run('crawlRuns.spentSince', async () => {
+      const rows = await this.db
+        .select({
+          micros: sql<number>`coalesce(sum(round((${schema.crawlRuns.costEur} * 1000000)::numeric)), 0)::bigint`,
+        })
+        .from(schema.crawlRuns)
+        .where(gte(schema.crawlRuns.startedAt, since.toISOString()));
+      return eurFromMicros(Number(rows[0]?.micros ?? 0));
+    });
+  }
   async costSummary(filter: { since?: Date; until?: Date }): Promise<CostSummary> {
     // Half-open window on started_at: since inclusive (gte), until exclusive (lt).
     // started_at is timestamptz mode:'string'; compare against an ISO string exactly
@@ -341,6 +373,11 @@ class PgCrawlRunRepo extends PgRepo implements CrawlRunRepository {
     // between adapters. `::bigint` makes the result a plain integer for JS.
     // See CostSummarySchema's rounding-convention note.
     const microSumExpr = sql<number>`coalesce(sum(round((${schema.crawlRuns.costEur} * 1000000)::numeric)), 0)::bigint`;
+
+    // Null source_id (Lane-B) → the shared sentinel string, matching the in-memory
+    // adapter. The uuid column is cast to text FIRST so coalesce doesn't try to
+    // parse the sentinel as a uuid (it isn't one — which is what stops collisions).
+    const sourceBucketExpr = sql<string>`coalesce(${schema.crawlRuns.sourceId}::text, ${SOURCELESS_RUN_BUCKET})`;
 
     return this.run('crawlRuns.costSummary', async () => {
       const [totalsRows, perDayRows, perSourceRows] = await Promise.all([
@@ -364,15 +401,17 @@ class PgCrawlRunRepo extends PgRepo implements CrawlRunRepository {
           .groupBy(dayExpr)
           .orderBy(asc(dayExpr)),
         // (3) per-source — final sort done in JS on the ROUNDED cost (below).
+        // Null source_id (Lane-B runs) folds under the shared sentinel via coalesce
+        // so the grouping matches the in-memory adapter's `?? SOURCELESS_RUN_BUCKET`.
         this.db
           .select({
-            sourceId: schema.crawlRuns.sourceId,
+            sourceId: sourceBucketExpr,
             micros: microSumExpr,
             count: sql<number>`count(*)::int`,
           })
           .from(schema.crawlRuns)
           .where(where)
-          .groupBy(schema.crawlRuns.sourceId),
+          .groupBy(sourceBucketExpr),
       ]);
 
       const totals = totalsRows[0] ?? { micros: 0, count: 0 };
@@ -696,13 +735,42 @@ function toRunRow(r: CrawlRun): typeof schema.crawlRuns.$inferInsert {
   return {
     id: r.id,
     sourceId: r.source_id,
+    runKind: r.run_kind,
     status: r.status,
     startedAt: r.started_at,
     finishedAt: r.finished_at,
     candidatesProduced: r.candidates_produced,
+    proposalsProduced: r.proposals_produced,
     costEur: r.cost_eur,
+    stoppedReason: r.stopped_reason,
     error: r.error,
   };
+}
+function fromRunRow(r: typeof schema.crawlRuns.$inferSelect): CrawlRun {
+  // Re-validate at the boundary (never trust the row shape blindly): the enums +
+  // nullability are enforced by CrawlRunSchema, not just the column types.
+  return CrawlRunSchema.parse({
+    id: r.id,
+    source_id: r.sourceId,
+    run_kind: r.runKind,
+    status: r.status,
+    // Postgres returns a `timestamptz` (mode:'string') in libpq text form
+    // ('2026-06-19 00:00:00+00' — space, '+00', no millis/'Z'), NOT the canonical
+    // ISO-Z the caller wrote. Normalize so this adapter emits byte-identical
+    // started_at/finished_at to the in-memory adapter (LSP): recentRuns exposes the
+    // raw string to CLI/ledger consumers, so the two adapters must agree exactly.
+    started_at: isoOf(r.startedAt),
+    finished_at: r.finishedAt === null ? null : isoOf(r.finishedAt),
+    candidates_produced: r.candidatesProduced,
+    proposals_produced: r.proposalsProduced,
+    cost_eur: r.costEur,
+    stopped_reason: r.stoppedReason,
+    error: r.error,
+  });
+}
+/** Canonical ISO-8601 (UTC, 'Z') for a Postgres timestamptz text value. */
+function isoOf(ts: string): string {
+  return new Date(ts).toISOString();
 }
 function toEvidenceRow(e: Evidence): typeof schema.evidence.$inferInsert {
   return {

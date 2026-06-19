@@ -50,6 +50,13 @@
       "when": 1781876123101,
       "tag": "0006_dapper_energizer",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781877878970,
+      "tag": "0007_military_sabretooth",
+      "breakpoints": true
     }
   ]
 }

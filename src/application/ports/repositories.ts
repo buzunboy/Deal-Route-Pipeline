@@ -72,6 +72,22 @@ export interface CrawlRunRepository {
    * `roundEur` helper, applied identically in both adapters.
    */
   costSummary(filter: { since?: Date; until?: Date }): Promise<CostSummary>;
+  /**
+   * Total logged run cost (EUR) since `since` inclusive (`started_at >= since`),
+   * across ALL run kinds. Powers the aggregate daily-budget guard: the caller
+   * passes UTC midnight to get spend-so-far-today. Rounded to cents via the same
+   * exact micro-euro convention as `costSummary` (order-independent across
+   * adapters). An empty window returns 0, never throws.
+   */
+  spentSince(since: Date): Promise<number>;
+  /**
+   * Recent runs (any kind) over a half-open `started_at` window — same bounds
+   * semantics as `costSummary` (`since` inclusive, `until` exclusive; both
+   * optional). Newest first (`started_at` desc, then `id` desc as a deterministic
+   * tiebreaker), capped at `limit`. The per-run observability surface: kind,
+   * status, candidates/proposals produced, cost, stop-reason.
+   */
+  recentRuns(filter: { since?: Date; until?: Date; limit: number }): Promise<CrawlRun[]>;
 }
 
 export interface EvidenceRepository {

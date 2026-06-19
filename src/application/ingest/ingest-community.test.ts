@@ -177,5 +177,40 @@ describe('IngestCommunityUseCase', () => {
     expect(await env.db.deals.listByStatus('in_review', 10)).toHaveLength(0);
     expect(await env.db.sources.listByStatus('pending_approval')).toHaveLength(0);
     expect(env.evidence.saved).toHaveLength(0);
+    // …including the run ledger.
+    expect(await env.db.crawlRuns.recentRuns({ limit: 10 })).toHaveLength(0);
+  });
+
+  it('records an ingest crawl_runs row attributed to the community source', async () => {
+    const env = build({ items: [feedItem({})] });
+    const sourceId = await seedCommunitySource(env.db);
+
+    const result = await env.uc.execute({ sourceId, maxItems: 50, budget: BUDGET });
+
+    const runs = await env.db.crawlRuns.recentRuns({ limit: 10 });
+    expect(runs).toHaveLength(1);
+    const run = runs[0]!;
+    expect(run.run_kind).toBe('ingest');
+    expect(run.source_id).toBe(sourceId); // ingest IS scoped to a source row
+    expect(run.status).toBe('succeeded');
+    expect(run.candidates_produced).toBe(result.candidatesFound);
+    expect(run.proposals_produced).toBe(result.proposedSources.length);
+    expect(run.stopped_reason).toBe('completed');
+  });
+
+  it('records a (zero-cost, completed) run even when the catalog is empty', async () => {
+    const env = build({ items: [feedItem({})] });
+    // Seed the source but NOT the catalog → the empty-catalog short-circuit.
+    const source = makeSource({ url: FEED_URL, type: 'community', tier: 3 });
+    await env.db.sources.upsert(source);
+
+    const result = await env.uc.execute({ sourceId: source.id, maxItems: 50, budget: BUDGET });
+    expect(result.candidatesFound).toBe(0);
+
+    const runs = await env.db.crawlRuns.recentRuns({ limit: 10 });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.status).toBe('succeeded');
+    expect(runs[0]!.stopped_reason).toBe('completed');
+    expect(runs[0]!.cost_eur).toBe(0);
   });
 });

@@ -113,16 +113,26 @@ export const crawlRuns = pgTable(
   'crawl_runs',
   {
     id: uuid('id').primaryKey(),
-    sourceId: uuid('source_id').notNull(),
+    // Nullable: Lane-B runs (discover/ingest) crawl arbitrary URLs with no
+    // `sources` row. Lane-A always sets it. Cost aggregation buckets null-source
+    // runs under a stable sentinel (see CostSummary).
+    sourceId: uuid('source_id'),
+    // Which lane produced this run: 'crawl' (Lane A) | 'discover' | 'ingest'
+    // (Lane B) | 'monitor'. Lets the run ledger + cost stats break down by lane.
+    runKind: text('run_kind').notNull(),
     status: text('status').notNull(),
     startedAt: timestamp('started_at', { withTimezone: true, mode: 'string' }).notNull(),
     finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'string' }),
     candidatesProduced: integer('candidates_produced').notNull(),
+    // Novel source domains proposed this run (Lane B); 0 for Lane A / monitor.
+    proposalsProduced: integer('proposals_produced').notNull().default(0),
     costEur: doublePrecision('cost_eur').notNull(),
+    // Why a capped (Lane-B/agentic) run stopped; null for Lane A (no caps loop).
+    stoppedReason: text('stopped_reason'),
     error: text('error'),
   },
-  // costSummary filters + groups by started_at; a btree serves the window scan and
-  // the per-day grouping.
+  // costSummary + the daily-budget guard filter/group by started_at; a btree serves
+  // the window scan, the per-day grouping, and the spent-since-midnight sum.
   (t) => ({
     startedAtIdx: index('crawl_runs_started_at_idx').on(t.startedAt),
   }),

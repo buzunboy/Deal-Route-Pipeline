@@ -9,11 +9,14 @@ function run(sourceId: string, startedAt: string, costEur: number): CrawlRun {
   return {
     id: randomUUID(),
     source_id: sourceId,
+    run_kind: 'crawl',
     status: 'succeeded',
     started_at: startedAt,
     finished_at: null,
     candidates_produced: 0,
+    proposals_produced: 0,
     cost_eur: costEur,
+    stopped_reason: null,
     error: null,
   };
 }
@@ -58,5 +61,33 @@ describe('MetricsUseCase', () => {
     expect(summary.total_eur).toBe(1.0);
     expect(summary.run_count).toBe(1);
     expect(summary.per_source).toEqual([{ source_id: src, cost_eur: 1.0, run_count: 1 }]);
+  });
+
+  it('recentRuns returns newest-first runs and applies the default cap', async () => {
+    const db = new InMemoryDb();
+    const useCase = new MetricsUseCase(db, new FakeLogger());
+    const src = randomUUID();
+    await db.crawlRuns.insert(run(src, '2026-06-19T01:00:00.000Z', 1.0));
+    await db.crawlRuns.insert(run(src, '2026-06-19T03:00:00.000Z', 2.0));
+    await db.crawlRuns.insert(run(src, '2026-06-19T02:00:00.000Z', 0.5));
+
+    const runs = await useCase.recentRuns({});
+    expect(runs.map((r) => r.started_at)).toEqual([
+      '2026-06-19T03:00:00.000Z',
+      '2026-06-19T02:00:00.000Z',
+      '2026-06-19T01:00:00.000Z',
+    ]);
+  });
+
+  it('recentRuns honours an explicit limit', async () => {
+    const db = new InMemoryDb();
+    const useCase = new MetricsUseCase(db, new FakeLogger());
+    const src = randomUUID();
+    await db.crawlRuns.insert(run(src, '2026-06-19T01:00:00.000Z', 1.0));
+    await db.crawlRuns.insert(run(src, '2026-06-19T02:00:00.000Z', 2.0));
+
+    const runs = await useCase.recentRuns({ limit: 1 });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.started_at).toBe('2026-06-19T02:00:00.000Z');
   });
 });

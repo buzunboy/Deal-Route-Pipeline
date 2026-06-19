@@ -194,4 +194,79 @@ describe('DiscoverSiteUseCase', () => {
       (await wet.db.deals.listByStatus('in_review', 10)).length;
     expect(persisted).toBeGreaterThan(0);
   });
+
+  it('records a discover crawl_runs row with kind/null-source/candidates/proposals/stop-reason', async () => {
+    const env = build({
+      [LISTING]: { html: `<a href="${DEAL_A}">A</a><a href="${OFF_DOMAIN}">reddit</a>` },
+      [DEAL_A]: { html: '', text: 'deal A text' },
+    });
+
+    const result = await env.uc.execute({ startUrl: LISTING, maxPages: 50, budget: BUDGET });
+
+    const runs = await env.db.crawlRuns.recentRuns({ limit: 10 });
+    expect(runs).toHaveLength(1);
+    const run = runs[0]!;
+    expect(run.run_kind).toBe('discover');
+    expect(run.source_id).toBeNull();
+    expect(run.status).toBe('succeeded');
+    expect(run.candidates_produced).toBe(result.candidatesFound);
+    expect(run.proposals_produced).toBe(result.proposedSources.length);
+    expect(run.stopped_reason).toBe(result.stoppedReason);
+  });
+
+  it('records daily_budget_cap (not cost_cap) when a daily-clamped run hits its cost cap', async () => {
+    // Two same-site deal pages; FakeLlm costs €0.001/extraction. A clamped €0.0005
+    // cap is below one extraction, so after the first page the loop-top guard trips
+    // on cost. With dailyClamped=true that stop is recorded as daily_budget_cap.
+    const env = build({
+      [LISTING]: { html: `<a href="${DEAL_A}">A</a><a href="${DEAL_B}">B</a>` },
+      [DEAL_A]: { html: '', text: 'deal A' },
+      [DEAL_B]: { html: '', text: 'deal B' },
+    });
+    const result = await env.uc.execute({
+      startUrl: LISTING,
+      maxPages: 50,
+      budget: { maxSteps: 50, maxSeconds: 300, maxCostEur: 0.0005 },
+      dailyClamped: true,
+    });
+    // The result object keeps the lane-level reason…
+    expect(result.stoppedReason).toBe('cost_cap');
+    // …but the ledger records the daily ceiling as the binding constraint.
+    const runs = await env.db.crawlRuns.recentRuns({ limit: 10 });
+    expect(runs[0]!.stopped_reason).toBe('daily_budget_cap');
+  });
+
+  it('writes NO crawl_runs row in dry-run', async () => {
+    const env = build({
+      [LISTING]: { html: `<a href="${DEAL_A}">A</a>` },
+      [DEAL_A]: { html: '', text: 'deal A' },
+    });
+    await env.uc.execute({ startUrl: LISTING, maxPages: 50, budget: BUDGET, dryRun: true });
+    expect(await env.db.crawlRuns.recentRuns({ limit: 10 })).toHaveLength(0);
+  });
+
+  it('bounds the frontier: a huge in-domain link set never queues more than the headroom', async () => {
+    // A listing page linking to 100 same-site deal pages, with maxPages=2. Only a
+    // couple are fetched; the frontier is bounded at maxPages * headroom (=10), so
+    // the queue can't grow to 100. We assert via the stop-reason + fetch count.
+    const links = Array.from(
+      { length: 100 },
+      (_, i) => `<a href="https://www.mydealz.de/deals/d${i}">d${i}</a>`,
+    ).join('');
+    const pages: Record<string, Partial<FetchResult> & { text?: string }> = {
+      [LISTING]: { html: links },
+    };
+    for (let i = 0; i < 100; i++) {
+      pages[`https://www.mydealz.de/deals/d${i}`] = { html: '', text: `deal ${i}` };
+    }
+    const env = build(pages);
+    const result = await env.uc.execute({
+      startUrl: LISTING,
+      maxPages: 2,
+      budget: { maxSteps: 2, maxSeconds: 300, maxCostEur: 1.0 },
+    });
+    // Stopped at the page cap after fetching exactly maxPages pages.
+    expect(result.stoppedReason).toBe('page_cap');
+    expect(result.pagesFetched).toBe(2);
+  });
 });

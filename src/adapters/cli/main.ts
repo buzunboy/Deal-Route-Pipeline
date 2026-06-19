@@ -34,6 +34,7 @@ Commands:
   review reject-source <id> <who>     Reject a proposed source (never crawled / re-proposed)
   stats [--since YYYY-MM-DD]          Aggregate logged crawl-run cost (per day + per source).
         [--until YYYY-MM-DD]          Window is half-open: since inclusive, until exclusive (UTC).
+        [--runs]                      Also list recent runs (kind/candidates/proposals/cost/stop-reason).
   serve                               Start the review API + thin test page (durable admin contract)
   discover <url> [--max-pages N]      Lane B: bounded same-site discovery → candidates + proposed
           [--dry-run]                 novel domains (capped by pages/€/time; nothing auto-publishes)
@@ -129,7 +130,7 @@ async function main(): Promise<void> {
       if (since && until && since.getTime() >= until.getTime()) {
         return fail('--since must be strictly before --until.');
       }
-      await stats(config, { since, until });
+      await stats(config, { since, until, runs: rest.includes('--runs') });
       break;
     }
     default:

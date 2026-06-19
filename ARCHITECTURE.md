@@ -135,3 +135,19 @@ drizzle-kit).
 Every external call is timeout-bounded and retried with backoff (`adapters/shared/retry.ts`).
 A failed source/run is logged with context and never crashes the batch. Per-run LLM cost is
 estimated and logged (guardrails). Jobs are idempotent.
+
+## Cost & run metrics (Pre-C-3)
+
+Every lane logs a `crawl_runs` row — Lane A inline, the bounded Lane-B lanes
+(`discover`/`ingest`) via the shared `RunRecorder` (start→finish/fail; a ledger-write
+failure is logged but never crashes the lane it measures; dry-run writes nothing). A
+Lane-B run has no `sources` row, so `crawl_runs.source_id` is nullable and such runs
+fold under a shared `SOURCELESS_RUN_BUCKET` sentinel in the per-source cost breakdown
+(the in-memory and Postgres adapters bucket/round identically — LSP). `run_kind`,
+`proposals_produced`, and `stopped_reason` make each run queryable. `MetricsUseCase`
+surfaces `costSummary` (total / per UTC day / per source) and `recentRuns`; the `stats`
+CLI renders both (`--runs`). Beyond the per-run `AgentBudget` cap, a `DailyBudgetGuard`
+(pure rules in `domain/metrics/daily-budget`) enforces an aggregate €/UTC-day ceiling
+(`DAILY_BUDGET_EUR`, 0 = off) across a discovery batch: it reads spend-so-far-today
+from the run ledger and stops before a run would push past the ceiling, clamping the
+per-run cap to the remaining headroom so one run can't overshoot either.

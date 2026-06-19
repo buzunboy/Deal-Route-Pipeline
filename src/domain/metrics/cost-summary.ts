@@ -50,6 +50,15 @@ import { z } from 'zod';
  * `cost_eur`, then ascending by `source_id` as a deterministic tiebreaker (the
  * tiebreak is computed on the already-rounded cost in both adapters).
  */
+/**
+ * `per_source` bucket key for runs with no `source_id` (Lane-B discover/ingest
+ * crawl arbitrary URLs that have no `sources` row). Both adapters MUST fold such
+ * runs under this exact sentinel so the per-source breakdown — and its
+ * deterministic sort tiebreaker — is byte-identical across adapters (LSP). It is
+ * not a UUID, so it can never collide with a real `source_id`.
+ */
+export const SOURCELESS_RUN_BUCKET = '(sourceless)';
+
 export const CostSummarySchema = z.object({
   total_eur: z.number().nonnegative(),
   run_count: z.number().int().nonnegative(),

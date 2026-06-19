@@ -1,5 +1,8 @@
-import type { CostSummary } from '../../domain/index.js';
+import type { CostSummary, CrawlRun } from '../../domain/index.js';
 import type { Database, Logger } from '../ports/index.js';
+
+/** Default cap on the per-run ledger view, so an unbounded table can't flood output. */
+export const DEFAULT_RUNS_LIMIT = 50;
 
 /**
  * Cost & observability use-case. Thin orchestration over the `CrawlRunRepository`
@@ -24,5 +27,21 @@ export class MetricsUseCase {
       until: filter.until?.toISOString(),
     });
     return this.db.crawlRuns.costSummary(filter);
+  }
+
+  /**
+   * Recent runs (newest first) over the same half-open window as `costSummary` —
+   * the per-run observability surface (kind / status / candidates / proposals /
+   * cost / stop-reason). `limit` defaults to a sane cap so the ledger view can't
+   * flood output.
+   */
+  async recentRuns(filter: { since?: Date; until?: Date; limit?: number }): Promise<CrawlRun[]> {
+    const limit = filter.limit ?? DEFAULT_RUNS_LIMIT;
+    this.logger.debug('metrics.recentRuns', {
+      since: filter.since?.toISOString(),
+      until: filter.until?.toISOString(),
+      limit,
+    });
+    return this.db.crawlRuns.recentRuns({ since: filter.since, until: filter.until, limit });
   }
 }

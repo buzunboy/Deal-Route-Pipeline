@@ -149,11 +149,16 @@ export class CrawlSourceUseCase {
     return {
       id: newId(),
       source_id: source.id,
+      run_kind: 'crawl',
       status: 'running',
       started_at: this.clock.nowIso(),
       finished_at: null,
       candidates_produced: 0,
+      // Lane A doesn't propose sources and has no caps loop — these stay at their
+      // base values for the whole run.
+      proposals_produced: 0,
       cost_eur: 0,
+      stopped_reason: null,
       error: null,
     };
   }

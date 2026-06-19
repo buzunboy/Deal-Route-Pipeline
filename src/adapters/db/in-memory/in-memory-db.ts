@@ -3,6 +3,7 @@ import {
   dedupeKey,
   toEurMicros,
   eurFromMicros,
+  SOURCELESS_RUN_BUCKET,
   type Source,
   type DealRecord,
   type CrawlRun,
@@ -156,6 +157,33 @@ class InMemoryCrawlRunRepo implements CrawlRunRepository {
   async update(r: CrawlRun): Promise<void> {
     this.store.set(r.id, { ...r });
   }
+  async recentRuns(filter: { since?: Date; until?: Date; limit: number }): Promise<CrawlRun[]> {
+    // Half-open window on started_at (since inclusive, until exclusive), newest
+    // first with id as the deterministic tiebreaker — mirrors the Postgres adapter.
+    const sinceMs = filter.since?.getTime();
+    const untilMs = filter.until?.getTime();
+    return [...this.store.values()]
+      .filter((r) => {
+        const t = Date.parse(r.started_at);
+        if (sinceMs !== undefined && t < sinceMs) return false;
+        if (untilMs !== undefined && t >= untilMs) return false;
+        return true;
+      })
+      .sort((a, b) => b.started_at.localeCompare(a.started_at) || b.id.localeCompare(a.id))
+      .slice(0, filter.limit)
+      .map((r) => ({ ...r }));
+  }
+  async spentSince(since: Date): Promise<number> {
+    // Sum exact micro-euros (order-independent) over runs at/after `since`, then
+    // round once — same convention as costSummary so the two never disagree.
+    const sinceMs = since.getTime();
+    let micros = 0;
+    for (const r of this.store.values()) {
+      if (Date.parse(r.started_at) < sinceMs) continue;
+      micros += toEurMicros(r.cost_eur);
+    }
+    return eurFromMicros(micros);
+  }
   async costSummary(filter: { since?: Date; until?: Date }): Promise<CostSummary> {
     // Half-open window on started_at: since inclusive, until exclusive. Mirrors
     // the Postgres adapter exactly (see CrawlRunRepository.costSummary JSDoc).
@@ -185,10 +213,13 @@ class InMemoryCrawlRunRepo implements CrawlRunRepository {
       d.count += 1;
       perDay.set(day, d);
 
-      const s = perSource.get(r.source_id) ?? { micros: 0, count: 0 };
+      // Null source_id (Lane-B runs) folds under the shared sentinel bucket so the
+      // per-source breakdown matches the Postgres adapter exactly (LSP).
+      const sourceKey = r.source_id ?? SOURCELESS_RUN_BUCKET;
+      const s = perSource.get(sourceKey) ?? { micros: 0, count: 0 };
       s.micros += micros;
       s.count += 1;
-      perSource.set(r.source_id, s);
+      perSource.set(sourceKey, s);
     }
 
     const perDayArr = [...perDay.entries()]

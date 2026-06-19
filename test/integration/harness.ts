@@ -50,7 +50,10 @@ export async function resetDb(): Promise<void> {
  * never started here (the queue isn't exercised by these flows). Evidence uses a
  * fresh temp dir so the local-fs store writes somewhere disposable.
  */
-export function makeContainer(overrides: NonNullable<ContainerOptions['overrides']>): Container {
+export function makeContainer(
+  overrides: NonNullable<ContainerOptions['overrides']>,
+  env: NodeJS.ProcessEnv = {},
+): Container {
   const evidenceDir = mkdtempSync(join(tmpdir(), 'dealroute-it-evidence-'));
   const config: Config = loadConfig({
     ...process.env,
@@ -62,6 +65,7 @@ export function makeContainer(overrides: NonNullable<ContainerOptions['overrides
     QUEUE_DATABASE_URL: DB_URL,
     RESPECT_ROBOTS_TXT: 'false', // overridden fetcher doesn't hit the network
     LOG_LEVEL: 'error',
+    ...env, // per-test config (e.g. DAILY_BUDGET_EUR, AGENT_MAX_*)
   });
   return new Container(config, { usePersistence: true, overrides });
 }

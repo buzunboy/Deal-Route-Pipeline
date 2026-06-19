@@ -26,9 +26,29 @@ export async function discover(config: Config, args: DiscoverArgs): Promise<void
   const container = new Container(config, { usePersistence: !args.dryRun });
   try {
     const maxPages = args.maxPages ?? config.agent.maxSteps;
+
+    // Aggregate daily €-budget guard: refuse to start (and clamp this run's €-cap
+    // to the budget left today) so a discovery run can't push past the daily
+    // ceiling. Dry-run logs no cost, so it's exempt. Disabled when DAILY_BUDGET_EUR=0.
+    let runCostCap = config.agent.maxCostEur;
+    if (!args.dryRun) {
+      const budget = await container.dailyBudgetGuard.check();
+      if (!budget.ok) {
+        console.log(
+          `Daily budget reached (€${budget.spentTodayEur.toFixed(2)} spent today, ` +
+            `ceiling €${config.agent.dailyBudgetEur}) — not starting discovery.`,
+        );
+        return;
+      }
+      runCostCap = container.dailyBudgetGuard.effectiveCostCap(
+        config.agent.maxCostEur,
+        budget.spentTodayEur,
+      );
+    }
+
     console.log(
       `Discovering from ${args.startUrl}${args.dryRun ? ' (dry-run)' : ''} ` +
-        `— caps: ${maxPages} pages, €${config.agent.maxCostEur}, ${config.agent.maxSeconds}s`,
+        `— caps: ${maxPages} pages, €${runCostCap.toFixed(2)}, ${config.agent.maxSeconds}s`,
     );
 
     const result = await container.discoverSite.execute({
@@ -37,8 +57,11 @@ export async function discover(config: Config, args: DiscoverArgs): Promise<void
       budget: {
         maxSteps: maxPages,
         maxSeconds: config.agent.maxSeconds,
-        maxCostEur: config.agent.maxCostEur,
+        maxCostEur: runCostCap,
       },
+      // Tell the run ledger when this run's €-cap was the daily headroom (not the
+      // per-run cap), so a cost_cap stop records as daily_budget_cap.
+      dailyClamped: runCostCap < config.agent.maxCostEur,
       dryRun: args.dryRun,
     });
 

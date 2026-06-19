@@ -33,7 +33,30 @@ export async function ingest(config: Config, args: IngestArgs): Promise<void> {
     let relevant = 0;
     let manual = 0;
     let proposed = 0;
+    let budgetStopped = false;
     for (const id of sourceIds) {
+      // Aggregate daily €-budget guard: stop the batch before starting a run once
+      // today's total run cost has reached the ceiling (a runaway day can't blow
+      // cost even if each run stays under its per-run cap). Dry-run skips it (no
+      // cost is logged). Disabled when DAILY_BUDGET_EUR=0.
+      let runCostCap = config.agent.maxCostEur;
+      if (!args.dryRun) {
+        const budget = await container.dailyBudgetGuard.check();
+        if (!budget.ok) {
+          budgetStopped = true;
+          console.log(
+            `\nStopped early: daily budget reached ` +
+              `(€${budget.spentTodayEur.toFixed(2)} spent today, ceiling €${config.agent.dailyBudgetEur}).`,
+          );
+          break;
+        }
+        // Clamp this run's €-cap to the budget left today so a single source can't
+        // overshoot the daily ceiling either.
+        runCostCap = container.dailyBudgetGuard.effectiveCostCap(
+          config.agent.maxCostEur,
+          budget.spentTodayEur,
+        );
+      }
       // Per-source isolation: one bad feed never aborts the batch.
       try {
         const r = await container.ingestCommunity.execute({
@@ -42,8 +65,11 @@ export async function ingest(config: Config, args: IngestArgs): Promise<void> {
           budget: {
             maxSteps: maxItems,
             maxSeconds: config.agent.maxSeconds,
-            maxCostEur: config.agent.maxCostEur,
+            maxCostEur: runCostCap,
           },
+          // Tell the run ledger when this run's €-cap was the daily headroom (not the
+          // per-run cap), so a cost_cap stop records as daily_budget_cap.
+          dailyClamped: runCostCap < config.agent.maxCostEur,
           dryRun: args.dryRun,
         });
         candidates += r.candidatesFound;
@@ -59,8 +85,8 @@ export async function ingest(config: Config, args: IngestArgs): Promise<void> {
     }
 
     console.log(
-      `\nDone. relevant-leads=${relevant} candidates=${candidates} ` +
-        `manual-capture=${manual} proposed-sources=${proposed}`,
+      `\nDone${budgetStopped ? ' (budget-stopped)' : ''}. relevant-leads=${relevant} ` +
+        `candidates=${candidates} manual-capture=${manual} proposed-sources=${proposed}`,
     );
     console.log(
       args.dryRun

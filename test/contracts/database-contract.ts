@@ -1,20 +1,34 @@
 import { describe, it, expect } from 'vitest';
 import type { Database } from '../../src/application/ports/index.js';
-import { DealStatus, type DealRecord, type CrawlRun } from '../../src/domain/index.js';
+import {
+  DealStatus,
+  SOURCELESS_RUN_BUCKET,
+  type DealRecord,
+  type CrawlRun,
+  type CrawlRunKind,
+} from '../../src/domain/index.js';
 import { makeLlmDeal } from '../factories/deal.js';
 import { makeSource } from '../factories/source.js';
 import { randomUUID } from 'node:crypto';
 
 /** A valid succeeded CrawlRun with a fixed started_at + cost, for cost-summary cases. */
-function makeRun(sourceId: string, startedAt: string, costEur: number): CrawlRun {
+function makeRun(
+  sourceId: string | null,
+  startedAt: string,
+  costEur: number,
+  extra: { kind?: CrawlRunKind; candidates?: number; proposals?: number } = {},
+): CrawlRun {
   return {
     id: randomUUID(),
     source_id: sourceId,
+    run_kind: extra.kind ?? 'crawl',
     status: 'succeeded',
     started_at: startedAt,
     finished_at: null,
-    candidates_produced: 0,
+    candidates_produced: extra.candidates ?? 0,
+    proposals_produced: extra.proposals ?? 0,
     cost_eur: costEur,
+    stopped_reason: null,
     error: null,
   };
 }
@@ -446,6 +460,99 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
         expect(summary.per_day).toEqual([{ day: '2300-09-01', cost_eur: 0.07, run_count: 6 }]);
         expect(summary.total_eur).toBe(0.07);
         expect(summary.run_count).toBe(6);
+      });
+
+      it('(f) null source_id (Lane-B) folds under the shared sentinel bucket', async () => {
+        const db = await makeDb();
+        const src = randomUUID();
+        const since = new Date('2301-02-01T00:00:00.000Z');
+        const until = new Date('2301-02-02T00:00:00.000Z');
+        // A Lane-A run (real source) + two Lane-B runs (null source) on the same day.
+        await db.crawlRuns.insert(makeRun(src, '2301-02-01T01:00:00.000Z', 1.0));
+        await db.crawlRuns.insert(
+          makeRun(null, '2301-02-01T02:00:00.000Z', 0.5, { kind: 'discover' }),
+        );
+        await db.crawlRuns.insert(
+          makeRun(null, '2301-02-01T03:00:00.000Z', 0.5, { kind: 'ingest' }),
+        );
+
+        const summary = await db.crawlRuns.costSummary({ since, until });
+        // The two null-source runs collapse into ONE sentinel bucket (€1.00, 2 runs),
+        // identical across adapters; the real source stays its own bucket.
+        expect(summary.per_source).toContainEqual({
+          source_id: SOURCELESS_RUN_BUCKET,
+          cost_eur: 1.0,
+          run_count: 2,
+        });
+        expect(summary.per_source).toContainEqual({
+          source_id: src,
+          cost_eur: 1.0,
+          run_count: 1,
+        });
+        expect(summary.total_eur).toBe(2.0);
+        expect(summary.run_count).toBe(3);
+      });
+    });
+
+    describe('crawlRuns.spentSince', () => {
+      it('sums all run cost at/after since (inclusive), 0 when none', async () => {
+        const db = await makeDb();
+        const src = randomUUID();
+        // A deserted day so the shared DB can't pollute the sum.
+        const dayStart = new Date('2310-08-15T00:00:00.000Z');
+        expect(await db.crawlRuns.spentSince(dayStart)).toBe(0);
+
+        // == since (included), inside, and one BEFORE since (excluded).
+        await db.crawlRuns.insert(makeRun(src, '2310-08-14T23:00:00.000Z', 5.0)); // before
+        await db.crawlRuns.insert(makeRun(src, '2310-08-15T00:00:00.000Z', 1.0)); // == since
+        await db.crawlRuns.insert(
+          makeRun(null, '2310-08-15T10:00:00.000Z', 2.0, { kind: 'discover' }),
+        );
+
+        // Only the two at/after since count; the pre-since 5.00 is excluded. This is
+        // a global sum (no source filter), so scope by using a fresh far-out day.
+        const spent = await db.crawlRuns.spentSince(dayStart);
+        expect(spent).toBe(3.0);
+      });
+    });
+
+    describe('crawlRuns.recentRuns', () => {
+      it('returns runs in the window newest-first, capped at limit, with all fields', async () => {
+        const db = await makeDb();
+        const src = randomUUID();
+        const since = new Date('2320-04-01T00:00:00.000Z');
+        const until = new Date('2320-04-02T00:00:00.000Z');
+        await db.crawlRuns.insert(makeRun(src, '2320-04-01T01:00:00.000Z', 1.0, { candidates: 2 }));
+        await db.crawlRuns.insert(
+          makeRun(null, '2320-04-01T05:00:00.000Z', 0.5, {
+            kind: 'discover',
+            candidates: 3,
+            proposals: 4,
+          }),
+        );
+        await db.crawlRuns.insert(makeRun(src, '2320-04-01T03:00:00.000Z', 0.25));
+        // One outside the window (must be excluded).
+        await db.crawlRuns.insert(makeRun(src, '2320-04-09T00:00:00.000Z', 9.0));
+
+        const runs = await db.crawlRuns.recentRuns({ since, until, limit: 10 });
+        expect(runs).toHaveLength(3);
+        // Newest first by started_at.
+        expect(runs.map((r) => r.started_at)).toEqual([
+          '2320-04-01T05:00:00.000Z',
+          '2320-04-01T03:00:00.000Z',
+          '2320-04-01T01:00:00.000Z',
+        ]);
+        // The Lane-B run round-trips its kind/null-source/proposals through the schema.
+        const discover = runs[0]!;
+        expect(discover.run_kind).toBe('discover');
+        expect(discover.source_id).toBeNull();
+        expect(discover.candidates_produced).toBe(3);
+        expect(discover.proposals_produced).toBe(4);
+
+        // limit caps the result.
+        const limited = await db.crawlRuns.recentRuns({ since, until, limit: 1 });
+        expect(limited).toHaveLength(1);
+        expect(limited[0]!.started_at).toBe('2320-04-01T05:00:00.000Z');
       });
     });
   });

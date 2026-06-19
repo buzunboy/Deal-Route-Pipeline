@@ -73,11 +73,14 @@ suite('Pre-C-2 DB resilience (Postgres)', () => {
       const run = {
         id: '11111111-1111-1111-1111-111111111111',
         source_id: '22222222-2222-2222-2222-222222222222',
+        run_kind: 'crawl' as const,
         status: 'running' as const,
         started_at: '2026-06-19T00:00:00.000Z',
         finished_at: null,
         candidates_produced: 0,
+        proposals_produced: 0,
         cost_eur: 0,
+        stopped_reason: null,
         error: null,
       };
       await container.db.crawlRuns.insert(run);

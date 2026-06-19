@@ -83,7 +83,7 @@ npm run cli -- review approve <deal-id> your-name
 npm run cli -- serve                       # web review page + JSON API on :3000
 
 # 6. cost stats: aggregate logged crawl-run cost (total + per UTC day + per source)
-npm run cli -- stats [--since YYYY-MM-DD] [--until YYYY-MM-DD]
+npm run cli -- stats [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--runs]
 ```
 
 ## CLI
@@ -97,9 +97,11 @@ monitor --source <id> | --due           Re-verify: diff → re-queue; blocked �
 review list | approve <id> <who> | reject <id> <who> | proposals | manual
 review sources | approve-source <id> <who> | reject-source <id> <who> [reason]
                              Promote/reject proposed (pending) sources — the source-promotion loop
-stats [--since YYYY-MM-DD] [--until YYYY-MM-DD]
-                             Aggregate logged crawl-run cost (total + per UTC day + per source).
-                             Half-open window: since inclusive, until exclusive.
+stats [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--runs]
+                             Aggregate logged crawl-run cost (total + per UTC day + per source);
+                             every lane (crawl/discover/ingest) logs a run, so the agentic lane is
+                             covered too. Half-open window: since inclusive, until exclusive.
+                             --runs also lists recent runs (kind/candidates/proposals/cost/stop-reason).
 serve                        Review API + thin test page
 discover <url> [--max-pages N] [--dry-run]
                              Lane B: bounded same-site discovery → candidates + proposed
