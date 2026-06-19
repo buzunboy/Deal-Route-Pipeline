@@ -69,6 +69,7 @@ export class ReviewApi {
     const approve = path.match(/^\/api\/candidates\/([^/]+)\/approve$/);
     if (method === 'POST' && approve) {
       const body = await readJson(req);
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = ApproveBody.safeParse(body);
       if (!parsed.success) return sendError(res, 400, 'approver is required');
       const deal = await this.review.approve(decodeURIComponent(approve[1]!), parsed.data.approver);
@@ -78,6 +79,7 @@ export class ReviewApi {
     const reject = path.match(/^\/api\/candidates\/([^/]+)\/reject$/);
     if (method === 'POST' && reject) {
       const body = await readJson(req);
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = RejectBody.safeParse(body);
       if (!parsed.success) return sendError(res, 400, 'approver is required');
       const deal = await this.review.reject(
@@ -111,6 +113,9 @@ function sendError(res: ServerResponse, status: number, message: string): void {
   sendJson(res, status, { error: message });
 }
 
+/** Sentinel distinguishing a malformed JSON body from an (allowed) empty one. */
+const MALFORMED = Symbol('malformed-json');
+
 async function readJson(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
@@ -119,7 +124,8 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   try {
     return JSON.parse(raw);
   } catch {
-    return {};
+    // Don't swallow: signal malformed input so the handler returns a clear 400.
+    return MALFORMED;
   }
 }
 

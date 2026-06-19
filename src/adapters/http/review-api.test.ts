@@ -114,6 +114,18 @@ describe('ReviewApi (HTTP integration)', () => {
     expect((await db.deals.getById(deal.id))!.status).toBe('rejected');
   });
 
+  it('POST with a malformed JSON body is a clear 400 (no silent swallow)', async () => {
+    const deal = await seedCandidate();
+    const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{ not json',
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/malformed/i);
+    expect((await db.deals.getById(deal.id))!.status).toBe('candidate');
+  });
+
   it('unknown route is 404', async () => {
     const res = await fetch(`${base}/api/nope`);
     expect(res.status).toBe(404);

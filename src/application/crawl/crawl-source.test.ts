@@ -115,15 +115,37 @@ describe('CrawlSourceUseCase', () => {
     expect(await env.db.manualCapture.listOpen(10)).toHaveLength(0);
   });
 
-  it('contains a fetch error: marks the run failed, lowers reliability, never throws', async () => {
+  it('contains a fetch error: failed run, lowered reliability, NO evidence/candidate, never throws', async () => {
     env = build({ fetcher: new FakeFetcher({ outcome: 'error', error: 'boom', text: '' }) });
     const source = makeSource({ reliability_score: 0.5 });
     await env.db.sources.upsert(source);
 
-    // outcome 'error' is not manual-capture; extraction runs on empty text and
-    // yields no deals — but we simulate a hard failure by making the LLM throw.
     const result = await env.uc.execute({ sourceId: source.id });
-    // No throw escaped; a run object is returned.
-    expect(result.run).toBeDefined();
+    expect(result.run.status).toBe('failed');
+    expect(result.candidates).toHaveLength(0);
+    expect(result.evidence).toBeNull();
+    // Evidence-required invariant: an error fetch never persists empty evidence.
+    expect(env.evidence.saved).toHaveLength(0);
+    expect(await env.db.deals.listByStatus('candidate', 10)).toHaveLength(0);
+    // Reliability was lowered by the failure.
+    expect((await env.db.sources.getById(source.id))!.reliability_score).toBeLessThan(0.5);
+  });
+
+  it('flags a low-confidence extraction as in_review (must-review triage signal)', async () => {
+    // A hallucinated grounding quote forces must-review.
+    const deal = makeLlmDeal({
+      grounding: [
+        { field: 'price', quote: 'This deal is free forever, no conditions whatsoever.' },
+        { field: 'eligibility', quote: PAGE_TEXT },
+        { field: 'validity', quote: PAGE_TEXT },
+      ],
+    });
+    env = build({ llmJson: JSON.stringify({ deals: [deal] }) });
+    const source = makeSource();
+    await env.db.sources.upsert(source);
+
+    await env.uc.execute({ sourceId: source.id });
+    expect(await env.db.deals.listByStatus('candidate', 10)).toHaveLength(0);
+    expect(await env.db.deals.listByStatus('in_review', 10)).toHaveLength(1);
   });
 });

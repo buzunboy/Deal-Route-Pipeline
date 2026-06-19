@@ -75,6 +75,14 @@ export class CrawlSourceUseCase {
         return await this.finishRun(run, source, [], null, true, input.dryRun ?? false);
       }
 
+      // Only an OK fetch yields trustworthy evidence. A non-OK outcome that wasn't
+      // routed to manual capture (i.e. `error`) is a contained failure: we never
+      // capture empty/fake evidence or extract from empty text (evidence-required
+      // invariant). Throw into the catch → run marked failed, reliability lowered.
+      if (fetched.outcome !== 'ok') {
+        throw new Error(`fetch outcome "${fetched.outcome}"${fetched.error ? `: ${fetched.error}` : ''}`);
+      }
+
       const evidence = await this.captureEvidence(fetched, input.dryRun ?? false);
       const extraction = await this.extract.execute({
         pageText: fetched.text,
@@ -191,13 +199,17 @@ export class CrawlSourceUseCase {
   }
 
   private toDealRecord(candidate: ExtractedCandidate, evidence: Evidence): DealRecord {
+    // Low-confidence / rule-failing extractions enter as `in_review` so the queue
+    // surfaces a triage signal; clean ones enter as `candidate`. Both are
+    // pre-approval states (neither auto-publishes); review handles both.
+    const status = candidate.mustReview ? DealStatus.enum.in_review : DealStatus.enum.candidate;
     return {
       ...candidate.deal,
       id: newId(),
       schema_version: candidate.schemaVersion,
       true_cost_monthly: candidate.trueCostMonthly,
       evidence_id: evidence.id,
-      status: DealStatus.enum.candidate,
+      status,
       verified_by: null,
       verified_at: null,
     };

@@ -1,5 +1,5 @@
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { and, eq, lte, or, isNull, desc } from 'drizzle-orm';
+import { and, eq, ne, lte, or, isNull, desc } from 'drizzle-orm';
 import pg from 'pg';
 import type {
   Database,
@@ -113,13 +113,15 @@ class PgDealRepo implements DealRepository {
     return rows.map(rowToDeal);
   }
   async findByDedupeKey(key: string): Promise<DealRecord | null> {
+    // Push the active-row predicate into SQL so a key with many rejected rows
+    // can't page the active one out of a JS-side filter.
     const rows = await this.db
       .select()
       .from(schema.deals)
-      .where(eq(schema.deals.dedupeKey, key))
-      .limit(50);
-    const active = rows.find((r) => r.status !== 'rejected');
-    return active ? rowToDeal(active) : null;
+      .where(and(eq(schema.deals.dedupeKey, key), ne(schema.deals.status, 'rejected')))
+      .orderBy(desc(schema.deals.confidence))
+      .limit(1);
+    return rows[0] ? rowToDeal(rows[0]) : null;
   }
   async updateStatus(
     id: string,

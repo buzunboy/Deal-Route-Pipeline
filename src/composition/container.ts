@@ -21,6 +21,7 @@ import { OpenAiLlm } from '../adapters/llm/openai-llm.js';
 import { StubLlm } from '../adapters/llm/stub-llm.js';
 import { PlaywrightFetcher } from '../adapters/fetcher/playwright-fetcher.js';
 import { FirecrawlFetcher } from '../adapters/fetcher/firecrawl-fetcher.js';
+import { PoliteFetcher } from '../adapters/fetcher/polite-fetcher.js';
 import { InMemoryDb } from '../adapters/db/in-memory/in-memory-db.js';
 import { PostgresDb } from '../adapters/db/postgres/postgres-db.js';
 import { InMemoryQueue } from '../adapters/queue/in-memory-queue.js';
@@ -97,15 +98,26 @@ export class Container {
   }
 
   private buildFetcher(config: Config): Fetcher {
+    let inner: Fetcher;
     if (config.fetcher.kind === 'firecrawl') {
       if (!config.fetcher.firecrawlApiKey) {
         throw new Error('FETCHER=firecrawl requires FIRECRAWL_API_KEY.');
       }
-      return new FirecrawlFetcher(config.fetcher.firecrawlApiKey, config.fetcher.timeoutMs);
+      inner = new FirecrawlFetcher(config.fetcher.firecrawlApiKey, config.fetcher.timeoutMs);
+    } else {
+      const playwright = new PlaywrightFetcher(config.fetcher.timeoutMs);
+      this.closables.push(playwright);
+      inner = playwright;
     }
-    const fetcher = new PlaywrightFetcher(config.fetcher.timeoutMs);
-    this.closables.push(fetcher);
-    return fetcher;
+    // Wrap with the politeness decorator so robots.txt + per-domain rate limiting
+    // are actually enforced (the config promised them). Behind the Fetcher port,
+    // so the crawl use-case and concrete fetchers are unchanged.
+    return new PoliteFetcher(inner, {
+      respectRobotsTxt: config.crawl.respectRobotsTxt,
+      minIntervalMs: config.crawl.perDomainRateLimitMs,
+      userAgent: config.fetcher.userAgent,
+      logger: this.logger,
+    });
   }
 
   private buildLlm(config: Config): Llm {

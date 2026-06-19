@@ -29,9 +29,17 @@ export class ReviewUseCase {
     private readonly logger: Logger,
   ) {}
 
-  /** List candidates awaiting review, each with its evidence bundle. */
+  /**
+   * List deals awaiting review (both `candidate` and the flagged `in_review`
+   * states), each with its evidence bundle. Flagged ones carry the must-review
+   * signal so a reviewer can triage.
+   */
   async listCandidates(limit = 50): Promise<CandidateView[]> {
-    const deals = await this.db.deals.listByStatus(DealStatus.enum.candidate, limit);
+    const [candidates, inReview] = await Promise.all([
+      this.db.deals.listByStatus(DealStatus.enum.candidate, limit),
+      this.db.deals.listByStatus(DealStatus.enum.in_review, limit),
+    ]);
+    const deals = [...candidates, ...inReview].slice(0, limit);
     return Promise.all(
       deals.map(async (deal) => ({
         deal,
@@ -42,9 +50,7 @@ export class ReviewUseCase {
 
   /** Approve a candidate → published. Requires an approver (no anonymous publish). */
   async approve(dealId: string, approver: string): Promise<DealRecord> {
-    if (approver.trim() === '') {
-      throw new Error('approve requires a non-empty approver identity.');
-    }
+    this.assertApprover(approver, 'approve');
     const deal = await this.requireDeal(dealId);
     this.assertReviewable(deal);
 
@@ -54,15 +60,33 @@ export class ReviewUseCase {
     return { ...deal, status: DealStatus.enum.published, verified_by: approver, verified_at: at };
   }
 
-  /** Reject a candidate → rejected (archived). */
-  async reject(dealId: string, approver: string, _reason?: string): Promise<DealRecord> {
+  /**
+   * Reject a candidate → rejected (archived). Requires an approver (symmetric with
+   * approve — no anonymous state changes). The rejection reason is recorded in the
+   * record's `attributes` (an open JSONB area) so the decision is auditable
+   * without inventing a column.
+   */
+  async reject(dealId: string, approver: string, reason?: string): Promise<DealRecord> {
+    this.assertApprover(approver, 'reject');
     const deal = await this.requireDeal(dealId);
     this.assertReviewable(deal);
 
     const at = this.clock.nowIso();
+    if (reason && reason.trim() !== '') {
+      await this.db.deals.update({
+        ...deal,
+        attributes: { ...deal.attributes, rejection_reason: reason },
+      });
+    }
     await this.db.deals.updateStatus(dealId, DealStatus.enum.rejected, approver, at);
-    this.logger.info('deal rejected → archived', { dealId, approver });
+    this.logger.info('deal rejected → archived', { dealId, approver, reason });
     return { ...deal, status: DealStatus.enum.rejected, verified_by: approver, verified_at: at };
+  }
+
+  private assertApprover(approver: string, action: string): void {
+    if (approver.trim() === '') {
+      throw new Error(`${action} requires a non-empty approver identity.`);
+    }
   }
 
   async listFieldProposals(limit = 50): Promise<FieldProposalRecord[]> {
