@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
-import { type Source, type CrawlRun, type Evidence, type Vocabulary } from '../../domain/index.js';
+import {
+  SourceStatus,
+  type Source,
+  type CrawlRun,
+  type Evidence,
+  type Vocabulary,
+} from '../../domain/index.js';
 import type {
   Fetcher,
   EvidenceStore,
@@ -60,6 +66,26 @@ export class CrawlSourceUseCase {
     const source = await this.db.sources.getById(input.sourceId);
     if (source === null) {
       throw new Error(`Source not found: ${input.sourceId}`);
+    }
+
+    // A source that hasn't been human-approved (proposed) or was explicitly
+    // rejected must never be crawled — even via an explicit `crawl --source <id>`.
+    // The only path to crawling such a domain is the source-promotion approval.
+    // (The `--due`/`--subscription` selectors already filter to `active`.)
+    if (
+      source.status === SourceStatus.enum.pending_approval ||
+      source.status === SourceStatus.enum.rejected
+    ) {
+      this.logger.warn('crawl: refusing a non-active source (needs approval first)', {
+        sourceId: source.id,
+        status: source.status,
+      });
+      const run = this.startRun(source);
+      run.status = 'skipped';
+      run.finished_at = this.clock.nowIso();
+      run.error = `source status is "${source.status}" — not crawlable until approved`;
+      if (!input.dryRun) await this.db.crawlRuns.insert(run);
+      return { run, candidates: [], evidence: null, routedToManualCapture: false };
     }
 
     const run = this.startRun(source);

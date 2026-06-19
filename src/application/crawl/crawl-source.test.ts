@@ -82,6 +82,21 @@ describe('CrawlSourceUseCase', () => {
     expect(await env.db.deals.listByStatus('candidate', 10)).toHaveLength(0);
   });
 
+  it('refuses to crawl a non-active source (pending_approval / rejected) — never auto-bypasses the human gate', async () => {
+    for (const status of ['pending_approval', 'rejected'] as const) {
+      env = build();
+      const src = makeSource({ status });
+      await env.db.sources.upsert(src);
+      const result = await env.uc.execute({ sourceId: src.id });
+      expect(result.run.status).toBe('skipped');
+      expect(result.candidates).toHaveLength(0);
+      expect(result.evidence).toBeNull();
+      // No evidence captured, no candidate written for an unapproved/rejected source.
+      expect(env.evidence.saved).toHaveLength(0);
+      expect(await env.db.deals.listByStatus('candidate', 10)).toHaveLength(0);
+    }
+  });
+
   it('dedupes: a second crawl of identical content does not double-insert', async () => {
     await env.uc.execute({ sourceId });
     await env.uc.execute({ sourceId });

@@ -16,8 +16,10 @@ export const SourceStatus = z.enum([
   'active',
   /** Tier-4 domain awaiting human approval before it joins the deterministic crawl. */
   'pending_approval',
-  /** Repeated failures or manual disable. */
+  /** Repeated failures or manual disable (may be re-activated). */
   'disabled',
+  /** A reviewer explicitly rejected this proposed source — never crawled, never re-proposed. */
+  'rejected',
 ]);
 export type SourceStatus = z.infer<typeof SourceStatus>;
 

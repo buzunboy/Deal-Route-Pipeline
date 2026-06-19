@@ -5,6 +5,7 @@ import {
   DiscoverSiteUseCase,
   IngestCommunityUseCase,
   ReviewUseCase,
+  SourceReviewUseCase,
   MonitorSourceUseCase,
   SystemClock,
   type Fetcher,
@@ -70,6 +71,7 @@ export class Container {
   readonly discoverSite: DiscoverSiteUseCase;
   readonly ingestCommunity: IngestCommunityUseCase;
   readonly review: ReviewUseCase;
+  readonly sourceReview: SourceReviewUseCase;
   readonly monitor: MonitorSourceUseCase;
 
   /** Adapters needing teardown (browser, pools). Closed by `shutdown()`. */
@@ -131,6 +133,7 @@ export class Container {
       config.fetcher.timeoutMs,
     );
     this.review = new ReviewUseCase(this.db, this.clock, this.logger);
+    this.sourceReview = new SourceReviewUseCase(this.db, this.clock, this.logger);
     this.monitor = new MonitorSourceUseCase(
       this.fetcher,
       this.db,

@@ -1,9 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import type { ReviewUseCase } from '../../application/index.js';
+import type { ReviewUseCase, SourceReviewUseCase } from '../../application/index.js';
 import type { Logger } from '../../application/ports/index.js';
-import { DealNotFoundError, NotReviewableError, MissingApproverError } from '../../domain/index.js';
+import {
+  DealNotFoundError,
+  NotReviewableError,
+  MissingApproverError,
+  SourceNotFoundError,
+  SourceNotReviewableError,
+} from '../../domain/index.js';
 
 /** Max accepted request-body size. Approve/reject bodies are a few hundred bytes. */
 const MAX_BODY_BYTES = 64 * 1024;
@@ -35,6 +41,10 @@ export interface ReviewApiOptions {
  *   GET  /api/candidates/:id/reviews      → [ReviewRecord]   (audit history)
  *   GET  /api/field-proposals            → [FieldProposalRecord]
  *   GET  /api/manual-capture-tasks       → [ManualCaptureTask]
+ *   GET  /api/sources/pending            → [Source]   (proposed sources)
+ *   POST /api/sources/:id/approve         { approver }            → { source }
+ *   POST /api/sources/:id/reject          { approver, reason? }   → { source }
+ *   GET  /api/sources/:id/reviews        → [SourceReviewRecord]  (audit history)
  */
 export class ReviewApi {
   private server: Server | null = null;
@@ -43,6 +53,7 @@ export class ReviewApi {
 
   constructor(
     private readonly review: ReviewUseCase,
+    private readonly sourceReview: SourceReviewUseCase,
     private readonly logger: Logger,
     options: ReviewApiOptions = {},
   ) {
@@ -133,6 +144,52 @@ export class ReviewApi {
       });
     }
 
+    // ── Source-promotion loop ────────────────────────────────────────────────
+    if (method === 'GET' && path === '/api/sources/pending') {
+      return sendJson(res, 200, await this.sourceReview.listPending());
+    }
+    const sourceReviews = path.match(/^\/api\/sources\/([^/]+)\/reviews$/);
+    if (method === 'GET' && sourceReviews) {
+      return sendJson(
+        res,
+        200,
+        await this.sourceReview.listReviews(decodeURIComponent(sourceReviews[1]!)),
+      );
+    }
+    const approveSource = path.match(/^\/api\/sources\/([^/]+)\/approve$/);
+    if (method === 'POST' && approveSource) {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = ApproveBody.safeParse(body);
+      if (!parsed.success) return sendError(res, 400, 'approver is required');
+      return this.mapErrors(res, async () => {
+        const source = await this.sourceReview.approveSource(
+          decodeURIComponent(approveSource[1]!),
+          parsed.data.approver,
+        );
+        sendJson(res, 200, { source });
+      });
+    }
+    const rejectSource = path.match(/^\/api\/sources\/([^/]+)\/reject$/);
+    if (method === 'POST' && rejectSource) {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = RejectBody.safeParse(body);
+      if (!parsed.success) return sendError(res, 400, 'approver is required');
+      return this.mapErrors(res, async () => {
+        const source = await this.sourceReview.rejectSource(
+          decodeURIComponent(rejectSource[1]!),
+          parsed.data.approver,
+          parsed.data.reason,
+        );
+        sendJson(res, 200, { source });
+      });
+    }
+
     sendError(res, 404, `Not found: ${method} ${path}`);
   }
 
@@ -157,6 +214,10 @@ export class ReviewApi {
       if (err instanceof DealNotFoundError) return sendError(res, 404, 'deal not found');
       if (err instanceof NotReviewableError) {
         return sendError(res, 409, `deal is not reviewable (status: ${err.status})`);
+      }
+      if (err instanceof SourceNotFoundError) return sendError(res, 404, 'source not found');
+      if (err instanceof SourceNotReviewableError) {
+        return sendError(res, 409, `source is not awaiting approval (status: ${err.status})`);
       }
       if (err instanceof MissingApproverError) return sendError(res, 400, 'approver is required');
       throw err;

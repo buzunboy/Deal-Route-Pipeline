@@ -6,6 +6,7 @@ export * from './crawl/crawl-source.js';
 export * from './crawl/candidate-sink.js';
 export * from './crawl/source-policy.js';
 export * from './review/review.js';
+export * from './review/source-review.js';
 export * from './monitor/monitor-source.js';
 export * from './discover/noop-browser-agent.js';
 export * from './discover/discover-site.js';

@@ -10,7 +10,7 @@ import { REVIEW_TEST_PAGE } from '../../http/test-page.js';
  */
 export async function serve(config: Config): Promise<void> {
   const container = new Container(config, { usePersistence: true });
-  const api = new ReviewApi(container.review, container.logger, {
+  const api = new ReviewApi(container.review, container.sourceReview, container.logger, {
     staticPageHtml: REVIEW_TEST_PAGE,
     authToken: config.reviewApi.authToken,
   });

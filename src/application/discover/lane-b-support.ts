@@ -79,7 +79,8 @@ export class LaneBSupport {
   /** The registrable domains already in the registry (any status) — never re-propose these. */
   async knownDomains(): Promise<Set<string>> {
     const known = new Set<string>();
-    for (const status of ['active', 'pending_approval', 'disabled'] as const) {
+    // Includes `rejected` so a domain a human declined is never re-proposed.
+    for (const status of ['active', 'pending_approval', 'disabled', 'rejected'] as const) {
       for (const s of await this.db.sources.listByStatus(status)) {
         const d = registrableDomain(s.url);
         if (d !== null) known.add(d);

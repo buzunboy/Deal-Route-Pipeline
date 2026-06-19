@@ -8,6 +8,7 @@ import type {
   Evidence,
   DealStatus,
   ReviewRecord,
+  SourceReviewRecord,
   SubscriptionCatalogEntry,
 } from '../../domain/index.js';
 
@@ -90,6 +91,13 @@ export interface ReviewRepository {
   listForDeal(dealId: string, limit: number): Promise<ReviewRecord[]>;
 }
 
+export interface SourceReviewRepository {
+  /** Append a source-promotion decision (immutable audit log). */
+  insert(review: SourceReviewRecord): Promise<void>;
+  /** Decision history for one source, newest first. */
+  listForSource(sourceId: string, limit: number): Promise<SourceReviewRecord[]>;
+}
+
 export interface SubscriptionCatalogRepository {
   upsert(entry: SubscriptionCatalogEntry): Promise<void>;
   /** All catalog services (drives Tier-3 community keyword matching). */
@@ -106,5 +114,6 @@ export interface Database {
   fieldProposals: FieldProposalRepository;
   changes: ChangeRepository;
   reviews: ReviewRepository;
+  sourceReviews: SourceReviewRepository;
   catalog: SubscriptionCatalogRepository;
 }

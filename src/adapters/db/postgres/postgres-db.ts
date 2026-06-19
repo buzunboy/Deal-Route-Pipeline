@@ -11,11 +11,13 @@ import type {
   FieldProposalRepository,
   ChangeRepository,
   ReviewRepository,
+  SourceReviewRepository,
   SubscriptionCatalogRepository,
 } from '../../../application/ports/index.js';
 import {
   ChangeSchema,
   ReviewRecordSchema,
+  SourceReviewRecordSchema,
   SubscriptionCatalogEntrySchema,
 } from '../../../domain/index.js';
 import type {
@@ -28,6 +30,7 @@ import type {
   Change,
   DealStatus,
   ReviewRecord,
+  SourceReviewRecord,
   SubscriptionCatalogEntry,
 } from '../../../domain/index.js';
 import * as schema from './schema.js';
@@ -51,6 +54,7 @@ export class PostgresDb implements Database {
   readonly fieldProposals: FieldProposalRepository;
   readonly changes: ChangeRepository;
   readonly reviews: ReviewRepository;
+  readonly sourceReviews: SourceReviewRepository;
   readonly catalog: SubscriptionCatalogRepository;
 
   private constructor(
@@ -65,6 +69,7 @@ export class PostgresDb implements Database {
     this.fieldProposals = new PgFieldProposalRepo(db);
     this.changes = new PgChangeRepo(db);
     this.reviews = new PgReviewRepo(db);
+    this.sourceReviews = new PgSourceReviewRepo(db);
     this.catalog = new PgCatalogRepo(db);
   }
 
@@ -364,6 +369,38 @@ class PgReviewRepo implements ReviewRepository {
       ReviewRecordSchema.parse({
         id: r.id,
         deal_id: r.dealId,
+        action: r.action,
+        approver: r.approver,
+        reason: r.reason,
+        decided_at: r.decidedAt,
+      }),
+    );
+  }
+}
+
+class PgSourceReviewRepo implements SourceReviewRepository {
+  constructor(private readonly db: Db) {}
+  async insert(r: SourceReviewRecord): Promise<void> {
+    await this.db.insert(schema.sourceReviews).values({
+      id: r.id,
+      sourceId: r.source_id,
+      action: r.action,
+      approver: r.approver,
+      reason: r.reason,
+      decidedAt: r.decided_at,
+    });
+  }
+  async listForSource(sourceId: string, limit: number): Promise<SourceReviewRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.sourceReviews)
+      .where(eq(schema.sourceReviews.sourceId, sourceId))
+      .orderBy(desc(schema.sourceReviews.decidedAt), desc(schema.sourceReviews.id))
+      .limit(limit);
+    return rows.map((r) =>
+      SourceReviewRecordSchema.parse({
+        id: r.id,
+        source_id: r.sourceId,
         action: r.action,
         approver: r.approver,
         reason: r.reason,

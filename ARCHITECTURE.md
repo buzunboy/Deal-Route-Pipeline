@@ -59,8 +59,10 @@ contract runs only when `DATABASE_URL_TEST` is set.
   **bounded same-site crawl** — fetch the start page, follow links **within the start domain
   and already-approved domains**, extract candidates from each via the same path as Lane A.
   Links to **novel domains** are NOT followed; they are recorded as `pending_approval`,
-  tier-4 `discovered` sources that a human approves before any crawl (the source-promotion
-  loop / new-domain guardrail). Runs are CAPPED by pages **and** € **and** wall-clock and stop
+  tier-4 `discovered` sources that a human approves before any crawl (the **source-promotion
+  loop**: `SourceReviewUseCase` + `review sources|approve-source|reject-source` + the
+  `/api/sources/*` endpoints; approve→`active`, reject→`rejected` which is never re-proposed;
+  decisions logged to `source_reviews`). Runs are CAPPED by pages **and** € **and** wall-clock and stop
   at the first cap; login/captcha/anti-bot pages route to manual capture; the frontier is
   ordered by a domain-agnostic "likely-offer-page" score so a small budget reaches deal pages
   before navigation chrome. A `NoopBrowserAgent` still backs the `BrowserAgent` port for the

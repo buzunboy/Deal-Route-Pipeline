@@ -39,6 +39,7 @@ export const REVIEW_TEST_PAGE = `<!doctype html>
 <main>
   <div class="tabs">
     <button data-tab="candidates" class="active">Candidates</button>
+    <button data-tab="sources">Pending sources</button>
     <button data-tab="proposals">Field proposals</button>
     <button data-tab="manual">Manual capture</button>
   </div>
@@ -95,14 +96,40 @@ async function renderManual() {
     : '<p class="empty">No open manual-capture tasks.</p>';
 }
 
-async function decide(id, action) {
+async function renderSources() {
+  const items = await api('/api/sources/pending');
+  if (!items.length) { content.innerHTML = '<p class="empty">No proposed sources awaiting approval.</p>'; return; }
+  content.innerHTML = items.map(s => \`
+    <div class="card">
+      <div class="row">
+        <div><strong>\${esc(s.url)}</strong> <span class="pill">T\${s.tier} \${esc(s.type)}</span></div>
+      </div>
+      <div class="muted">proposed source — approving makes it crawlable; rejecting blocks it from being re-proposed</div>
+      <div style="margin-top:10px; display:flex; gap:8px;">
+        <button class="action approve" onclick="decideSource('\${s.id}','approve')">Approve → active</button>
+        <button class="action reject" onclick="decideSource('\${s.id}','reject')">Reject</button>
+      </div>
+    </div>\`).join('');
+}
+
+function ensureApprover() {
   if (!approver) { approver = prompt('Your reviewer identity (recorded with the decision):') || ''; if (approver) localStorage.setItem('approver', approver); }
-  if (!approver) return;
+  return approver;
+}
+
+async function decide(id, action) {
+  if (!ensureApprover()) return;
   try { await api('/api/candidates/'+id+'/'+action, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ approver }) }); renderCandidates(); }
   catch (e) { alert(action+' failed: '+e.message); }
 }
 
-const renderers = { candidates: renderCandidates, proposals: renderProposals, manual: renderManual };
+async function decideSource(id, action) {
+  if (!ensureApprover()) return;
+  try { await api('/api/sources/'+id+'/'+action, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ approver }) }); renderSources(); }
+  catch (e) { alert(action+' failed: '+e.message); }
+}
+
+const renderers = { candidates: renderCandidates, sources: renderSources, proposals: renderProposals, manual: renderManual };
 document.querySelectorAll('.tabs button').forEach(btn => btn.addEventListener('click', () => {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');

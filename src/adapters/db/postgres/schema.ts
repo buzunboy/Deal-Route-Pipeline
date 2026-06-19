@@ -174,3 +174,17 @@ export const reviews = pgTable(
   // The sole access path is the deal-scoped, time-ordered history (listForDeal).
   (t) => ({ dealIdx: index('reviews_deal_idx').on(t.dealId, t.decidedAt) }),
 );
+
+// Append-only audit log of source-promotion decisions (promote/reject a proposed source).
+export const sourceReviews = pgTable(
+  'source_reviews',
+  {
+    id: uuid('id').primaryKey(),
+    sourceId: uuid('source_id').notNull(),
+    action: text('action').notNull(),
+    approver: text('approver').notNull(),
+    reason: text('reason'),
+    decidedAt: timestamp('decided_at', { withTimezone: true, mode: 'string' }).notNull(),
+  },
+  (t) => ({ sourceIdx: index('source_reviews_source_idx').on(t.sourceId, t.decidedAt) }),
+);

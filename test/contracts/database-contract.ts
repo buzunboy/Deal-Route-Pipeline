@@ -236,6 +236,41 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect(history.every((r) => r.deal_id === dealId)).toBe(true);
       expect(history[1]!.reason).toBe('not a bundle');
     });
+
+    it('sourceReviews: insert + listForSource returns newest-first, scoped to the source', async () => {
+      const db = await makeDb();
+      const sourceId = randomUUID();
+      const other = randomUUID();
+      await db.sourceReviews.insert({
+        id: randomUUID(),
+        source_id: sourceId,
+        action: 'reject',
+        approver: 's1',
+        reason: 'parked',
+        decided_at: '2026-06-17T00:00:00.000Z',
+      });
+      await db.sourceReviews.insert({
+        id: randomUUID(),
+        source_id: sourceId,
+        action: 'approve',
+        approver: 's2',
+        reason: null,
+        decided_at: '2026-06-19T00:00:00.000Z',
+      });
+      await db.sourceReviews.insert({
+        id: randomUUID(),
+        source_id: other,
+        action: 'approve',
+        approver: 's3',
+        reason: null,
+        decided_at: '2026-06-20T00:00:00.000Z',
+      });
+
+      const history = await db.sourceReviews.listForSource(sourceId, 10);
+      expect(history.map((r) => r.action)).toEqual(['approve', 'reject']);
+      expect(history.every((r) => r.source_id === sourceId)).toBe(true);
+      expect(history[1]!.reason).toBe('parked');
+    });
   });
 }
 

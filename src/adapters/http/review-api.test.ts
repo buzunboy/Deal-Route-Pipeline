@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { AddressInfo } from 'node:net';
 import { ReviewApi } from './review-api.js';
-import { ReviewUseCase } from '../../application/index.js';
+import { ReviewUseCase, SourceReviewUseCase } from '../../application/index.js';
 import { DealStatus, type DealRecord } from '../../domain/index.js';
+import { makeSource } from '../../../test/factories/source.js';
 import { InMemoryDb } from '../db/in-memory/in-memory-db.js';
 import { LocalFsEvidenceStore } from '../evidence-store/local-fs-evidence-store.js';
 import { ConsoleLogger } from '../logger/console-logger.js';
@@ -47,7 +48,8 @@ describe('ReviewApi (HTTP integration)', () => {
   beforeEach(async () => {
     db = new InMemoryDb();
     const review = new ReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    api = new ReviewApi(review, new ConsoleLogger('error'), {
+    const sourceReview = new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    api = new ReviewApi(review, sourceReview, new ConsoleLogger('error'), {
       staticPageHtml: '<html>page</html>',
     });
     await api.listen(0);
@@ -166,6 +168,59 @@ describe('ReviewApi (HTTP integration)', () => {
     expect(res.status).toBe(413);
     expect((await db.deals.getById(deal.id))!.status).toBe('candidate');
   });
+
+  it('GET /api/sources/pending lists pending sources; approve → active', async () => {
+    const src = makeSource({ status: 'pending_approval', type: 'discovered', tier: 4 });
+    await db.sources.upsert(src);
+
+    const pending = (await (await fetch(`${base}/api/sources/pending`)).json()) as { id: string }[];
+    expect(pending.map((s) => s.id)).toContain(src.id);
+
+    const res = await fetch(`${base}/api/sources/${src.id}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'curator@dealroute' }),
+    });
+    expect(res.status).toBe(200);
+    expect((await db.sources.getById(src.id))!.status).toBe('active');
+    // …and an audit row was written.
+    const history = (await (await fetch(`${base}/api/sources/${src.id}/reviews`)).json()) as {
+      action: string;
+    }[];
+    expect(history[0]!.action).toBe('approve');
+  });
+
+  it('rejecting a source → rejected (not re-crawled / re-proposed)', async () => {
+    const src = makeSource({ status: 'pending_approval', type: 'discovered', tier: 4 });
+    await db.sources.upsert(src);
+    const res = await fetch(`${base}/api/sources/${src.id}/reject`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'curator', reason: 'irrelevant domain' }),
+    });
+    expect(res.status).toBe(200);
+    expect((await db.sources.getById(src.id))!.status).toBe('rejected');
+  });
+
+  it('approving a non-pending source is a 409 (conflict)', async () => {
+    const src = makeSource({ status: 'active' });
+    await db.sources.upsert(src);
+    const res = await fetch(`${base}/api/sources/${src.id}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'curator' }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it('approving a non-existent source is a 404', async () => {
+    const res = await fetch(`${base}/api/sources/${randomUUID()}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'curator' }),
+    });
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('ReviewApi — auth (bearer token gating state changes)', () => {
@@ -200,7 +255,10 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     dealId = deal.id;
 
     const review = new ReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    api = new ReviewApi(review, new ConsoleLogger('error'), { authToken: 'secret-token' });
+    const sourceReview = new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    api = new ReviewApi(review, sourceReview, new ConsoleLogger('error'), {
+      authToken: 'secret-token',
+    });
     await api.listen(0);
     // @ts-expect-error reach into the underlying server for the assigned port
     base = `http://localhost:${(api['server'].address() as AddressInfo).port}`;

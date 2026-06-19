@@ -10,6 +10,7 @@ import {
   type Change,
   type DealStatus,
   type ReviewRecord,
+  type SourceReviewRecord,
   type SubscriptionCatalogEntry,
 } from '../../../domain/index.js';
 import type {
@@ -22,6 +23,7 @@ import type {
   FieldProposalRepository,
   ChangeRepository,
   ReviewRepository,
+  SourceReviewRepository,
   SubscriptionCatalogRepository,
 } from '../../../application/ports/index.js';
 
@@ -42,6 +44,7 @@ export class InMemoryDb implements Database {
   fieldProposals: FieldProposalRepository = new InMemoryFieldProposalRepo();
   changes: ChangeRepository = new InMemoryChangeRepo();
   reviews: ReviewRepository = new InMemoryReviewRepo();
+  sourceReviews: SourceReviewRepository = new InMemorySourceReviewRepo();
   catalog: SubscriptionCatalogRepository = new InMemoryCatalogRepo();
 }
 
@@ -226,6 +229,21 @@ class InMemoryReviewRepo implements ReviewRepository {
     // Newest first; insertion sequence breaks equal-timestamp ties (fixed clock).
     return this.reviews
       .filter((e) => e.review.deal_id === dealId)
+      .sort((a, b) => b.review.decided_at.localeCompare(a.review.decided_at) || b.seq - a.seq)
+      .slice(0, limit)
+      .map((e) => ({ ...e.review }));
+  }
+}
+
+class InMemorySourceReviewRepo implements SourceReviewRepository {
+  private reviews: { review: SourceReviewRecord; seq: number }[] = [];
+  private seq = 0;
+  async insert(r: SourceReviewRecord): Promise<void> {
+    this.reviews.push({ review: { ...r }, seq: this.seq++ });
+  }
+  async listForSource(sourceId: string, limit: number): Promise<SourceReviewRecord[]> {
+    return this.reviews
+      .filter((e) => e.review.source_id === sourceId)
       .sort((a, b) => b.review.decided_at.localeCompare(a.review.decided_at) || b.seq - a.seq)
       .slice(0, limit)
       .map((e) => ({ ...e.review }));

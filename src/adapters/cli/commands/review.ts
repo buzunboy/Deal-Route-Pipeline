@@ -2,16 +2,20 @@ import { Container } from '../../../composition/container.js';
 import type { Config } from '../../../config/index.js';
 
 /**
- * `review list` / `review approve <id> <approver>` / `review reject <id> <approver>` /
- * `review proposals` / `review manual` — the CLI half of the human-in-the-loop.
- * The HTTP review API exposes the same actions for the future admin panel.
+ * `review list|approve|reject|proposals|manual` (deal review) plus
+ * `review sources|approve-source|reject-source` (the source-promotion loop) —
+ * the CLI half of the human-in-the-loop. The HTTP review API exposes the same
+ * actions for the future admin panel.
  */
 export type ReviewArgs =
   | { action: 'list' }
   | { action: 'approve'; dealId: string; approver: string }
   | { action: 'reject'; dealId: string; approver: string }
   | { action: 'proposals' }
-  | { action: 'manual' };
+  | { action: 'manual' }
+  | { action: 'sources' }
+  | { action: 'approve-source'; sourceId: string; approver: string }
+  | { action: 'reject-source'; sourceId: string; approver: string; reason?: string };
 
 export async function review(config: Config, args: ReviewArgs): Promise<void> {
   const container = new Container(config, { usePersistence: true });
@@ -51,6 +55,28 @@ export async function review(config: Config, args: ReviewArgs): Promise<void> {
         for (const t of tasks) {
           console.log(`  ${t.id}  ${t.reason}  ${t.source_url}`);
         }
+        break;
+      }
+      case 'sources': {
+        const pending = await container.sourceReview.listPending();
+        console.log(`${pending.length} source(s) awaiting approval:\n`);
+        for (const s of pending) {
+          console.log(`  ${s.id}  [T${s.tier} ${s.type}]  ${s.url}`);
+        }
+        break;
+      }
+      case 'approve-source': {
+        const updated = await container.sourceReview.approveSource(args.sourceId, args.approver);
+        console.log(`Source approved → active: ${updated.id} (${updated.url})`);
+        break;
+      }
+      case 'reject-source': {
+        const updated = await container.sourceReview.rejectSource(
+          args.sourceId,
+          args.approver,
+          args.reason,
+        );
+        console.log(`Source rejected: ${updated.id} (${updated.url})`);
         break;
       }
     }

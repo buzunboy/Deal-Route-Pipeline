@@ -28,6 +28,9 @@ Commands:
   review reject <id> <approver>       Reject a candidate → archived
   review proposals                    List open field proposals
   review manual                       List open manual-capture tasks
+  review sources                      List proposed (pending) sources awaiting approval
+  review approve-source <id> <who>    Promote a proposed source → active (crawlable)
+  review reject-source <id> <who>     Reject a proposed source (never crawled / re-proposed)
   serve                               Start the review API + thin test page (durable admin contract)
   discover <url> [--max-pages N]      Lane B: bounded same-site discovery → candidates + proposed
           [--dry-run]                 novel domains (capped by pages/€/time; nothing auto-publishes)
@@ -134,8 +137,29 @@ async function runReview(config: Parameters<typeof review>[0], rest: string[]): 
       if (!dealId || !approver) return fail(`review ${action} requires <id> <approver>.`);
       return review(config, { action, dealId, approver });
     }
+    case 'sources':
+      return review(config, { action: 'sources' });
+    case 'approve-source': {
+      const sourceId = rest[1];
+      const approver = rest[2];
+      if (!sourceId || !approver) return fail('review approve-source requires <id> <approver>.');
+      return review(config, { action: 'approve-source', sourceId, approver });
+    }
+    case 'reject-source': {
+      const sourceId = rest[1];
+      const approver = rest[2];
+      if (!sourceId || !approver) return fail('review reject-source requires <id> <approver>.');
+      return review(config, {
+        action: 'reject-source',
+        sourceId,
+        approver,
+        reason: rest.slice(3).join(' ') || undefined,
+      });
+    }
     default:
-      return fail('review requires: list | approve | reject | proposals | manual');
+      return fail(
+        'review requires: list | approve | reject | proposals | manual | sources | approve-source | reject-source',
+      );
   }
 }
 

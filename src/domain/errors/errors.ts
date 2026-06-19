@@ -87,3 +87,27 @@ export class MissingApproverError extends DomainError {
     super(`${action} requires a non-empty approver identity.`);
   }
 }
+
+/** The requested source does not exist. Maps to HTTP 404. */
+export class SourceNotFoundError extends DomainError {
+  readonly code = 'SOURCE_NOT_FOUND';
+
+  constructor(readonly sourceId: string) {
+    super(`Source not found: ${sourceId}`);
+  }
+}
+
+/**
+ * A source-promotion action was attempted on a source that isn't awaiting review
+ * (not `pending_approval`). Maps to HTTP 409 (conflict).
+ */
+export class SourceNotReviewableError extends DomainError {
+  readonly code = 'SOURCE_NOT_REVIEWABLE';
+
+  constructor(
+    readonly sourceId: string,
+    readonly status: string,
+  ) {
+    super(`Source ${sourceId} is not awaiting approval (status: ${status}).`);
+  }
+}

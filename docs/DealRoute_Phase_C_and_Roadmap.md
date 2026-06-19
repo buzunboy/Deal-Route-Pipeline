@@ -27,6 +27,10 @@ and what comes after._
 - **Review** (CLI + HTTP API, the durable admin contract): approve→published /
   reject→rejected, append-only `reviews` audit log, field-proposals + manual-
   capture queues.
+- **Source-promotion loop** (Pre-C-1): list/approve/reject proposed
+  `pending_approval` sources (CLI + API + test-page tab), approve→`active`,
+  reject→`rejected`, append-only `source_reviews` audit log. Closes the
+  discovery/ingest proposal loop.
 - **Monitoring** (`monitor --source|--due`): diff price/terms via evidence hash →
   re-queue on change; debounced auto-expiry on disappearance; blocked→manual
   capture; cadence advanced each pass.
@@ -49,12 +53,17 @@ into the composition root (removed as a required-dead dependency in `3e8aecb`).
 Build in this order. **Phase C should NOT be first** — a few prerequisites make
 it safe and actually useful, and some are trust-critical regardless of Phase C.
 
-1. **Pre-C-1 — Source-promotion loop (REQUIRED before C; arguably a Phase-B gap).**
-   Today discovery/ingest create `pending_approval` tier-4 sources but **nothing
-   can promote them to `active`**, so the loop is a dead end and Phase C would
-   pile up un-actionable proposals. Add review-of-sources: list/approve/reject
-   pending sources (CLI `review sources` + API + the test page), promotion sets
-   `status='active'` with a cadence. Small, high value, unblocks both B and C.
+1. **Pre-C-1 — Source-promotion loop. ✅ DONE.** Discovery/ingest propose
+   `pending_approval` tier-4 sources, and a human can now promote/reject them:
+   `SourceReviewUseCase` + CLI (`review sources` / `review approve-source <id>
+   <who>` / `review reject-source <id> <who> [reason]`) + HTTP API
+   (`GET /api/sources/pending`, `POST /api/sources/:id/approve|reject`,
+   `GET /api/sources/:id/reviews`) + a "Pending sources" tab on the test page.
+   Approve → `status='active'`, tier kept, `next_due=null` (crawled on the next
+   `crawl --due`). Reject → new `status='rejected'` (never crawled, never
+   re-proposed — `LaneBSupport.knownDomains()` includes it). Decisions are written
+   to an append-only `source_reviews` audit log (log-before-act). Unit + contract +
+   integration tested. (Migration `0005`.)
 2. **Pre-C-2 — Persistence/ops hardening for unattended running.** Phase C (and
    the cron deployment) run autonomously, so close the remaining
    resilience/scale gaps: DB pool tuning + statement_timeout + `pool.on('error')`
@@ -71,9 +80,8 @@ it safe and actually useful, and some are trust-critical regardless of Phase C.
 4. **Phase C — agentic broad discovery (Tier 4).** See §4.
 5. **Post-C — product-completeness toward the goal.** See §5.
 
-If you want the _minimum_ to start Phase C: **Pre-C-1 is mandatory** (the loop
-must close). Pre-C-2/3 can overlap with C but should land before C runs on a
-schedule against the open web.
+**Pre-C-1 is now done**, so the loop closes — the next gate is Pre-C-2/3, which can
+overlap with C but should land before C runs on a schedule against the open web.
 
 ---
 

@@ -92,6 +92,8 @@ crawl --source <id> | --subscription <name> | --due [--dry-run]
 monitor --source <id> | --due           Re-verify: diff → re-queue; blocked → manual capture;
                                         gone → auto-expire (after N consecutive failures)
 review list | approve <id> <who> | reject <id> <who> | proposals | manual
+review sources | approve-source <id> <who> | reject-source <id> <who> [reason]
+                             Promote/reject proposed (pending) sources — the source-promotion loop
 serve                        Review API + thin test page
 discover <url> [--max-pages N] [--dry-run]
                              Lane B: bounded same-site discovery → candidates + proposed
@@ -110,6 +112,10 @@ POST /api/candidates/:id/reject         { approver, reason? } → archive
 GET  /api/candidates/:id/reviews        decision audit history (who/what/when/why)
 GET  /api/field-proposals               recurring unknown conditions
 GET  /api/manual-capture-tasks          login-gated / blocked offers
+GET  /api/sources/pending               proposed sources awaiting approval
+POST /api/sources/:id/approve           { approver }          → active (crawlable)
+POST /api/sources/:id/reject            { approver, reason? } → rejected
+GET  /api/sources/:id/reviews           source-promotion audit history
 GET  /api/health
 ```
 
