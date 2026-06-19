@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Local evidence store (dev)
+.evidence/
+evidence-store/
+
+# Test / coverage
+coverage/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+
+# Generated seeds (regenerable from docs)
+seeds.csv
