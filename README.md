@@ -93,7 +93,9 @@ monitor --source <id> | --due           Re-verify: diff → re-queue; blocked �
                                         gone → auto-expire (after N consecutive failures)
 review list | approve <id> <who> | reject <id> <who> | proposals | manual
 serve                        Review API + thin test page
-discover                     (Phase B/C) bounded agentic discovery — stubbed in Phase A
+discover <url> [--max-pages N] [--dry-run]
+                             Lane B: bounded same-site discovery → candidates + proposed
+                             novel domains (capped by pages/€/time; nothing auto-publishes)
 ```
 
 ## Review API (durable contract for the future admin panel)

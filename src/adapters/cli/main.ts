@@ -6,6 +6,7 @@ import { crawl } from './commands/crawl.js';
 import { monitor } from './commands/monitor.js';
 import { review } from './commands/review.js';
 import { serve } from './commands/serve.js';
+import { discover } from './commands/discover.js';
 
 const DEFAULT_SEED_PATH = 'docs/DealRoute_Seed_List_DE.md';
 
@@ -27,7 +28,8 @@ Commands:
   review proposals                    List open field proposals
   review manual                       List open manual-capture tasks
   serve                               Start the review API + thin test page (durable admin contract)
-  discover [query]                    (Phase B/C) bounded agentic discovery — not enabled in Phase A
+  discover <url> [--max-pages N]      Lane B: bounded same-site discovery → candidates + proposed
+          [--dry-run]                 novel domains (capped by pages/€/time; nothing auto-publishes)
   help                                Show this help
 
 Configuration is read from the environment (.env). See .env.example.`;
@@ -81,10 +83,16 @@ async function main(): Promise<void> {
       break;
     }
     case 'discover': {
-      console.log(
-        'discover: the agentic discovery lane (Tiers 3–4) is scaffolded behind the BrowserAgent port ' +
-          'but not enabled in Phase A. It slots in for Phase B/C with bounded caps and human source approval.',
-      );
+      const maxPagesRaw = flag(rest, '--max-pages');
+      const maxPages = maxPagesRaw !== undefined ? Number(maxPagesRaw) : undefined;
+      if (maxPages !== undefined && (!Number.isInteger(maxPages) || maxPages <= 0)) {
+        return fail('--max-pages must be a positive integer.');
+      }
+      await discover(config, {
+        startUrl: rest.find((a) => !a.startsWith('--')),
+        maxPages,
+        dryRun: rest.includes('--dry-run'),
+      });
       break;
     }
     default:

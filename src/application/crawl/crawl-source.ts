@@ -1,12 +1,5 @@
 import { createHash } from 'node:crypto';
-import {
-  DealStatus,
-  type Source,
-  type DealRecord,
-  type CrawlRun,
-  type Evidence,
-  type Vocabulary,
-} from '../../domain/index.js';
+import { type Source, type CrawlRun, type Evidence, type Vocabulary } from '../../domain/index.js';
 import type {
   Fetcher,
   EvidenceStore,
@@ -18,6 +11,7 @@ import type {
 import { ExtractUseCase, type ExtractedCandidate } from '../extract/extract.js';
 import { newId } from '../shared/id.js';
 import { reliabilityAfter, nextDueIso } from './source-policy.js';
+import { CandidateSink } from './candidate-sink.js';
 
 export interface CrawlSourceInput {
   sourceId: string;
@@ -46,6 +40,8 @@ export interface CrawlSourceResult {
  * directly — see the deferred follow-up to route crawl jobs through the queue.)
  */
 export class CrawlSourceUseCase {
+  private readonly sink: CandidateSink;
+
   constructor(
     private readonly fetcher: Fetcher,
     private readonly evidenceStore: EvidenceStore,
@@ -56,7 +52,9 @@ export class CrawlSourceUseCase {
     private readonly vocabulary: Vocabulary,
     private readonly fetchUserAgent: string,
     private readonly fetchTimeoutMs: number,
-  ) {}
+  ) {
+    this.sink = new CandidateSink(db, clock, logger);
+  }
 
   async execute(input: CrawlSourceInput): Promise<CrawlSourceResult> {
     const source = await this.db.sources.getById(input.sourceId);
@@ -75,6 +73,13 @@ export class CrawlSourceUseCase {
 
       const manual = await this.maybeRouteToManualCapture(source, fetched, input.dryRun ?? false);
       if (manual) {
+        return await this.finishRun(run, source, [], null, true, input.dryRun ?? false);
+      }
+
+      // robots.txt told us not to fetch this source: skip without failing the run
+      // or lowering reliability (it's a deliberate decline, not a fetch failure).
+      if (fetched.outcome === 'robots_disallowed') {
+        this.logger.info('crawl: skipped by robots.txt', { url: source.url });
         return await this.finishRun(run, source, [], null, true, input.dryRun ?? false);
       }
 
@@ -98,7 +103,7 @@ export class CrawlSourceUseCase {
       run.cost_eur = extraction.costEur;
 
       if (!input.dryRun) {
-        await this.persistCandidates(extraction.candidates, evidence);
+        await this.sink.persist(extraction.candidates, evidence);
       }
 
       return await this.finishRun(
@@ -170,82 +175,6 @@ export class CrawlSourceUseCase {
     const evidence = await this.evidenceStore.save(capture);
     if (!dryRun) await this.db.evidence.insert(evidence);
     return evidence;
-  }
-
-  private async persistCandidates(
-    candidates: ExtractedCandidate[],
-    evidence: Evidence,
-  ): Promise<void> {
-    for (const candidate of candidates) {
-      const existing = await this.db.deals.findByDedupeKey(candidate.dedupeKey);
-
-      if (existing === null) {
-        // New route: persist the candidate.
-        await this.db.deals.insert(this.toDealRecord(candidate, evidence));
-      } else if (await this.contentDiffers(existing, evidence)) {
-        // Same route (dedupe key excludes price/terms) but the page content
-        // materially changed — surface a FRESH candidate for re-review linking the
-        // new evidence, rather than silently dropping the re-extraction. Forced to
-        // `in_review` so a human re-approves the changed deal before it republishes
-        // (nothing auto-publishes). The prior record is left intact until then.
-        this.logger.info('route changed — queuing a fresh candidate for re-review', {
-          dedupeKey: candidate.dedupeKey,
-          existingId: existing.id,
-        });
-        await this.db.deals.insert(this.toDealRecord(candidate, evidence, true));
-      } else {
-        // Unchanged duplicate: keep the existing record (still record proposals).
-        this.logger.info('duplicate route, unchanged content — keeping existing record', {
-          dedupeKey: candidate.dedupeKey,
-          existingId: existing.id,
-        });
-      }
-
-      for (const proposal of candidate.fieldProposals) {
-        await this.db.fieldProposals.upsertAndCount({
-          suggested_key: proposal.suggested_key,
-          label: proposal.label,
-          rationale: proposal.rationale,
-          example_quote: proposal.example_quote,
-          first_seen_at: this.clock.nowIso(),
-          last_seen_at: this.clock.nowIso(),
-        });
-      }
-    }
-  }
-
-  /**
-   * Has the page content changed since the matched deal was captured? Compares
-   * evidence content hashes. If the prior evidence can't be found we treat it as
-   * changed (fail toward review, never silently keep a possibly-stale record).
-   */
-  private async contentDiffers(existing: DealRecord, fresh: Evidence): Promise<boolean> {
-    const priorEvidence = await this.db.evidence.getById(existing.evidence_id);
-    if (priorEvidence === null) return true;
-    return priorEvidence.content_hash !== fresh.content_hash;
-  }
-
-  private toDealRecord(
-    candidate: ExtractedCandidate,
-    evidence: Evidence,
-    forceReview = false,
-  ): DealRecord {
-    // Low-confidence / rule-failing extractions enter as `in_review` so the queue
-    // surfaces a triage signal; clean ones enter as `candidate`. A changed-route
-    // re-extraction is also forced to `in_review`. All are pre-approval states
-    // (none auto-publishes); review handles them.
-    const status =
-      candidate.mustReview || forceReview ? DealStatus.enum.in_review : DealStatus.enum.candidate;
-    return {
-      ...candidate.deal,
-      id: newId(),
-      schema_version: candidate.schemaVersion,
-      true_cost_monthly: candidate.trueCostMonthly,
-      evidence_id: evidence.id,
-      status,
-      verified_by: null,
-      verified_at: null,
-    };
   }
 
   private async finishRun(

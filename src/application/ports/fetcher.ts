@@ -7,7 +7,18 @@
  * (public-only v1).
  */
 
-export type FetchOutcome = 'ok' | 'login_required' | 'captcha' | 'blocked' | 'error';
+/**
+ * `blocked` = anti-bot defences stopped us (route to manual capture).
+ * `robots_disallowed` = robots.txt told us not to fetch this path — we CHOSE not
+ * to, so it is skipped silently, never treated as a failure or manual-capture task.
+ */
+export type FetchOutcome =
+  | 'ok'
+  | 'login_required'
+  | 'captcha'
+  | 'blocked'
+  | 'robots_disallowed'
+  | 'error';
 
 export interface FetchResult {
   outcome: FetchOutcome;

@@ -37,7 +37,9 @@ export type CrawlRun = z.infer<typeof CrawlRunSchema>;
  */
 export const ManualCaptureTaskSchema = z.object({
   id: z.string().uuid(),
-  source_id: z.string().uuid(),
+  /** Registered source this came from, or null for a discovery-origin task (Lane B
+   *  hits a blocked page on a URL that has no `sources` row yet). */
+  source_id: z.string().uuid().nullable(),
   source_url: z.string().url(),
   reason: ManualCaptureReason,
   created_at: z.string().min(1),

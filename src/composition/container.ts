@@ -2,6 +2,7 @@ import type { Config } from '../config/index.js';
 import {
   ExtractUseCase,
   CrawlSourceUseCase,
+  DiscoverSiteUseCase,
   ReviewUseCase,
   MonitorSourceUseCase,
   SystemClock,
@@ -54,6 +55,7 @@ export class Container {
 
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
+  readonly discoverSite: DiscoverSiteUseCase;
   readonly review: ReviewUseCase;
   readonly monitor: MonitorSourceUseCase;
 
@@ -75,6 +77,17 @@ export class Container {
 
     this.extract = new ExtractUseCase(this.llm, this.logger);
     this.crawlSource = new CrawlSourceUseCase(
+      this.fetcher,
+      this.evidenceStore,
+      this.db,
+      this.extract,
+      this.clock,
+      this.logger,
+      this.vocabulary,
+      config.fetcher.userAgent,
+      config.fetcher.timeoutMs,
+    );
+    this.discoverSite = new DiscoverSiteUseCase(
       this.fetcher,
       this.evidenceStore,
       this.db,

@@ -115,7 +115,8 @@ export const crawlRuns = pgTable('crawl_runs', {
 
 export const manualCaptureTasks = pgTable('manual_capture_tasks', {
   id: uuid('id').primaryKey(),
-  sourceId: uuid('source_id').notNull(),
+  // Nullable: discovery-origin tasks reference a URL with no registered source row.
+  sourceId: uuid('source_id'),
   sourceUrl: text('source_url').notNull(),
   reason: text('reason').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull(),

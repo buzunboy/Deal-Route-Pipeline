@@ -1,0 +1,1 @@
+ALTER TABLE "manual_capture_tasks" ALTER COLUMN "source_id" DROP NOT NULL;

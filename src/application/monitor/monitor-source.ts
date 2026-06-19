@@ -69,6 +69,14 @@ export class MonitorSourceUseCase {
         userAgent: this.fetchUserAgent,
       });
 
+      if (fetched.outcome === 'robots_disallowed') {
+        // robots.txt now disallows this path — neither a disappearance nor a block.
+        // Record `unchanged` (no diff possible) and leave published deals intact.
+        this.logger.info('monitor: skipped by robots.txt (not expiring)', { sourceId: source.id });
+        const change = this.recordChange(source, 'unchanged', null, null);
+        await this.db.changes.insert(change);
+        return { change, reQueued: false, routedToManualCapture: false, expired: 0 };
+      }
       if (isBlockedOutcome(fetched)) return this.handleBlocked(source, fetched);
       if (fetched.outcome !== 'ok') return this.handleUnreachable(source);
 

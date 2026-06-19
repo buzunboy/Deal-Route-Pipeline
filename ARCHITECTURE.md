@@ -55,11 +55,20 @@ contract runs only when `DATABASE_URL_TEST` is set.
 - **Lane A — deterministic (Tiers 1–2):** scheduler picks due sources → `Fetcher` returns
   text + screenshot + HTML → evidence captured **before** any candidate → `ExtractUseCase`
   (LLM = extraction only) → validate + dedupe → candidate queue.
-- **Lane B — agentic (Tiers 3–4):** behind the `BrowserAgent` port; a `NoopBrowserAgent`
-  ships in Phase A so the wiring exists. Phase B/C drop in a bounded agent **without editing
-  callers** (OCP).
+- **Lane B — site discovery (Tiers 3–4):** `DiscoverSiteUseCase` (`discover <url>`) does a
+  **bounded same-site crawl** — fetch the start page, follow links **within the start domain
+  and already-approved domains**, extract candidates from each via the same path as Lane A.
+  Links to **novel domains** are NOT followed; they are recorded as `pending_approval`,
+  tier-4 `discovered` sources that a human approves before any crawl (the source-promotion
+  loop / new-domain guardrail). Runs are CAPPED by pages **and** € **and** wall-clock and stop
+  at the first cap; login/captcha/anti-bot pages route to manual capture; the frontier is
+  ordered by a domain-agnostic "likely-offer-page" score so a small budget reaches deal pages
+  before navigation chrome. A `NoopBrowserAgent` still backs the `BrowserAgent` port for the
+  fully-agentic Phase C lane (search-driven discovery), droppable in without editing callers.
 - **Shared path:** validate → dedupe/canonicalize → capture evidence → **candidate queue** →
   human approve/reject (review API/CLI) → publish → monitor/diff → re-queue or auto-expire.
+  Lane A and Lane B share one persist implementation (`CandidateSink`) so the dedupe /
+  content-change / proposal rules live in exactly one place.
 
 ## Trust invariants (enforced in code, covered by tests)
 

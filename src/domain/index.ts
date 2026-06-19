@@ -7,3 +7,4 @@ export * from './evidence/index.js';
 export * from './crawl/index.js';
 export * from './proposals/index.js';
 export * from './monitoring/index.js';
+export * from './discovery/index.js';

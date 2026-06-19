@@ -30,7 +30,9 @@ export class PoliteFetcher implements Fetcher {
   async fetch(url: string, options?: FetchOptions): Promise<FetchResult> {
     if (this.opts.respectRobotsTxt && !(await this.isAllowed(url))) {
       this.opts.logger.info('skipped by robots.txt', { url });
-      return blocked(url);
+      // Distinct from `blocked` (anti-bot): we deliberately declined per robots —
+      // callers skip it silently rather than queue a non-actionable manual task.
+      return outcomeOnly('robots_disallowed', url);
     }
     await this.throttle(url);
     return this.inner.fetch(url, options);
@@ -157,15 +159,8 @@ function productTokenOf(userAgent: string): string {
   return userAgent.toLowerCase().split('/')[0]!.trim();
 }
 
-function blocked(url: string): FetchResult {
-  return {
-    outcome: 'blocked',
-    url,
-    finalUrl: url,
-    text: '',
-    html: '',
-    screenshot: new Uint8Array(),
-  };
+function outcomeOnly(outcome: FetchResult['outcome'], url: string): FetchResult {
+  return { outcome, url, finalUrl: url, text: '', html: '', screenshot: new Uint8Array() };
 }
 
 function hostOf(url: string): string | null {

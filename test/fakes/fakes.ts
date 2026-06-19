@@ -31,6 +31,40 @@ export class FakeFetcher implements Fetcher {
   }
 }
 
+/**
+ * Fetcher fake that returns a DIFFERENT result per URL — for multi-page flows
+ * (discovery). Unknown URLs resolve to an `error` outcome (so a run can't wander
+ * off into unscripted territory). Records the order URLs were fetched.
+ */
+export class ScriptedFetcher implements Fetcher {
+  public readonly fetched: string[] = [];
+  constructor(private readonly pages: Record<string, Partial<FetchResult> & { text?: string }>) {}
+  async fetch(url: string): Promise<FetchResult> {
+    this.fetched.push(url);
+    const page = this.pages[url];
+    if (page === undefined) {
+      return {
+        outcome: 'error',
+        url,
+        finalUrl: url,
+        text: '',
+        html: '',
+        screenshot: new Uint8Array(),
+        error: 'not scripted',
+      };
+    }
+    return {
+      outcome: 'ok',
+      url,
+      finalUrl: url,
+      text: 'page text',
+      html: '<html></html>',
+      screenshot: new Uint8Array([1]),
+      ...page,
+    };
+  }
+}
+
 /** Llm fake: returns scripted JSON text. */
 export class FakeLlm implements Llm {
   public lastRequest: LlmRequest | null = null;

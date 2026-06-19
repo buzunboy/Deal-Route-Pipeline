@@ -23,13 +23,14 @@ Stack: **TypeScript (Node 20+, strict)** · zod · Playwright/Firecrawl · Anthr
 - Lint + typecheck: `npm run lint && npm run typecheck` (or `npm run check` for both + tests)
 - Dry-run extract a URL: `npm run cli -- dry-run-extract <url|file>` (no writes; `LLM_PROVIDER=stub` for offline)
 - Run a crawl: `npm run cli -- crawl --source <id> | --subscription <name> | --due [--dry-run]`
+- Discover a site (Lane B): `npm run cli -- discover <url> [--max-pages N] [--dry-run]` (bounded same-site crawl → candidates + proposed novel domains)
 - Monitor / Review / Serve: `npm run cli -- monitor --due` · `review list|approve|reject|proposals|manual` · `serve`
 - Seed import: `npm run cli -- seed-import` · DB: `npm run db:migrate`
 
 ## Repo layout
-- `src/domain/` — deal-record schema (zod) + pure rules: `rules/{true-cost,dedupe-key,vocab-mapping,validate-record,confidence}`, entities (source, evidence, crawl, proposals, monitoring), typed errors, `parse-llm-output` (LLM boundary)
-- `src/application/` — use-cases (`extract`, `crawl/crawl-source`, `review`, `monitor/monitor-source`, `discover/noop-browser-agent`) + `ports/` (Fetcher, Llm, EvidenceStore, repositories+Database, Queue, Clock, BrowserAgent, Logger)
-- `src/adapters/` — `fetcher/` (playwright, firecrawl, page-classifier) · `llm/` (anthropic, openai, stub, pricing) · `evidence-store/` (local-fs) · `db/` (in-memory, postgres+drizzle, migrate) · `queue/` (in-memory, pg-boss) · `http/` (review-api, test-page) · `cli/` · `seeds/` · `logger/` · `shared/retry`
+- `src/domain/` — deal-record schema (zod) + pure rules: `rules/{true-cost,dedupe-key,vocab-mapping,validate-record,confidence}`, entities (source, evidence, crawl, proposals, monitoring), `discovery/links` (pure link rules + frontier scoring), typed errors, `parse-llm-output` (LLM boundary)
+- `src/application/` — use-cases (`extract`, `crawl/crawl-source`, `crawl/candidate-sink` (shared persist), `review`, `monitor/monitor-source`, `discover/discover-site` (Lane B), `discover/noop-browser-agent`) + `ports/` (Fetcher, Llm, EvidenceStore, repositories+Database, Queue, Clock, BrowserAgent, Logger)
+- `src/adapters/` — `fetcher/` (playwright, firecrawl, page-classifier) · `llm/` (anthropic, openai, stub, pricing, json-recovery) · `evidence-store/` (local-fs) · `db/` (in-memory, postgres+drizzle, migrate) · `queue/` (in-memory, pg-boss) · `http/` (review-api, test-page) · `cli/` · `seeds/` · `logger/` · `shared/retry`
 - `src/composition/container.ts` — the single composition root · `src/config/` — env→typed config (zod)
 - `test/` — `contracts/` (port suites), `fixtures/golden/`, `golden/`, `fakes/`, `factories/` · `drizzle/` — generated migrations
 - `docs/` — design + seed list · `ARCHITECTURE.md` — layers + how to add a source/model/condition
