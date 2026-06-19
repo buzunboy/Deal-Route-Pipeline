@@ -5,24 +5,32 @@ export type CrawlRunStatus = z.infer<typeof CrawlRunStatus>;
 
 /**
  * Which lane produced a run — drives the per-lane run ledger + cost breakdown.
- * `monitor` is intentionally NOT a kind: a monitor pass makes no LLM call (its
- * diff is a hash compare) and any re-crawl it triggers is a separate `crawl` run
- * with its own row, so a monitor row would always be zero-cost noise. Monitor's
- * structured per-pass outcome already lives, richer, in the `changes` table.
+ * `discover` = bounded same-site discovery (Lane B); `discover_broad` = Tier-4
+ * agentic open-web broad discovery (Phase C, C-1). `monitor` is intentionally
+ * NOT a kind: a monitor pass makes no LLM call (its diff is a hash compare) and
+ * any re-crawl it triggers is a separate `crawl` run with its own row, so a
+ * monitor row would always be zero-cost noise. Monitor's structured per-pass
+ * outcome already lives, richer, in the `changes` table.
+ *
+ * NB: `run_kind` is a free `text` column (see schema.ts), so adding a value is an
+ * additive zod-enum widening — no migration needed; cost/stats are kind-agnostic.
  */
-export const CrawlRunKind = z.enum(['crawl', 'discover', 'ingest']);
+export const CrawlRunKind = z.enum(['crawl', 'discover', 'ingest', 'discover_broad']);
 export type CrawlRunKind = z.infer<typeof CrawlRunKind>;
 
 /**
  * Why a capped run stopped. Lane-A crawls have no caps loop and leave this null;
  * the bounded Lane-B/agentic lanes record which cap (or clean completion) ended
- * the run. `daily_budget_cap` is the aggregate €/day guard (Pre-C-3), distinct
- * from the per-run `cost_cap`.
+ * the run. Per-lane the unit differs: `page_cap` (discover), `item_cap` (ingest),
+ * `step_cap` (discover_broad — a step = a fetched search result). `daily_budget_cap`
+ * is the aggregate €/day guard (Pre-C-3), distinct from the per-run `cost_cap`.
+ * Stored as free `text`, so adding a reason is an additive widening — no migration.
  */
 export const CrawlRunStoppedReason = z.enum([
   'completed',
   'page_cap',
   'item_cap',
+  'step_cap',
   'time_cap',
   'cost_cap',
   'daily_budget_cap',

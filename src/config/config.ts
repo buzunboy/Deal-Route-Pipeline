@@ -35,6 +35,13 @@ const ConfigSchema = z.object({
     apiKey: z.string().optional(),
     resultsPerQuery: z.coerce.number().int().positive(),
   }),
+  // Tier-4 broad discovery (Phase C, C-1) tuning beyond the shared `agent` budget.
+  discovery: z.object({
+    /** Hard cap on search queries issued per broad-discovery run. */
+    maxQueries: z.coerce.number().int().positive(),
+    /** Extra deny-list domains (comma/space-separated) on top of the defaults. */
+    denyDomains: z.string().optional(),
+  }),
   evidence: z.object({
     kind: z.enum(['local', 's3']),
     localDir: z.string().min(1),
@@ -138,6 +145,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       provider: env.SEARCH_PROVIDER ?? (emptyToUndefined(env.SEARCH_API_KEY) ? 'api' : 'stub'),
       apiKey: emptyToUndefined(env.SEARCH_API_KEY),
       resultsPerQuery: env.SEARCH_RESULTS_PER_QUERY ?? '10',
+    },
+    discovery: {
+      maxQueries: env.DISCOVERY_MAX_QUERIES ?? '20',
+      denyDomains: emptyToUndefined(env.DISCOVERY_DENY_DOMAINS),
     },
     evidence: {
       kind: env.EVIDENCE_STORE ?? 'local',

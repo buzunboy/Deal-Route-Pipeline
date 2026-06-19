@@ -117,9 +117,10 @@ export const crawlRuns = pgTable(
     // `sources` row. Lane-A always sets it. Cost aggregation buckets null-source
     // runs under a stable sentinel (see CostSummary).
     sourceId: uuid('source_id'),
-    // Which lane produced this run: 'crawl' (Lane A) | 'discover' | 'ingest'
-    // (Lane B). Lets the run ledger + cost stats break down by lane. (Monitor is
-    // deliberately not a kind — it makes no LLM call of its own; see CrawlRunKind.)
+    // Which lane produced this run: 'crawl' (Lane A) | 'discover' | 'ingest' |
+    // 'discover_broad' (Tier-4 agentic). Free text — new lanes widen CrawlRunKind
+    // with no migration. Lets the run ledger + cost stats break down by lane.
+    // (Monitor is deliberately not a kind — it makes no LLM call; see CrawlRunKind.)
     runKind: text('run_kind').notNull(),
     status: text('status').notNull(),
     startedAt: timestamp('started_at', { withTimezone: true, mode: 'string' }).notNull(),

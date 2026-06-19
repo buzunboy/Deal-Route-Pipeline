@@ -10,6 +10,7 @@ import {
   MetricsUseCase,
   DailyBudgetGuard,
   NoopBrowserAgent,
+  DiscoverBroadUseCase,
   SystemClock,
   type Fetcher,
   type FeedReader,
@@ -21,7 +22,7 @@ import {
   type SearchProvider,
   type BrowserAgent,
 } from '../application/index.js';
-import { SEED_VOCABULARY, type Vocabulary } from '../domain/index.js';
+import { SEED_VOCABULARY, DomainDenylist, type Vocabulary } from '../domain/index.js';
 import { ConsoleLogger } from '../adapters/logger/console-logger.js';
 import { LocalFsEvidenceStore } from '../adapters/evidence-store/local-fs-evidence-store.js';
 import { AnthropicLlm } from '../adapters/llm/anthropic-llm.js';
@@ -82,6 +83,7 @@ export class Container {
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
   readonly discoverSite: DiscoverSiteUseCase;
+  readonly discoverBroad: DiscoverBroadUseCase;
   readonly ingestCommunity: IngestCommunityUseCase;
   readonly review: ReviewUseCase;
   readonly sourceReview: SourceReviewUseCase;
@@ -135,6 +137,16 @@ export class Container {
       this.vocabulary,
       config.fetcher.userAgent,
       config.fetcher.timeoutMs,
+    );
+    this.discoverBroad = new DiscoverBroadUseCase(
+      this.browserAgent,
+      this.evidenceStore,
+      this.db,
+      this.extract,
+      this.clock,
+      this.logger,
+      this.vocabulary,
+      DomainDenylist.fromConfig(config.discovery.denyDomains),
     );
     this.ingestCommunity = new IngestCommunityUseCase(
       this.fetcher,
