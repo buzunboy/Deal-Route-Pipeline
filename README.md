@@ -139,7 +139,18 @@ and LLM key.
 
 ## Tests
 
-`npm test` covers: pure-rule unit tests, adapter **contract** suites (EvidenceStore, Database),
-**golden-file** extraction (saved HTML → expected record, asserting grounding + no
-hallucination), the deterministic offline **dry-run**, and the review **HTTP** integration. The
-Postgres contract runs when `DATABASE_URL_TEST` is set.
+Three tiers (see `.github/workflows/` for how CI runs them):
+
+- **`npm test`** — fast, hermetic **unit/component** tests (no network, no DB): pure-rule unit
+  tests, adapter **contract** suites (EvidenceStore, Database), **golden-file** extraction
+  (saved HTML → expected record, asserting grounding + no hallucination), the deterministic
+  offline **dry-run**, and the review **HTTP** integration. Runs on every PR.
+- **`npm run test:integration`** — **hermetic integration** tests: the real composition root +
+  **real Postgres**, with deterministic doubles for the network/LLM/feeds. Exercises Phase A
+  (crawl → evidence → candidate → approve → monitor) and Phase B (feed → triage → ingest)
+  end-to-end through real wiring. Needs `DATABASE_URL_TEST` (CI provides a Postgres service
+  container); self-skips without it. The Postgres adapter contract also runs here.
+- **`npm run test:live`** — **live smoke** tests that hit real sites (Playwright) + the real LLM
+  (Anthropic) to catch "the live world changed" (site markup / feed / model drift). Run on a
+  nightly schedule and on a `live-test` PR label — **never** the normal PR gate. Self-skip
+  unless `RUN_LIVE_TESTS=1` and a provider key is set.

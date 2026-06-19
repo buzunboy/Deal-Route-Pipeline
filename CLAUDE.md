@@ -19,7 +19,7 @@ Clean, layered: **domain** → **application** (use-cases) → **adapters/infras
 Stack: **TypeScript (Node 20+, strict)** · zod · Playwright/Firecrawl · Anthropic/OpenAI/stub · Postgres+drizzle · pg-boss · Vitest.
 - Install: `npm install && npx playwright install chromium`
 - Build: `npm run build`
-- Test: `npm test` (unit + contract + golden + HTTP integration)
+- Test: `npm test` (fast hermetic unit/contract/golden/HTTP). Integration (real Postgres): `npm run test:integration` (needs `DATABASE_URL_TEST`). Live smoke (real sites+LLM, scheduled): `npm run test:live` (needs `RUN_LIVE_TESTS=1` + key)
 - Lint + typecheck: `npm run lint && npm run typecheck` (or `npm run check` for both + tests)
 - Dry-run extract a URL: `npm run cli -- dry-run-extract <url|file>` (no writes; `LLM_PROVIDER=stub` for offline)
 - Run a crawl: `npm run cli -- crawl --source <id> | --subscription <name> | --due [--dry-run]`
@@ -33,7 +33,7 @@ Stack: **TypeScript (Node 20+, strict)** · zod · Playwright/Firecrawl · Anthr
 - `src/application/` — use-cases (`extract`, `crawl/crawl-source`, `crawl/candidate-sink` (shared persist), `review`, `monitor/monitor-source`, `discover/discover-site` (Lane B), `discover/lane-b-support` (shared Lane-B edge logic), `ingest/ingest-community` (Lane B Tier 3) + `ingest/triage-prompt`, `discover/noop-browser-agent`) + `ports/` (Fetcher, FeedReader, Llm, EvidenceStore, repositories+Database, Queue, Clock, BrowserAgent, Logger)
 - `src/adapters/` — `fetcher/` (playwright, firecrawl, page-classifier) · `feed/` (rss-feed-reader) · `llm/` (anthropic, openai, stub, pricing, json-recovery) · `evidence-store/` (local-fs) · `db/` (in-memory, postgres+drizzle, migrate) · `queue/` (in-memory, pg-boss) · `http/` (review-api, test-page) · `cli/` · `seeds/` · `logger/` · `shared/retry`
 - `src/composition/container.ts` — the single composition root · `src/config/` — env→typed config (zod)
-- `test/` — `contracts/` (port suites), `fixtures/golden/`, `golden/`, `fakes/`, `factories/` · `drizzle/` — generated migrations
+- `test/` — `contracts/` (port suites), `fixtures/golden/`, `golden/`, `fakes/`, `factories/`, `integration/` (real Container+Postgres, hermetic), `live/` (real sites+LLM, scheduled) · `drizzle/` — generated migrations · CI: `.github/workflows/{ci,live}.yml`
 - `docs/` — design + seed list · `ARCHITECTURE.md` — layers + how to add a source/model/condition
 
 ## Working habits

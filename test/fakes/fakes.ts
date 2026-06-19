@@ -42,6 +42,10 @@ export class FakeFetcher implements Fetcher {
 export class ScriptedFetcher implements Fetcher {
   public readonly fetched: string[] = [];
   constructor(private readonly pages: Record<string, Partial<FetchResult> & { text?: string }>) {}
+  /** Replace (or add) the scripted result for a URL — e.g. to simulate a change. */
+  setResultFor(url: string, page: Partial<FetchResult> & { text?: string }): void {
+    this.pages[url] = page;
+  }
   async fetch(url: string): Promise<FetchResult> {
     this.fetched.push(url);
     const page = this.pages[url];

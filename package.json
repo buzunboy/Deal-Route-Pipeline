@@ -16,6 +16,8 @@
     "cli": "tsx src/adapters/cli/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:live": "vitest run --config vitest.live.config.ts",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

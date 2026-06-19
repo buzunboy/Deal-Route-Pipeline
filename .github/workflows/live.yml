@@ -1,0 +1,41 @@
+name: Live smoke
+
+# Live tests hit real sites (Playwright) + the real LLM (Anthropic). They are
+# non-deterministic and cost money, so they NEVER run on the normal PR gate —
+# only on a nightly schedule, on manual dispatch, or when a PR carries the
+# `live-test` label. Failures here mean "the live world changed" (site markup,
+# feed, or model drift), not necessarily a code regression — they notify, they
+# do not gate merges.
+on:
+  schedule:
+    - cron: '0 6 * * *' # 06:00 UTC nightly
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  live:
+    # Run on the nightly schedule / manual dispatch, OR when a PR is labeled `live-test`.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'live-test'
+    runs-on: ubuntu-latest
+    env:
+      RUN_LIVE_TESTS: '1'
+      LLM_PROVIDER: anthropic
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Guard — require the API key secret
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not set; live tests cannot run."
+            exit 1
+          fi
+      - run: npm run test:live

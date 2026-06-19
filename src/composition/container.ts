@@ -43,6 +43,18 @@ export interface ContainerOptions {
   /** When false, use in-memory DB + queue (no Postgres needed). Default true. */
   usePersistence?: boolean;
   vocabulary?: Vocabulary;
+  /**
+   * Test-only adapter overrides. The composition root is the one place injection
+   * belongs, so integration tests can exercise the REAL wiring + real Postgres
+   * while swapping out the genuinely-external edges (network fetch, LLM, feeds,
+   * wall clock) for deterministic doubles. Production passes none of these.
+   */
+  overrides?: {
+    fetcher?: Fetcher;
+    feedReader?: FeedReader;
+    llm?: Llm;
+    clock?: Clock;
+  };
 }
 
 export class Container {
@@ -69,14 +81,15 @@ export class Container {
 
   constructor(config: Config, options: ContainerOptions = {}) {
     const usePersistence = options.usePersistence ?? true;
+    const overrides = options.overrides ?? {};
     this.config = config;
     this.vocabulary = options.vocabulary ?? SEED_VOCABULARY;
     this.logger = new ConsoleLogger(config.logLevel);
-    this.clock = new SystemClock();
+    this.clock = overrides.clock ?? new SystemClock();
 
-    this.fetcher = this.buildFetcher(config);
-    this.feedReader = new RssFeedReader(config.fetcher.timeoutMs);
-    this.llm = this.buildLlm(config);
+    this.fetcher = overrides.fetcher ?? this.buildFetcher(config);
+    this.feedReader = overrides.feedReader ?? new RssFeedReader(config.fetcher.timeoutMs);
+    this.llm = overrides.llm ?? this.buildLlm(config);
     this.evidenceStore = this.buildEvidenceStore(config);
     this.db = this.buildDatabase(config, usePersistence);
     this.queue = this.buildQueue(config, usePersistence);
