@@ -13,9 +13,15 @@ export function formatCandidate(c: ExtractedCandidate, index: number): string {
     `  price:          ${d.price.amount} ${d.price.currency} / ${d.price.billing}  (true cost/mo: ${c.trueCostMonthly})`,
   );
   lines.push(`  country:        ${d.country}`);
-  lines.push(`  eligibility:    new_customer_only=${d.eligibility.new_customer_only}, stackable=${d.eligibility.stackable}, plan_tier=${d.eligibility.plan_tier_required ?? '—'}`);
-  lines.push(`  validity:       start=${d.validity.start ?? '—'} end=${d.validity.end ?? '—'} recheck_days=${d.validity.recheck_days}`);
-  lines.push(`  confidence:     ${c.adjustedConfidence.toFixed(2)}  ${c.mustReview ? '⚠️  MUST-REVIEW' : '✅ passes gate'}`);
+  lines.push(
+    `  eligibility:    new_customer_only=${d.eligibility.new_customer_only}, stackable=${d.eligibility.stackable}, plan_tier=${d.eligibility.plan_tier_required ?? '—'}`,
+  );
+  lines.push(
+    `  validity:       start=${d.validity.start ?? '—'} end=${d.validity.end ?? '—'} recheck_days=${d.validity.recheck_days}`,
+  );
+  lines.push(
+    `  confidence:     ${c.adjustedConfidence.toFixed(2)}  ${c.mustReview ? '⚠️  MUST-REVIEW' : '✅ passes gate'}`,
+  );
   lines.push(`  dedupe_key:     ${c.dedupeKey}`);
 
   if (d.eligibility.conditions.length || d.validity.conditions.length) {

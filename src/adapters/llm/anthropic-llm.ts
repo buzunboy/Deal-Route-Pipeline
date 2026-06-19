@@ -25,7 +25,8 @@ export class AnthropicLlm implements Llm {
   }
 
   async complete(request: LlmRequest): Promise<LlmResponse> {
-    const model = request.role === 'discovery' ? this.opts.discoveryModel : this.opts.extractionModel;
+    const model =
+      request.role === 'discovery' ? this.opts.discoveryModel : this.opts.extractionModel;
     // Anthropic has no JSON-mode flag; we steer via the system prompt and prefill.
     const system = request.jsonMode
       ? `${request.system}\n\nRespond with a single JSON object and nothing else.`
@@ -54,7 +55,11 @@ export class AnthropicLlm implements Llm {
     const outputTokens = message.usage.output_tokens;
     return {
       text: stripJsonFence(text),
-      usage: { inputTokens, outputTokens, costEur: estimateCostEur(model, inputTokens, outputTokens) },
+      usage: {
+        inputTokens,
+        outputTokens,
+        costEur: estimateCostEur(model, inputTokens, outputTokens),
+      },
       model,
     };
   }

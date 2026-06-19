@@ -7,9 +7,7 @@ import { z } from 'zod';
  * typed `Config` — never `process.env`.
  */
 
-const boolish = z
-  .enum(['true', 'false', '1', '0'])
-  .transform((v) => v === 'true' || v === '1');
+const boolish = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1');
 
 const ConfigSchema = z.object({
   llm: z.object({
@@ -33,19 +31,25 @@ const ConfigSchema = z.object({
     localDir: z.string().min(1),
     s3: z
       .object({
-        bucket: z.string(),
-        region: z.string(),
+        // Required when S3 is configured at all, so a partial S3 setup fails
+        // loudly at config load rather than at first write (loud-failure policy).
+        bucket: z.string().min(1),
+        region: z.string().min(1),
         endpoint: z.string().optional(),
-        accessKeyId: z.string(),
-        secretAccessKey: z.string(),
+        accessKeyId: z.string().min(1),
+        secretAccessKey: z.string().min(1),
       })
       .optional(),
   }),
+  // DB/queue URLs are optional at parse time: the offline path (dry-run, tests,
+  // stub) uses in-memory adapters and needs no Postgres (README: "Dry-run and
+  // tests need neither"). The composition root enforces their presence loudly
+  // only when it actually constructs the Postgres / pg-boss adapters.
   database: z.object({
-    url: z.string().min(1),
+    url: z.string(),
   }),
   queue: z.object({
-    databaseUrl: z.string().min(1),
+    databaseUrl: z.string(),
   }),
   crawl: z.object({
     defaultRecrawlDays: z.coerce.number().int().positive(),
@@ -59,6 +63,8 @@ const ConfigSchema = z.object({
   }),
   reviewApi: z.object({
     port: z.coerce.number().int().positive(),
+    /** Bearer token gating approve/reject. Unset ⇒ open (bind to a trusted network). */
+    authToken: z.string().min(1).optional(),
   }),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']),
   country: z.string().min(1),
@@ -114,7 +120,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       maxSeconds: env.AGENT_MAX_SECONDS ?? '300',
       maxCostEur: env.AGENT_MAX_COST_EUR ?? '1.00',
     },
-    reviewApi: { port: env.REVIEW_API_PORT ?? '3000' },
+    reviewApi: {
+      port: env.REVIEW_API_PORT ?? '3000',
+      authToken: emptyToUndefined(env.REVIEW_API_TOKEN),
+    },
     logLevel: env.LOG_LEVEL ?? 'info',
     country: env.COUNTRY ?? 'DE',
     currency: env.CURRENCY ?? 'EUR',
@@ -122,7 +131,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   const result = ConfigSchema.safeParse(raw);
   if (!result.success) {
-    const issues = result.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
+    const issues = result.error.issues
+      .map((i) => `  - ${i.path.join('.')}: ${i.message}`)
+      .join('\n');
     throw new Error(`Invalid configuration:\n${issues}`);
   }
   return result.data;

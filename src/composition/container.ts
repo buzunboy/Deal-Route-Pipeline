@@ -148,6 +148,11 @@ export class Container {
 
   private buildDatabase(config: Config, usePersistence: boolean): Database {
     if (!usePersistence) return new InMemoryDb();
+    if (config.database.url.trim() === '') {
+      throw new Error(
+        'Persistence enabled but DATABASE_URL is empty. Set it, or run a dry-run/offline command.',
+      );
+    }
     const db = PostgresDb.connect(config.database.url);
     this.closables.push(db);
     return db;
@@ -155,6 +160,11 @@ export class Container {
 
   private buildQueue(config: Config, usePersistence: boolean): Queue {
     if (!usePersistence) return new InMemoryQueue();
+    if (config.queue.databaseUrl.trim() === '') {
+      throw new Error(
+        'Persistence enabled but QUEUE_DATABASE_URL/DATABASE_URL is empty. Set it, or run a dry-run/offline command.',
+      );
+    }
     const queue = new PgBossQueue(config.queue.databaseUrl);
     this.closables.push({ close: () => queue.stop() });
     return queue;

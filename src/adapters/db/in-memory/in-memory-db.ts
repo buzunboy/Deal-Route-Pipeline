@@ -73,13 +73,21 @@ class InMemoryDealRepo implements DealRepository {
     return d ? { ...d } : null;
   }
   async listByStatus(status: DealStatus, limit: number): Promise<DealRecord[]> {
-    return [...this.store.values()].filter((d) => d.status === status).slice(0, limit).map((d) => ({ ...d }));
+    return [...this.store.values()]
+      .filter((d) => d.status === status)
+      .slice(0, limit)
+      .map((d) => ({ ...d }));
   }
   async findByDedupeKey(key: string): Promise<DealRecord | null> {
+    // Return the highest-confidence non-rejected match, matching PgDealRepo's
+    // `orderBy(desc(confidence))` so the canonical-deal choice is identical
+    // across adapters (LSP) and a low-confidence row can't shadow the canonical.
+    let best: DealRecord | null = null;
     for (const d of this.store.values()) {
-      if (d.status !== 'rejected' && dedupeKey(d) === key) return { ...d };
+      if (d.status === 'rejected' || dedupeKey(d) !== key) continue;
+      if (best === null || d.confidence > best.confidence) best = d;
     }
-    return null;
+    return best ? { ...best } : null;
   }
   async updateStatus(
     id: string,
@@ -122,7 +130,10 @@ class InMemoryManualCaptureRepo implements ManualCaptureRepository {
     this.tasks.push({ ...t });
   }
   async listOpen(limit: number): Promise<ManualCaptureTask[]> {
-    return this.tasks.filter((t) => t.status === 'open').slice(0, limit).map((t) => ({ ...t }));
+    return this.tasks
+      .filter((t) => t.status === 'open')
+      .slice(0, limit)
+      .map((t) => ({ ...t }));
   }
 }
 
@@ -141,13 +152,27 @@ class InMemoryFieldProposalRepo implements FieldProposalRepository {
     }
   }
   async listOpen(limit: number): Promise<FieldProposalRecord[]> {
-    return [...this.store.values()].filter((p) => p.status === 'open').slice(0, limit).map((p) => ({ ...p }));
+    return [...this.store.values()]
+      .filter((p) => p.status === 'open')
+      .slice(0, limit)
+      .map((p) => ({ ...p }));
   }
 }
 
 class InMemoryChangeRepo implements ChangeRepository {
-  private changes: Change[] = [];
+  private changes: { change: Change; seq: number }[] = [];
+  private seq = 0;
   async insert(c: Change): Promise<void> {
-    this.changes.push({ ...c });
+    this.changes.push({ change: { ...c }, seq: this.seq++ });
+  }
+  async recentForSource(sourceId: string, limit: number): Promise<Change[]> {
+    // Newest first. Insertion sequence is the tiebreaker so equal timestamps
+    // (e.g. a fixed clock) still return the later-inserted change first —
+    // monitor's consecutive-disappearance debounce depends on this ordering.
+    return this.changes
+      .filter((e) => e.change.source_id === sourceId)
+      .sort((a, b) => b.change.detected_at.localeCompare(a.change.detected_at) || b.seq - a.seq)
+      .slice(0, limit)
+      .map((e) => ({ ...e.change }));
   }
 }

@@ -9,27 +9,35 @@ describe('classifyPage', () => {
   });
 
   it('classifies a 403 with login signals as login_required', () => {
-    expect(
-      classifyPage({ httpStatus: 403, text: 'Bitte anmelden', hasPasswordField: true }),
-    ).toBe('login_required');
+    expect(classifyPage({ httpStatus: 403, text: 'Bitte anmelden', hasPasswordField: true })).toBe(
+      'login_required',
+    );
   });
 
   it('classifies a captcha page', () => {
     expect(
-      classifyPage({ httpStatus: 200, text: 'Please complete the captcha', hasPasswordField: false }),
+      classifyPage({
+        httpStatus: 200,
+        text: 'Please complete the captcha',
+        hasPasswordField: false,
+      }),
     ).toBe('captcha');
   });
 
   it('classifies an anti-bot block', () => {
     expect(
-      classifyPage({ httpStatus: 200, text: 'Access denied by Cloudflare', hasPasswordField: false }),
+      classifyPage({
+        httpStatus: 200,
+        text: 'Access denied by Cloudflare',
+        hasPasswordField: false,
+      }),
     ).toBe('blocked');
   });
 
   it('classifies a thin login-form page as login_required', () => {
-    expect(
-      classifyPage({ httpStatus: 200, text: 'Login\nPasswort', hasPasswordField: true }),
-    ).toBe('login_required');
+    expect(classifyPage({ httpStatus: 200, text: 'Login\nPasswort', hasPasswordField: true })).toBe(
+      'login_required',
+    );
   });
 
   it('does NOT treat a rich page with an incidental password field as login-gated', () => {

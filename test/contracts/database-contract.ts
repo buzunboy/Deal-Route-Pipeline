@@ -22,7 +22,8 @@ function dealRecord(overrides: Partial<DealRecord> = {}): DealRecord {
 /**
  * Shared contract suite for the Database port. The in-memory adapter and the
  * Postgres adapter both run it, guaranteeing substitutability (LSP). The Postgres
- * run is skipped automatically when no DATABASE_URL is configured.
+ * run is skipped automatically when no DATABASE_URL_TEST is configured (a
+ * separate var from the runtime DATABASE_URL, since the suite mutates rows).
  */
 export function databaseContract(name: string, makeDb: () => Promise<Database> | Database): void {
   describe(`Database contract: ${name}`, () => {
@@ -49,7 +50,12 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect((await db.deals.getById(deal.id))!.service).toBe(deal.service);
       expect(await db.deals.listByStatus(DealStatus.enum.candidate, 10)).toHaveLength(1);
 
-      await db.deals.updateStatus(deal.id, DealStatus.enum.published, 'reviewer', '2026-06-19T00:00:00Z');
+      await db.deals.updateStatus(
+        deal.id,
+        DealStatus.enum.published,
+        'reviewer',
+        '2026-06-19T00:00:00Z',
+      );
       expect((await db.deals.getById(deal.id))!.status).toBe('published');
       expect((await db.deals.getById(deal.id))!.verified_by).toBe('reviewer');
     });
@@ -113,17 +119,56 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect(proposals[0]!.count).toBe(2);
     });
 
-    it('changes: insert does not throw', async () => {
+    it('deals: findByDedupeKey returns the highest-confidence match (canonical)', async () => {
       const db = await makeDb();
-      await db.changes.insert({
-        id: randomUUID(),
-        deal_id: null,
-        source_id: randomUUID(),
-        kind: 'unchanged',
-        previous_hash: 'a',
-        current_hash: 'a',
-        detected_at: '2026-06-19T00:00:00.000Z',
-      });
+      const { dedupeKey } = await import('../../src/domain/index.js');
+      const low = dealRecord({ confidence: 0.4 });
+      const high = dealRecord({ ...sameRoute(low), confidence: 0.9 });
+      await db.deals.insert(low);
+      await db.deals.insert(high);
+      // Both share a dedupe key; the canonical (highest-confidence) one must win,
+      // regardless of insertion order — so the two adapters don't diverge here.
+      const found = await db.deals.findByDedupeKey(dedupeKey(low));
+      expect(found!.id).toBe(high.id);
+    });
+
+    it('changes: insert + recentForSource returns newest-first, scoped to the source', async () => {
+      const db = await makeDb();
+      const sourceId = randomUUID();
+      const other = randomUUID();
+      await db.changes.insert(makeChange(sourceId, 'unchanged', '2026-06-17T00:00:00.000Z'));
+      await db.changes.insert(makeChange(sourceId, 'disappeared', '2026-06-19T00:00:00.000Z'));
+      await db.changes.insert(makeChange(other, 'blocked', '2026-06-20T00:00:00.000Z'));
+
+      const recent = await db.changes.recentForSource(sourceId, 10);
+      expect(recent.map((c) => c.kind)).toEqual(['disappeared', 'unchanged']);
+      expect(recent.every((c) => c.source_id === sourceId)).toBe(true);
     });
   });
+}
+
+/** Copy the canonical-key fields (service/provider/route_type/country) of a deal. */
+function sameRoute(d: DealRecord): Partial<DealRecord> {
+  return {
+    service: d.service,
+    provider: d.provider,
+    route_type: d.route_type,
+    country: d.country,
+  };
+}
+
+function makeChange(
+  sourceId: string,
+  kind: 'unchanged' | 'disappeared' | 'blocked' | 'content_changed',
+  detectedAt: string,
+) {
+  return {
+    id: randomUUID(),
+    deal_id: null,
+    source_id: sourceId,
+    kind,
+    previous_hash: null,
+    current_hash: null,
+    detected_at: detectedAt,
+  };
 }

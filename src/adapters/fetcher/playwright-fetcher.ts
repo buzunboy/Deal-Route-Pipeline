@@ -28,6 +28,10 @@ export class PlaywrightFetcher implements Fetcher {
         userAgent: options.userAgent,
       });
       const page = await context.newPage();
+      // Bound EVERY subsequent operation (content/locator/evaluate), not just
+      // goto — a page that finishes domcontentloaded but then hangs (infinite
+      // scroll, stuck render) must not block the serialised per-domain fetch.
+      page.setDefaultTimeout(timeoutMs);
       try {
         const response = await withTimeout(
           page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs }),
@@ -36,11 +40,17 @@ export class PlaywrightFetcher implements Fetcher {
         const httpStatus = response?.status() ?? 0;
         const html = await page.content();
         const hasPasswordField = (await page.locator('input[type="password"]').count()) > 0;
-        const screenshot = await page.screenshot({ fullPage: true });
+        const screenshot = await page.screenshot({ fullPage: true, timeout: timeoutMs });
         // `document` runs in the browser context, not Node — typed loosely here
-        // to avoid pulling the DOM lib into the whole server build.
-        const bodyText = await page.evaluate(
-          () => (globalThis as { document?: { body?: { innerText?: string } } }).document?.body?.innerText ?? '',
+        // to avoid pulling the DOM lib into the whole server build. Bounded too,
+        // so a wedged JS context can't hang the fetch indefinitely.
+        const bodyText = await withTimeout(
+          page.evaluate(
+            () =>
+              (globalThis as { document?: { body?: { innerText?: string } } }).document?.body
+                ?.innerText ?? '',
+          ),
+          timeoutMs,
         );
         const text = this.turndown.turndown(html);
 
@@ -60,7 +70,11 @@ export class PlaywrightFetcher implements Fetcher {
         await context.close();
       }
     } catch (err) {
-      return { ...empty, outcome: 'error', error: err instanceof Error ? err.message : String(err) };
+      return {
+        ...empty,
+        outcome: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 

@@ -12,7 +12,9 @@ export async function seedImport(config: Config, path: string, dryRun: boolean):
   const markdown = await readFile(path, 'utf8');
   const { catalog, sources } = parseSeeds(markdown, config.crawl.defaultRecrawlDays);
 
-  console.log(`Parsed ${catalog.length} catalog services and ${sources.length} sources from ${path}.`);
+  console.log(
+    `Parsed ${catalog.length} catalog services and ${sources.length} sources from ${path}.`,
+  );
   const byTier = countBy(sources, (s) => `tier ${s.tier}`);
   for (const [tier, n] of Object.entries(byTier)) console.log(`  ${tier}: ${n} sources`);
 

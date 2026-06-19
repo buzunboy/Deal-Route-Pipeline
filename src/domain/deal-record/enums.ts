@@ -20,13 +20,7 @@ export type Billing = z.infer<typeof Billing>;
  * invariant: LLM proposes, humans approve). `candidate` and `in_review` are the
  * pre-approval states; `expired`/`rejected` are terminal.
  */
-export const DealStatus = z.enum([
-  'candidate',
-  'in_review',
-  'published',
-  'expired',
-  'rejected',
-]);
+export const DealStatus = z.enum(['candidate', 'in_review', 'published', 'expired', 'rejected']);
 export type DealStatus = z.infer<typeof DealStatus>;
 
 /** ISO-4217 currencies we support in v1. Germany v1 ⇒ EUR; widen as we expand. */

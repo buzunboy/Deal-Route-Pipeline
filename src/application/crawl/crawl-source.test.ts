@@ -82,10 +82,32 @@ describe('CrawlSourceUseCase', () => {
     expect(await env.db.deals.listByStatus('candidate', 10)).toHaveLength(0);
   });
 
-  it('dedupes: a second crawl of the same route does not double-insert', async () => {
+  it('dedupes: a second crawl of identical content does not double-insert', async () => {
     await env.uc.execute({ sourceId });
     await env.uc.execute({ sourceId });
     expect(await env.db.deals.listByStatus('candidate', 10)).toHaveLength(1);
+  });
+
+  it('changed content on the same route → fresh in_review candidate, original untouched', async () => {
+    // First crawl: a clean candidate for the route.
+    await env.uc.execute({ sourceId });
+    const first = (await env.db.deals.listByStatus('candidate', 10))[0]!;
+
+    // Second crawl: same route (dedupe key unchanged) but the page text changed,
+    // so the new evidence content_hash differs → a re-review candidate is queued.
+    env.fetcher.setResult({ text: PAGE_TEXT + ' Jetzt mit neuem Preis: 12,00 €/Monat.' });
+    await env.uc.execute({ sourceId });
+
+    // The original candidate is left intact (not mutated/removed)…
+    const stillThere = await env.db.deals.getById(first.id);
+    expect(stillThere).not.toBeNull();
+    expect(stillThere!.status).toBe('candidate');
+    // …and a SEPARATE fresh candidate is queued for re-review (forced in_review).
+    const inReview = await env.db.deals.listByStatus('in_review', 10);
+    expect(inReview).toHaveLength(1);
+    expect(inReview[0]!.id).not.toBe(first.id);
+    // The fresh candidate links the NEW evidence bundle (not the stale one).
+    expect(inReview[0]!.evidence_id).not.toBe(first.evidence_id);
   });
 
   it('records field proposals for unknown conditions', async () => {

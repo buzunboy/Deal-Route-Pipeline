@@ -33,9 +33,7 @@ export function buildExtractionPrompt(input: ExtractionPromptInput): {
   system: string;
   user: string;
 } {
-  const vocabList = input.vocabulary
-    .map((v) => `- ${v.key}: ${v.label}`)
-    .join('\n');
+  const vocabList = input.vocabulary.map((v) => `- ${v.key}: ${v.label}`).join('\n');
 
   const target =
     input.targetService !== null

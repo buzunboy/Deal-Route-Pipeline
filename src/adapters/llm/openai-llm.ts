@@ -24,7 +24,8 @@ export class OpenAiLlm implements Llm {
   }
 
   async complete(request: LlmRequest): Promise<LlmResponse> {
-    const model = request.role === 'discovery' ? this.opts.discoveryModel : this.opts.extractionModel;
+    const model =
+      request.role === 'discovery' ? this.opts.discoveryModel : this.opts.extractionModel;
 
     const completion = await withRetry(
       () =>
@@ -48,7 +49,11 @@ export class OpenAiLlm implements Llm {
     const outputTokens = completion.usage?.completion_tokens ?? 0;
     return {
       text,
-      usage: { inputTokens, outputTokens, costEur: estimateCostEur(model, inputTokens, outputTokens) },
+      usage: {
+        inputTokens,
+        outputTokens,
+        costEur: estimateCostEur(model, inputTokens, outputTokens),
+      },
       model,
     };
   }

@@ -12,6 +12,14 @@ const MONTHS_PER_YEAR = 12;
  * would be a trust violation). `unknown` billing returns the raw amount so the
  * value is never silently dropped; validation flags `unknown` billing for review.
  *
+ * IMPORTANT (intro/promo pricing): this normalises only the *headline* price.
+ * A deal that is "0 € for 6 months, then 15 €/mo" is extracted with
+ * `price.amount = 0`, so this returns 0 — the steady-state 15 €/mo lives in an
+ * `intro_period` condition, not in `price`. We deliberately do NOT guess the
+ * post-intro figure here (that would be invention). Instead `validateRecord`
+ * forces such deals to must-review (`promo_pricing_needs_review`), so a human
+ * confirms the real cost before it can rank as "free". See `validate-record.ts`.
+ *
  * Rounded to whole cents to avoid floating-point noise in comparisons.
  */
 export function trueCostMonthly(price: Price): number {

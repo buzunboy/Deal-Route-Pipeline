@@ -35,8 +35,9 @@ All config + secrets come from the environment; nothing is hard-coded. Key vars 
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | whichever provider you chose |
 | `FETCHER` | `playwright` (default) \| `firecrawl` |
 | `EVIDENCE_STORE` | `local` (default) \| `s3` |
-| `DATABASE_URL` | Postgres connection string |
+| `DATABASE_URL` | Postgres connection string (persisted runs only; dry-run/tests need none) |
 | `DEFAULT_RECRAWL_DAYS` | re-crawl cadence (default 3) |
+| `REVIEW_API_TOKEN` | optional bearer token gating approve/reject; unset ⇒ open (bind to a trusted network) |
 
 ## What you must supply
 
@@ -88,7 +89,8 @@ npm run cli -- serve                       # web review page + JSON API on :3000
 dry-run-extract <url|file>   Fetch + extract one source, print candidates, NO writes
 seed-import [path]           Import sources from the seed-list markdown
 crawl --source <id> | --subscription <name> | --due [--dry-run]
-monitor --source <id> | --due           Re-verify: diff → re-queue / auto-expire
+monitor --source <id> | --due           Re-verify: diff → re-queue; blocked → manual capture;
+                                        gone → auto-expire (after N consecutive failures)
 review list | approve <id> <who> | reject <id> <who> | proposals | manual
 serve                        Review API + thin test page
 discover                     (Phase B/C) bounded agentic discovery — stubbed in Phase A
@@ -104,6 +106,11 @@ GET  /api/field-proposals               recurring unknown conditions
 GET  /api/manual-capture-tasks          login-gated / blocked offers
 GET  /api/health
 ```
+
+State-changing POSTs require `Authorization: Bearer $REVIEW_API_TOKEN` when that var is set
+(unset ⇒ open; bind to a trusted network). Unknown deal → `404`; an already-decided deal →
+`409`; missing approver / malformed JSON → `400`; oversized body → `413`. Internal errors return
+a generic `500` (no internal detail leaked). Read endpoints are never gated.
 
 ## Commands
 

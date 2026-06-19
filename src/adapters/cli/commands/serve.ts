@@ -10,10 +10,19 @@ import { REVIEW_TEST_PAGE } from '../../http/test-page.js';
  */
 export async function serve(config: Config): Promise<void> {
   const container = new Container(config, { usePersistence: true });
-  const api = new ReviewApi(container.review, container.logger, REVIEW_TEST_PAGE);
+  const api = new ReviewApi(container.review, container.logger, {
+    staticPageHtml: REVIEW_TEST_PAGE,
+    authToken: config.reviewApi.authToken,
+  });
   await api.listen(config.reviewApi.port);
   console.log(`Review test page:  http://localhost:${config.reviewApi.port}/`);
   console.log(`Review API base:   http://localhost:${config.reviewApi.port}/api`);
+  if (config.reviewApi.authToken === undefined) {
+    console.log(
+      'WARNING: no REVIEW_API_TOKEN set — approve/reject are unauthenticated. ' +
+        'Bind to a trusted network or set REVIEW_API_TOKEN.',
+    );
+  }
 
   const shutdown = async (): Promise<void> => {
     await api.close();

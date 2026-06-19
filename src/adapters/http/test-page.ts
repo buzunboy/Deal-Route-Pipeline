@@ -54,7 +54,9 @@ async function api(path, opts) {
   return res.json();
 }
 
-function esc(s) { return String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+// Escapes for both text and attribute (href="...") contexts: a scraped URL with
+// a quote must not break out of the attribute.
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 async function renderCandidates() {
   const items = await api('/api/candidates');

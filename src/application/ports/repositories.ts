@@ -63,6 +63,8 @@ export interface FieldProposalRepository {
 
 export interface ChangeRepository {
   insert(change: Change): Promise<void>;
+  /** Recent changes for a source, newest first — used to debounce auto-expiry. */
+  recentForSource(sourceId: string, limit: number): Promise<Change[]>;
 }
 
 /** Aggregate handed to the composition root; groups the focused repositories. */

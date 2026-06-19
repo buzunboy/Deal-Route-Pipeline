@@ -76,24 +76,49 @@ export class PoliteFetcher implements Fetcher {
   }
 }
 
-/** Minimal robots.txt rules: the Disallow paths that apply to our user-agent. */
+interface RobotsRule {
+  type: 'allow' | 'disallow';
+  path: string;
+}
+
+/**
+ * robots.txt rules for our user-agent, applying RFC 9309 longest-match
+ * precedence: among the Allow/Disallow rules whose path is a prefix of the
+ * request path, the most specific (longest) one wins; an Allow (or no match)
+ * means the path is crawlable. So `Disallow: /` + `Allow: /angebote` correctly
+ * permits `/angebote` instead of blocking the whole site.
+ */
 class RobotsRules {
-  constructor(private readonly disallow: string[]) {}
+  constructor(private readonly rules: RobotsRule[]) {}
   isAllowed(path: string): boolean {
-    return !this.disallow.some((rule) => rule !== '' && path.startsWith(rule));
+    let best: RobotsRule | null = null;
+    for (const rule of this.rules) {
+      if (rule.path === '' || !path.startsWith(rule.path)) continue;
+      if (best === null || rule.path.length > best.path.length) {
+        best = rule;
+      } else if (rule.path.length === best.path.length && rule.type === 'allow') {
+        // RFC 9309: on an equal-length tie the least-restrictive rule (Allow) wins.
+        best = rule;
+      }
+    }
+    return best === null || best.type === 'allow';
   }
+}
+
+interface RobotsGroup {
+  agents: string[];
+  rules: RobotsRule[];
 }
 
 /**
  * Parse robots.txt for the group matching our user-agent, falling back to `*`.
- * Intentionally small (prefix Disallow rules only) — enough for the public pages
- * we crawl; a fuller parser can replace it behind the same decorator.
+ * Handles Allow + Disallow with longest-match precedence (see {@link RobotsRules}).
  */
 export function parseRobots(text: string, userAgent: string): RobotsRules {
-  const ua = userAgent.toLowerCase();
+  const productToken = productTokenOf(userAgent);
   const lines = text.split('\n').map((l) => l.replace(/#.*/, '').trim());
-  const groups: { agents: string[]; disallow: string[] }[] = [];
-  let current: { agents: string[]; disallow: string[] } | null = null;
+  const groups: RobotsGroup[] = [];
+  let current: RobotsGroup | null = null;
   let lastWasAgent = false;
 
   for (const line of lines) {
@@ -104,26 +129,43 @@ export function parseRobots(text: string, userAgent: string): RobotsRules {
 
     if (key === 'user-agent') {
       if (!lastWasAgent || current === null) {
-        current = { agents: [], disallow: [] };
+        current = { agents: [], rules: [] };
         groups.push(current);
       }
       current.agents.push(value.toLowerCase());
       lastWasAgent = true;
-    } else if (key === 'disallow' && current) {
-      current.disallow.push(value);
+    } else if ((key === 'disallow' || key === 'allow') && current) {
+      current.rules.push({ type: key === 'allow' ? 'allow' : 'disallow', path: value });
       lastWasAgent = false;
     } else {
       lastWasAgent = false;
     }
   }
 
-  const matching = groups.find((g) => g.agents.some((a) => a !== '*' && ua.includes(a)));
+  // Match the robots product token as a prefix of OUR product token (RFC 9309),
+  // not an arbitrary substring of the full UA — so a `bot` group doesn't capture
+  // `dealroutebot`.
+  const matching = groups.find((g) =>
+    g.agents.some((a) => a !== '*' && productToken.startsWith(a)),
+  );
   const wildcard = groups.find((g) => g.agents.includes('*'));
-  return new RobotsRules((matching ?? wildcard)?.disallow ?? []);
+  return new RobotsRules((matching ?? wildcard)?.rules ?? []);
+}
+
+/** The product token of a user-agent: the part before the first '/', lowercased. */
+function productTokenOf(userAgent: string): string {
+  return userAgent.toLowerCase().split('/')[0]!.trim();
 }
 
 function blocked(url: string): FetchResult {
-  return { outcome: 'blocked', url, finalUrl: url, text: '', html: '', screenshot: new Uint8Array() };
+  return {
+    outcome: 'blocked',
+    url,
+    finalUrl: url,
+    text: '',
+    html: '',
+    screenshot: new Uint8Array(),
+  };
 }
 
 function hostOf(url: string): string | null {

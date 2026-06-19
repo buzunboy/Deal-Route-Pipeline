@@ -34,4 +34,16 @@ describe('parseRobots', () => {
     expect(rules.isAllowed('/x/y')).toBe(false);
     expect(rules.isAllowed('/y')).toBe(true);
   });
+
+  it('honours Allow with longest-match precedence over a broad Disallow', () => {
+    const rules = parseRobots('User-agent: *\nDisallow: /\nAllow: /angebote', UA);
+    expect(rules.isAllowed('/angebote/disney')).toBe(true); // Allow is more specific
+    expect(rules.isAllowed('/konto')).toBe(false); // only the Disallow:/ matches
+  });
+
+  it('does not match a robots group whose token is merely a substring of our UA', () => {
+    // A `User-agent: bot` group must NOT capture `dealroutebot`.
+    const rules = parseRobots('User-agent: bot\nDisallow: /\n', UA);
+    expect(rules.isAllowed('/anything')).toBe(true);
+  });
 });

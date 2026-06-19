@@ -28,10 +28,20 @@ export async function crawl(config: Config, args: CrawlArgs): Promise<void> {
     let manual = 0;
     let failed = 0;
     for (const id of sourceIds) {
-      const result = await container.crawlSource.execute({ sourceId: id, dryRun: args.dryRun });
-      candidates += result.candidates.length;
-      if (result.routedToManualCapture) manual++;
-      if (result.run.status === 'failed') failed++;
+      // Per-source isolation: a throw (e.g. unknown source id, or a DB write on
+      // the failure path) must not abort the whole batch.
+      try {
+        const result = await container.crawlSource.execute({ sourceId: id, dryRun: args.dryRun });
+        candidates += result.candidates.length;
+        if (result.routedToManualCapture) manual++;
+        if (result.run.status === 'failed') failed++;
+      } catch (err) {
+        failed++;
+        container.logger.error('crawl: source failed, continuing batch', {
+          sourceId: id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     console.log(
       `\nDone. candidates=${candidates} manual-capture=${manual} failed=${failed} of ${sourceIds.length} sources.`,

@@ -23,15 +23,17 @@ export function dedupeKey(
 
 /** Pure name normaliser used for the dedupe key. Not for display. */
 export function normalizeName(raw: string): string {
-  return raw
-    .normalize('NFKD')
-    // Strip combining diacritics (ä→a etc. after NFKD).
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/\+/g, ' plus ')
-    .replace(/&/g, ' and ')
-    // Collapse any non-alphanumeric run to a single space.
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
+  return (
+    raw
+      .normalize('NFKD')
+      // Strip combining diacritics (ä→a etc. after NFKD).
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/\+/g, ' plus ')
+      .replace(/&/g, ' and ')
+      // Collapse any non-alphanumeric run to a single space.
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ')
+  );
 }

@@ -18,7 +18,13 @@ const LOGIN_SIGNALS = [
   'mein konto',
 ];
 
-const CAPTCHA_SIGNALS = ['captcha', 'recaptcha', 'hcaptcha', 'are you a robot', 'sind sie ein roboter'];
+const CAPTCHA_SIGNALS = [
+  'captcha',
+  'recaptcha',
+  'hcaptcha',
+  'are you a robot',
+  'sind sie ein roboter',
+];
 
 const BLOCK_SIGNALS = [
   'access denied',

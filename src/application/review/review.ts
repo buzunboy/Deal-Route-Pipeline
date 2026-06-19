@@ -1,5 +1,8 @@
 import {
   DealStatus,
+  DealNotFoundError,
+  NotReviewableError,
+  MissingApproverError,
   type DealRecord,
   type Evidence,
   type ManualCaptureTask,
@@ -85,7 +88,7 @@ export class ReviewUseCase {
 
   private assertApprover(approver: string, action: string): void {
     if (approver.trim() === '') {
-      throw new Error(`${action} requires a non-empty approver identity.`);
+      throw new MissingApproverError(action);
     }
   }
 
@@ -99,7 +102,7 @@ export class ReviewUseCase {
 
   private async requireDeal(dealId: string): Promise<DealRecord> {
     const deal = await this.db.deals.getById(dealId);
-    if (deal === null) throw new Error(`Deal not found: ${dealId}`);
+    if (deal === null) throw new DealNotFoundError(dealId);
     return deal;
   }
 
@@ -107,7 +110,7 @@ export class ReviewUseCase {
   private assertReviewable(deal: DealRecord): void {
     const reviewable: DealStatus[] = [DealStatus.enum.candidate, DealStatus.enum.in_review];
     if (!reviewable.includes(deal.status)) {
-      throw new Error(`Deal ${deal.id} is not reviewable (status: ${deal.status}).`);
+      throw new NotReviewableError(deal.id, deal.status);
     }
   }
 }

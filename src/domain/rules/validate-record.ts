@@ -1,5 +1,14 @@
 import type { LlmExtractedDeal } from '../deal-record/index.js';
 import { KEY_GROUNDED_FIELDS } from './confidence.js';
+import { trueCostMonthly } from './true-cost.js';
+
+/**
+ * Vocabulary key signalling a discounted introductory period (see
+ * `seed-vocabulary.ts`). When present, the headline price understates the
+ * steady-state cost, so the normalised `true_cost_monthly` cannot be trusted
+ * for ranking without a human confirming the post-intro figure.
+ */
+const INTRO_PERIOD_KEY = 'intro_period';
 
 /** A single sanity-rule failure. Non-fatal: it downgrades to must-review. */
 export interface RuleFailure {
@@ -40,12 +49,14 @@ export function validateRecord(deal: LlmExtractedDeal, sourceText?: string): Val
     });
   }
 
-  // ── Price sanity band.
-  if (deal.price.amount > MAX_PLAUSIBLE_MONTHLY_EUR) {
+  // ── Price sanity band, checked on the NORMALISED monthly cost (so an annual
+  //    1200 €/yr = 100 €/mo deal is judged on the same basis as a monthly one).
+  const monthly = trueCostMonthly(deal.price);
+  if (monthly < 0 || monthly > MAX_PLAUSIBLE_MONTHLY_EUR) {
     failures.push({
       rule: 'price_within_band',
       field: 'price.amount',
-      message: `Price ${deal.price.amount} exceeds plausible band (${MAX_PLAUSIBLE_MONTHLY_EUR}).`,
+      message: `Normalised cost ${monthly}/mo is outside the plausible band (0–${MAX_PLAUSIBLE_MONTHLY_EUR}).`,
     });
   }
 
@@ -58,6 +69,12 @@ export function validateRecord(deal: LlmExtractedDeal, sourceText?: string): Val
     });
   }
 
+  // ── Promo / intro pricing: the headline price understates the steady-state
+  //    cost, so true_cost_monthly is misleading (a "0 € for 6 months" deal
+  //    normalises to 0 and would rank as permanently free). Force must-review so
+  //    a human confirms the real post-intro cost before it can rank/publish.
+  validatePromoPricing(deal, failures);
+
   // ── Validity dates parse and are ordered.
   validateDates(deal, failures);
 
@@ -65,6 +82,21 @@ export function validateRecord(deal: LlmExtractedDeal, sourceText?: string): Val
   validateGrounding(deal, sourceText, failures);
 
   return { failures, ok: failures.length === 0 };
+}
+
+function validatePromoPricing(deal: LlmExtractedDeal, failures: RuleFailure[]): void {
+  const hasIntroCondition = [...deal.eligibility.conditions, ...deal.validity.conditions].some(
+    (c) => c.key === INTRO_PERIOD_KEY,
+  );
+  if (deal.route_type === 'promo' || hasIntroCondition) {
+    failures.push({
+      rule: 'promo_pricing_needs_review',
+      field: 'true_cost_monthly',
+      message:
+        'Promo/introductory pricing detected: the headline price may understate the steady-state cost. ' +
+        'A human must confirm the true monthly cost before this deal can rank or publish.',
+    });
+  }
 }
 
 function validateDates(deal: LlmExtractedDeal, failures: RuleFailure[]): void {
@@ -110,24 +142,42 @@ function validateGrounding(
     }
   }
 
-  if (sourceText !== undefined) {
-    const haystack = normalizeForMatch(sourceText);
-    for (const g of deal.grounding) {
-      const needle = normalizeForMatch(g.quote);
-      if (needle.length > 0 && !haystack.includes(needle)) {
-        failures.push({
-          rule: 'grounding_quote_in_source',
-          field: g.field,
-          message: `Grounding quote for "${g.field}" not found in source text (possible hallucination).`,
-        });
-      }
+  if (sourceText === undefined) {
+    // The quote-in-source check is the primary hallucination guard. If a caller
+    // validates without the page text we can't run it — fail closed (force
+    // review) rather than letting an ungrounded record pass as ok.
+    failures.push({
+      rule: 'grounding_not_verifiable',
+      message:
+        'Source text was not provided; grounding quotes could not be verified against the page.',
+    });
+    return;
+  }
+
+  const haystack = normalizeForMatch(sourceText);
+  for (const g of deal.grounding) {
+    const needle = normalizeForMatch(g.quote);
+    if (needle.length > 0 && !haystack.includes(needle)) {
+      failures.push({
+        rule: 'grounding_quote_in_source',
+        field: g.field,
+        message: `Grounding quote for "${g.field}" not found in source text (possible hallucination).`,
+      });
     }
   }
 }
 
-/** Parse an ISO date string to epoch ms, or null if invalid. */
+/** ISO-8601 date (YYYY-MM-DD) or full datetime — what we promise validity dates are. */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(T.*)?$/;
+
+/**
+ * Parse a strict-ISO date string to epoch ms, or null if it isn't ISO-8601 or
+ * isn't a real date. We reject `Date.parse`-lenient forms (bare years, locale
+ * strings) so "valid dates" actually means valid ISO dates, not just parseable.
+ */
 function parseDate(value: string | null): number | null {
   if (value === null) return null;
+  if (!ISO_DATE_RE.test(value)) return null;
   const ms = Date.parse(value);
   return Number.isNaN(ms) ? null : ms;
 }

@@ -109,7 +109,7 @@ describe('MonitorSourceUseCase', () => {
     expect(env.evidenceStore.saved.length).toBeGreaterThan(oldEvidenceCount + 1);
   });
 
-  it('auto-expires published deals when the source disappears', async () => {
+  it('does NOT expire on a single transient failure (debounced)', async () => {
     const fetcher = new FakeFetcher({ outcome: 'error', text: '' });
     const env = build(fetcher);
     await env.db.sources.upsert(source);
@@ -117,6 +117,36 @@ describe('MonitorSourceUseCase', () => {
 
     const result = await env.monitor.execute({ sourceId: source.id });
     expect(result.change.kind).toBe('disappeared');
+    expect(result.expired).toBe(0);
+    // A single transient error must never retract a verified deal.
+    expect((await env.db.deals.getById(deal.id))!.status).toBe('published');
+  });
+
+  it('auto-expires only after N consecutive disappearances', async () => {
+    const fetcher = new FakeFetcher({ outcome: 'error', text: '' });
+    const env = build(fetcher);
+    await env.db.sources.upsert(source);
+    const deal = await seedPublishedDeal(env.db, env.evidenceStore, source.url, sha256(PAGE_TEXT));
+
+    await env.monitor.execute({ sourceId: source.id }); // 1st: debounced
+    expect((await env.db.deals.getById(deal.id))!.status).toBe('published');
+
+    const second = await env.monitor.execute({ sourceId: source.id }); // 2nd: expires
+    expect(second.expired).toBe(1);
     expect((await env.db.deals.getById(deal.id))!.status).toBe('expired');
+  });
+
+  it('routes a blocked page to manual capture without expiring published deals', async () => {
+    const fetcher = new FakeFetcher({ outcome: 'blocked', text: '' });
+    const env = build(fetcher);
+    await env.db.sources.upsert(source);
+    const deal = await seedPublishedDeal(env.db, env.evidenceStore, source.url, sha256(PAGE_TEXT));
+
+    const result = await env.monitor.execute({ sourceId: source.id });
+    expect(result.change.kind).toBe('blocked');
+    expect(result.routedToManualCapture).toBe(true);
+    expect(result.expired).toBe(0);
+    expect((await env.db.deals.getById(deal.id))!.status).toBe('published');
+    expect(await env.db.manualCapture.listOpen(10)).toHaveLength(1);
   });
 });

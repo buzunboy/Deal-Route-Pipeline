@@ -75,6 +75,22 @@ contract runs only when `DATABASE_URL_TEST` is set.
    schema at the boundary; `validate-record` checks sanity + that every grounding quote is a
    real substring of the page (the hallucination guard); failures downgrade confidence and
    force review.
+6. **Misleading cost can't rank silently.** `validate-record` forces must-review when a deal is
+   `promo` or carries an `intro_period` condition, so a "0 € for 6 months" headline can't
+   surface as permanently free without a human confirming the steady-state cost.
+7. **Monitoring never silently retracts a verified deal.** A login/captcha/anti-bot wall routes
+   to manual capture (not expiry); auto-expiry fires only after N **consecutive** unreachable
+   checks, so a single transient failure can't expire a published deal.
+
+## Review API trust boundary
+
+The HTTP review API (`serve`) is the durable contract for the future admin panel. State-changing
+endpoints (approve/reject) are gated by `REVIEW_API_TOKEN` (bearer) when set; the recorded
+`approver` is still client-supplied, so the **production admin panel terminates real
+authentication and supplies the authenticated principal**. With no token set the API is open and
+**must** be bound to a trusted network (localhost/private). Read endpoints are never gated.
+Domain errors map to precise client status codes (404/409/400/413); internal errors return a
+generic 500 with no leaked detail; request bodies are size-bounded.
 
 ## How to add things (no editing of existing logic)
 

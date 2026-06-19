@@ -1,5 +1,5 @@
 import type { Fetcher, FetchOptions, FetchResult } from '../../application/ports/index.js';
-import { withRetry, withTimeout } from '../shared/retry.js';
+import { withRetry, withAbortableTimeout, TimeoutError } from '../shared/retry.js';
 import { classifyPage } from './page-classifier.js';
 
 /**
@@ -24,21 +24,25 @@ export class FirecrawlFetcher implements Fetcher {
     try {
       const res = await withRetry(
         () =>
-          withTimeout(
-            fetch(`${this.baseUrl}/v1/scrape`, {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${this.apiKey}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                url,
-                formats: ['markdown', 'html', 'screenshot'],
+          withAbortableTimeout(
+            (signal) =>
+              fetch(`${this.baseUrl}/v1/scrape`, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${this.apiKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  url,
+                  formats: ['markdown', 'html', 'screenshot'],
+                }),
+                signal,
               }),
-            }),
             timeoutMs,
           ),
-        { retries: 2, baseDelayMs: 500, isRetryable: () => true },
+        // Only retry transient failures — a malformed-body 400 or a programming
+        // error thrown before the response should not burn retries + budget.
+        { retries: 2, baseDelayMs: 500, isRetryable: isTransientFetchError },
       );
 
       if (!res.ok) {
@@ -50,14 +54,20 @@ export class FirecrawlFetcher implements Fetcher {
       const data = body.data ?? {};
       const text = data.markdown ?? '';
       const html = data.html ?? '';
-      const screenshot = data.screenshot ? await downloadBytes(data.screenshot, timeoutMs) : new Uint8Array();
+      const screenshot = data.screenshot
+        ? await downloadBytes(data.screenshot, timeoutMs)
+        : new Uint8Array();
 
       const outcome = classifyPage({ httpStatus: 200, text, hasPasswordField: false });
       if (outcome !== 'ok') return { ...empty, outcome, finalUrl: data.url ?? url };
 
       return { outcome: 'ok', url, finalUrl: data.url ?? url, text, html, screenshot };
     } catch (err) {
-      return { ...empty, outcome: 'error', error: err instanceof Error ? err.message : String(err) };
+      return {
+        ...empty,
+        outcome: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 }
@@ -72,12 +82,28 @@ interface FirecrawlResponse {
   };
 }
 
+/**
+ * Retry only transient network/timeout failures (TimeoutError, abort, or the
+ * usual transient socket errors). A non-transient error — e.g. a thrown TypeError
+ * from a bad body — is not worth retrying. HTTP-status non-retryables are handled
+ * separately by the `res.ok` check, which returns rather than throws.
+ */
+function isTransientFetchError(err: unknown): boolean {
+  if (err instanceof TimeoutError) return true;
+  if (err instanceof Error) {
+    if (err.name === 'AbortError') return true;
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'EAI_AGAIN';
+  }
+  return false;
+}
+
 async function downloadBytes(ref: string, timeoutMs: number): Promise<Uint8Array> {
   if (ref.startsWith('data:')) {
     const base64 = ref.slice(ref.indexOf(',') + 1);
     return new Uint8Array(Buffer.from(base64, 'base64'));
   }
-  const res = await withTimeout(fetch(ref), timeoutMs);
+  const res = await withAbortableTimeout((signal) => fetch(ref, { signal }), timeoutMs);
   return new Uint8Array(await res.arrayBuffer());
 }
 

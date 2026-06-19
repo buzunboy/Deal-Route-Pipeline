@@ -1,7 +1,23 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { ReviewUseCase } from '../../application/index.js';
 import type { Logger } from '../../application/ports/index.js';
+import { DealNotFoundError, NotReviewableError, MissingApproverError } from '../../domain/index.js';
+
+/** Max accepted request-body size. Approve/reject bodies are a few hundred bytes. */
+const MAX_BODY_BYTES = 64 * 1024;
+
+export interface ReviewApiOptions {
+  staticPageHtml?: string;
+  /**
+   * Bearer token required on state-changing (POST) endpoints. When set, an
+   * approve/reject without `Authorization: Bearer <token>` is rejected 401. When
+   * unset, state changes are open and the API MUST be bound to a trusted network
+   * (localhost / private) — see ARCHITECTURE.md. Read endpoints are never gated.
+   */
+  authToken?: string;
+}
 
 /**
  * HTTP review API — the DURABLE CONTRACT the future production admin panel (and
@@ -21,17 +37,27 @@ import type { Logger } from '../../application/ports/index.js';
  */
 export class ReviewApi {
   private server: Server | null = null;
+  private readonly staticPageHtml?: string;
+  private readonly authToken?: string;
 
   constructor(
     private readonly review: ReviewUseCase,
     private readonly logger: Logger,
-    private readonly staticPageHtml?: string,
-  ) {}
+    options: ReviewApiOptions = {},
+  ) {
+    this.staticPageHtml = options.staticPageHtml;
+    this.authToken = options.authToken;
+  }
 
   listen(port: number): Promise<void> {
     return new Promise((resolve) => {
       this.server = createServer((req, res) => {
-        this.handle(req, res).catch((err) => sendError(res, 500, errMessage(err)));
+        // Unexpected errors: log the detail server-side, return a generic 500 —
+        // never echo internal error text to clients.
+        this.handle(req, res).catch((err) => {
+          this.logger.error('review API request failed', { error: errMessage(err) });
+          if (!res.headersSent) sendError(res, 500, 'internal error');
+        });
       });
       this.server.listen(port, () => {
         this.logger.info('review API listening', { port });
@@ -68,29 +94,67 @@ export class ReviewApi {
 
     const approve = path.match(/^\/api\/candidates\/([^/]+)\/approve$/);
     if (method === 'POST' && approve) {
-      const body = await readJson(req);
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = ApproveBody.safeParse(body);
       if (!parsed.success) return sendError(res, 400, 'approver is required');
-      const deal = await this.review.approve(decodeURIComponent(approve[1]!), parsed.data.approver);
-      return sendJson(res, 200, { deal });
+      return this.mapErrors(res, async () => {
+        const deal = await this.review.approve(
+          decodeURIComponent(approve[1]!),
+          parsed.data.approver,
+        );
+        sendJson(res, 200, { deal });
+      });
     }
 
     const reject = path.match(/^\/api\/candidates\/([^/]+)\/reject$/);
     if (method === 'POST' && reject) {
-      const body = await readJson(req);
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = RejectBody.safeParse(body);
       if (!parsed.success) return sendError(res, 400, 'approver is required');
-      const deal = await this.review.reject(
-        decodeURIComponent(reject[1]!),
-        parsed.data.approver,
-        parsed.data.reason,
-      );
-      return sendJson(res, 200, { deal });
+      return this.mapErrors(res, async () => {
+        const deal = await this.review.reject(
+          decodeURIComponent(reject[1]!),
+          parsed.data.approver,
+          parsed.data.reason,
+        );
+        sendJson(res, 200, { deal });
+      });
     }
 
     sendError(res, 404, `Not found: ${method} ${path}`);
+  }
+
+  /** True when no token is configured (open, trusted-network mode) or the bearer matches. */
+  private authorized(req: IncomingMessage): boolean {
+    if (this.authToken === undefined) return true;
+    const header = req.headers.authorization ?? '';
+    const prefix = 'Bearer ';
+    if (!header.startsWith(prefix)) return false;
+    return safeEqual(header.slice(prefix.length), this.authToken);
+  }
+
+  /**
+   * Run a review action, translating typed domain errors into the correct client
+   * status (404/409/400) instead of letting them surface as a generic 500 with a
+   * leaked internal message. Unexpected errors propagate to the top-level handler.
+   */
+  private async mapErrors(res: ServerResponse, fn: () => Promise<void>): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      if (err instanceof DealNotFoundError) return sendError(res, 404, 'deal not found');
+      if (err instanceof NotReviewableError) {
+        return sendError(res, 409, `deal is not reviewable (status: ${err.status})`);
+      }
+      if (err instanceof MissingApproverError) return sendError(res, 400, 'approver is required');
+      throw err;
+    }
   }
 
   private servePage(res: ServerResponse): void {
@@ -113,12 +177,33 @@ function sendError(res: ServerResponse, status: number, message: string): void {
   sendJson(res, status, { error: message });
 }
 
-/** Sentinel distinguishing a malformed JSON body from an (allowed) empty one. */
+/** Sentinels distinguishing malformed / oversized bodies from an (allowed) empty one. */
 const MALFORMED = Symbol('malformed-json');
+const TOO_LARGE = Symbol('body-too-large');
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+/**
+ * Read and JSON-parse a request body, bounding total size so a client cannot
+ * exhaust memory by streaming an unbounded body (Node imposes no default cap).
+ * Returns TOO_LARGE / MALFORMED sentinels for the handler to map to 413 / 400.
+ */
+async function readBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let total = 0;
+  let oversize = false;
+  for await (const chunk of req) {
+    const buf = chunk as Buffer;
+    total += buf.length;
+    if (total > MAX_BODY_BYTES) {
+      // Stop buffering but keep draining the stream to completion, so the
+      // connection stays usable and the handler can return a clean 413
+      // (destroying the socket mid-request makes the client see a reset).
+      oversize = true;
+      chunks.length = 0;
+    } else if (!oversize) {
+      chunks.push(buf);
+    }
+  }
+  if (oversize) return TOO_LARGE;
   const raw = Buffer.concat(chunks).toString('utf8');
   if (raw.trim() === '') return {};
   try {
@@ -127,6 +212,14 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
     // Don't swallow: signal malformed input so the handler returns a clear 400.
     return MALFORMED;
   }
+}
+
+/** Constant-time string compare to avoid leaking the token via timing. */
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
 }
 
 function errMessage(err: unknown): string {

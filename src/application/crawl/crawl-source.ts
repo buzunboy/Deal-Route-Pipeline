@@ -83,7 +83,9 @@ export class CrawlSourceUseCase {
       // capture empty/fake evidence or extract from empty text (evidence-required
       // invariant). Throw into the catch → run marked failed, reliability lowered.
       if (fetched.outcome !== 'ok') {
-        throw new Error(`fetch outcome "${fetched.outcome}"${fetched.error ? `: ${fetched.error}` : ''}`);
+        throw new Error(
+          `fetch outcome "${fetched.outcome}"${fetched.error ? `: ${fetched.error}` : ''}`,
+        );
       }
 
       const evidence = await this.captureEvidence(fetched, input.dryRun ?? false);
@@ -176,16 +178,27 @@ export class CrawlSourceUseCase {
   ): Promise<void> {
     for (const candidate of candidates) {
       const existing = await this.db.deals.findByDedupeKey(candidate.dedupeKey);
-      const deal = this.toDealRecord(candidate, evidence);
 
-      if (existing !== null) {
-        this.logger.info('duplicate route — keeping existing, recording candidate evidence', {
+      if (existing === null) {
+        // New route: persist the candidate.
+        await this.db.deals.insert(this.toDealRecord(candidate, evidence));
+      } else if (await this.contentDiffers(existing, evidence)) {
+        // Same route (dedupe key excludes price/terms) but the page content
+        // materially changed — surface a FRESH candidate for re-review linking the
+        // new evidence, rather than silently dropping the re-extraction. Forced to
+        // `in_review` so a human re-approves the changed deal before it republishes
+        // (nothing auto-publishes). The prior record is left intact until then.
+        this.logger.info('route changed — queuing a fresh candidate for re-review', {
           dedupeKey: candidate.dedupeKey,
           existingId: existing.id,
         });
-        // v1: keep the existing record; still record proposals from this pass.
+        await this.db.deals.insert(this.toDealRecord(candidate, evidence, true));
       } else {
-        await this.db.deals.insert(deal);
+        // Unchanged duplicate: keep the existing record (still record proposals).
+        this.logger.info('duplicate route, unchanged content — keeping existing record', {
+          dedupeKey: candidate.dedupeKey,
+          existingId: existing.id,
+        });
       }
 
       for (const proposal of candidate.fieldProposals) {
@@ -201,11 +214,28 @@ export class CrawlSourceUseCase {
     }
   }
 
-  private toDealRecord(candidate: ExtractedCandidate, evidence: Evidence): DealRecord {
+  /**
+   * Has the page content changed since the matched deal was captured? Compares
+   * evidence content hashes. If the prior evidence can't be found we treat it as
+   * changed (fail toward review, never silently keep a possibly-stale record).
+   */
+  private async contentDiffers(existing: DealRecord, fresh: Evidence): Promise<boolean> {
+    const priorEvidence = await this.db.evidence.getById(existing.evidence_id);
+    if (priorEvidence === null) return true;
+    return priorEvidence.content_hash !== fresh.content_hash;
+  }
+
+  private toDealRecord(
+    candidate: ExtractedCandidate,
+    evidence: Evidence,
+    forceReview = false,
+  ): DealRecord {
     // Low-confidence / rule-failing extractions enter as `in_review` so the queue
-    // surfaces a triage signal; clean ones enter as `candidate`. Both are
-    // pre-approval states (neither auto-publishes); review handles both.
-    const status = candidate.mustReview ? DealStatus.enum.in_review : DealStatus.enum.candidate;
+    // surfaces a triage signal; clean ones enter as `candidate`. A changed-route
+    // re-extraction is also forced to `in_review`. All are pre-approval states
+    // (none auto-publishes); review handles them.
+    const status =
+      candidate.mustReview || forceReview ? DealStatus.enum.in_review : DealStatus.enum.candidate;
     return {
       ...candidate.deal,
       id: newId(),

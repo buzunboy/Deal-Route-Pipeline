@@ -6,12 +6,7 @@ import { Country } from '../deal-record/enums.js';
  *  1 provider · 2 bundler · 3 community · 4 discovered (agentic).
  * Noise and required verification weight rise with tier.
  */
-export const SourceTier = z.union([
-  z.literal(1),
-  z.literal(2),
-  z.literal(3),
-  z.literal(4),
-]);
+export const SourceTier = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]);
 export type SourceTier = z.infer<typeof SourceTier>;
 
 export const SourceType = z.enum(['provider', 'bundler', 'community', 'discovered', 'aggregator']);

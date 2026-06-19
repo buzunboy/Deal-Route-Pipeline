@@ -53,3 +53,37 @@ export class SanityRuleError extends DomainError {
 export class InvariantViolation extends DomainError {
   readonly code = 'INVARIANT_VIOLATION';
 }
+
+/** The requested deal does not exist. Maps to HTTP 404 at the API boundary. */
+export class DealNotFoundError extends DomainError {
+  readonly code = 'DEAL_NOT_FOUND';
+
+  constructor(readonly dealId: string) {
+    super(`Deal not found: ${dealId}`);
+  }
+}
+
+/**
+ * A review action was attempted on a deal that is not in a reviewable state
+ * (already published/expired/rejected). Maps to HTTP 409 (conflict) — re-deciding
+ * a terminal deal is a client error, not a server fault.
+ */
+export class NotReviewableError extends DomainError {
+  readonly code = 'NOT_REVIEWABLE';
+
+  constructor(
+    readonly dealId: string,
+    readonly status: string,
+  ) {
+    super(`Deal ${dealId} is not reviewable (status: ${status}).`);
+  }
+}
+
+/** A required actor identity (e.g. approver) was missing or empty. Maps to 400. */
+export class MissingApproverError extends DomainError {
+  readonly code = 'MISSING_APPROVER';
+
+  constructor(action: string) {
+    super(`${action} requires a non-empty approver identity.`);
+  }
+}

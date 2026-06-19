@@ -11,6 +11,7 @@ import type {
   FieldProposalRepository,
   ChangeRepository,
 } from '../../../application/ports/index.js';
+import { ChangeSchema } from '../../../domain/index.js';
 import type {
   Source,
   DealRecord,
@@ -68,13 +69,20 @@ export class PostgresDb implements Database {
 class PgSourceRepo implements SourceRepository {
   constructor(private readonly db: Db) {}
   async upsert(s: Source): Promise<void> {
-    await this.db.insert(schema.sources).values(toSourceRow(s)).onConflictDoUpdate({
-      target: schema.sources.id,
-      set: toSourceRow(s),
-    });
+    await this.db
+      .insert(schema.sources)
+      .values(toSourceRow(s))
+      .onConflictDoUpdate({
+        target: schema.sources.id,
+        set: toSourceRow(s),
+      });
   }
   async getById(id: string): Promise<Source | null> {
-    const rows = await this.db.select().from(schema.sources).where(eq(schema.sources.id, id)).limit(1);
+    const rows = await this.db
+      .select()
+      .from(schema.sources)
+      .where(eq(schema.sources.id, id))
+      .limit(1);
     return rows[0] ? fromSourceRow(rows[0]) : null;
   }
   async listDue(now: Date, limit: number): Promise<Source[]> {
@@ -91,7 +99,10 @@ class PgSourceRepo implements SourceRepository {
     return rows.map(fromSourceRow);
   }
   async listByStatus(status: Source['status']): Promise<Source[]> {
-    const rows = await this.db.select().from(schema.sources).where(eq(schema.sources.status, status));
+    const rows = await this.db
+      .select()
+      .from(schema.sources)
+      .where(eq(schema.sources.status, status));
     return rows.map(fromSourceRow);
   }
   async update(s: Source): Promise<void> {
@@ -109,7 +120,11 @@ class PgDealRepo implements DealRepository {
     return rows[0] ? rowToDeal(rows[0]) : null;
   }
   async listByStatus(status: DealStatus, limit: number): Promise<DealRecord[]> {
-    const rows = await this.db.select().from(schema.deals).where(eq(schema.deals.status, status)).limit(limit);
+    const rows = await this.db
+      .select()
+      .from(schema.deals)
+      .where(eq(schema.deals.status, status))
+      .limit(limit);
     return rows.map(rowToDeal);
   }
   async findByDedupeKey(key: string): Promise<DealRecord | null> {
@@ -155,7 +170,11 @@ class PgEvidenceRepo implements EvidenceRepository {
     await this.db.insert(schema.evidence).values(toEvidenceRow(e));
   }
   async getById(id: string): Promise<Evidence | null> {
-    const rows = await this.db.select().from(schema.evidence).where(eq(schema.evidence.id, id)).limit(1);
+    const rows = await this.db
+      .select()
+      .from(schema.evidence)
+      .where(eq(schema.evidence.id, id))
+      .limit(1);
     return rows[0] ? fromEvidenceRow(rows[0]) : null;
   }
 }
@@ -163,7 +182,7 @@ class PgEvidenceRepo implements EvidenceRepository {
 class PgManualCaptureRepo implements ManualCaptureRepository {
   constructor(private readonly db: Db) {}
   async insert(t: ManualCaptureTask): Promise<void> {
-    await this.db.insert(schema.manualCaptureTasks).values({ ...t, sourceId: t.source_id, sourceUrl: t.source_url, createdAt: t.created_at });
+    await this.db.insert(schema.manualCaptureTasks).values(toManualCaptureRow(t));
   }
   async listOpen(limit: number): Promise<ManualCaptureTask[]> {
     const rows = await this.db
@@ -185,9 +204,7 @@ class PgManualCaptureRepo implements ManualCaptureRepository {
 
 class PgFieldProposalRepo implements FieldProposalRepository {
   constructor(private readonly db: Db) {}
-  async upsertAndCount(
-    p: Omit<FieldProposalRecord, 'id' | 'count' | 'status'>,
-  ): Promise<void> {
+  async upsertAndCount(p: Omit<FieldProposalRecord, 'id' | 'count' | 'status'>): Promise<void> {
     await this.db
       .insert(schema.fieldProposals)
       .values({
@@ -243,9 +260,46 @@ class PgChangeRepo implements ChangeRepository {
       detectedAt: c.detected_at,
     });
   }
+  async recentForSource(sourceId: string, limit: number): Promise<Change[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.changes)
+      .where(eq(schema.changes.sourceId, sourceId))
+      // `id` is a deterministic tiebreaker for equal timestamps (matches the
+      // in-memory adapter's contract: newest first, stable).
+      .orderBy(desc(schema.changes.detectedAt), desc(schema.changes.id))
+      .limit(limit);
+    return rows.map(rowToChange);
+  }
+}
+
+function rowToChange(r: typeof schema.changes.$inferSelect): Change {
+  // Re-validate the free-text `kind` column at the boundary rather than casting
+  // blindly — never trust stored data even though we own every write.
+  return ChangeSchema.parse({
+    id: r.id,
+    deal_id: r.dealId,
+    source_id: r.sourceId,
+    kind: r.kind,
+    previous_hash: r.previousHash,
+    current_hash: r.currentHash,
+    detected_at: r.detectedAt,
+  });
 }
 
 // ── row mappers (small, table-local) ─────────────────────────────────────────
+
+function toManualCaptureRow(t: ManualCaptureTask): typeof schema.manualCaptureTasks.$inferInsert {
+  return {
+    id: t.id,
+    sourceId: t.source_id,
+    sourceUrl: t.source_url,
+    reason: t.reason,
+    createdAt: t.created_at,
+    status: t.status,
+    note: t.note,
+  };
+}
 
 function toSourceRow(s: Source): typeof schema.sources.$inferInsert {
   return {

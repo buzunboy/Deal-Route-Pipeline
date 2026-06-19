@@ -54,7 +54,11 @@ async function loadPageText(
   const fetched = await container.fetcher.fetch(target);
   if (fetched.outcome !== 'ok') {
     console.log(`Fetch outcome: ${fetched.outcome}${fetched.error ? ` (${fetched.error})` : ''}`);
-    if (fetched.outcome === 'login_required' || fetched.outcome === 'blocked' || fetched.outcome === 'captcha') {
+    if (
+      fetched.outcome === 'login_required' ||
+      fetched.outcome === 'blocked' ||
+      fetched.outcome === 'captcha'
+    ) {
       console.log('→ In a real crawl this would be routed to the manual-capture queue.');
     }
   }

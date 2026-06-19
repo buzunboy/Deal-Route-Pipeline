@@ -74,9 +74,46 @@ describe('validateRecord — grounding (hallucination guard)', () => {
     expect(result.failures.some((f) => f.rule === 'grounding_quote_in_source')).toBe(false);
   });
 
-  it('skips the substring check when no source text is supplied', () => {
+  it('fails closed when no source text is supplied (guard cannot run → review)', () => {
     const deal = makeLlmDeal();
     const result = validateRecord(deal); // no sourceText
+    // The substring check itself can't run without the page text…
     expect(result.failures.some((f) => f.rule === 'grounding_quote_in_source')).toBe(false);
+    // …so we fail closed: the record is not ok and is forced to review.
+    expect(result.failures.some((f) => f.rule === 'grounding_not_verifiable')).toBe(true);
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('validateRecord — promo/intro pricing (true-cost trust guard)', () => {
+  it('forces review when route_type is promo', () => {
+    const deal = makeLlmDeal({ route_type: 'promo' });
+    const result = validateRecord(deal, SOURCE_TEXT);
+    expect(result.failures.some((f) => f.rule === 'promo_pricing_needs_review')).toBe(true);
+  });
+
+  it('forces review when an intro_period condition is present', () => {
+    const base = makeLlmDeal();
+    const deal = {
+      ...base,
+      eligibility: {
+        ...base.eligibility,
+        conditions: [
+          {
+            key: 'intro_period',
+            label: 'Discounted introductory period',
+            value: { months: 6 },
+            source_quote: '6 Monate gratis, danach 15 €/Monat.',
+          },
+        ],
+      },
+    };
+    const result = validateRecord(deal, SOURCE_TEXT);
+    expect(result.failures.some((f) => f.rule === 'promo_pricing_needs_review')).toBe(true);
+  });
+
+  it('does not flag promo pricing on a normal bundle with no intro condition', () => {
+    const result = validateRecord(makeLlmDeal(), SOURCE_TEXT);
+    expect(result.failures.some((f) => f.rule === 'promo_pricing_needs_review')).toBe(false);
   });
 });

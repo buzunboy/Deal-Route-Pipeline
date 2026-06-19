@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  adjustConfidence,
-  mustReview,
-  MUST_REVIEW_CONFIDENCE_THRESHOLD,
-} from './confidence.js';
+import { adjustConfidence, mustReview, MUST_REVIEW_CONFIDENCE_THRESHOLD } from './confidence.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
 
 describe('adjustConfidence', () => {

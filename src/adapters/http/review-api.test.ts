@@ -47,7 +47,9 @@ describe('ReviewApi (HTTP integration)', () => {
   beforeEach(async () => {
     db = new InMemoryDb();
     const review = new ReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    api = new ReviewApi(review, new ConsoleLogger('error'), '<html>page</html>');
+    api = new ReviewApi(review, new ConsoleLogger('error'), {
+      staticPageHtml: '<html>page</html>',
+    });
     await api.listen(0);
     // @ts-expect-error reach into the underlying server for the assigned port
     const port = (api['server'].address() as AddressInfo).port;
@@ -130,5 +132,106 @@ describe('ReviewApi (HTTP integration)', () => {
   it('unknown route is 404', async () => {
     const res = await fetch(`${base}/api/nope`);
     expect(res.status).toBe(404);
+  });
+
+  it('approving a non-existent deal is a 404, not a 500', async () => {
+    const res = await fetch(`${base}/api/candidates/${randomUUID()}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'reviewer' }),
+    });
+    expect(res.status).toBe(404);
+    expect((await res.json()) as { error: string }).toEqual({ error: 'deal not found' });
+  });
+
+  it('approving an already-decided deal is a 409 (conflict), not a 500', async () => {
+    const deal = await seedCandidate();
+    await db.deals.updateStatus(deal.id, DealStatus.enum.rejected, 'r', '2026-06-19T00:00:00Z');
+    const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'reviewer' }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it('an oversized body is rejected with 413, not buffered unbounded', async () => {
+    const deal = await seedCandidate();
+    const huge = JSON.stringify({ approver: 'r', pad: 'x'.repeat(70 * 1024) });
+    const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: huge,
+    });
+    expect(res.status).toBe(413);
+    expect((await db.deals.getById(deal.id))!.status).toBe('candidate');
+  });
+});
+
+describe('ReviewApi — auth (bearer token gating state changes)', () => {
+  let db: InMemoryDb;
+  let api: ReviewApi;
+  let base: string;
+  let dealId: string;
+
+  beforeEach(async () => {
+    db = new InMemoryDb();
+    const evidenceStore = new LocalFsEvidenceStore(mkdtempSync(join(tmpdir(), 'ev-')));
+    const ev = await evidenceStore.save({
+      sourceUrl: 'https://x.de',
+      screenshot: new Uint8Array([1]),
+      html: '<html>',
+      termsText: 't',
+      capturedAt: '2026-06-19T00:00:00.000Z',
+      contentHash: 'h',
+    });
+    await db.evidence.insert(ev);
+    const deal: DealRecord = {
+      ...makeLlmDeal(),
+      id: randomUUID(),
+      schema_version: 1,
+      true_cost_monthly: 10,
+      evidence_id: ev.id,
+      status: DealStatus.enum.candidate,
+      verified_by: null,
+      verified_at: null,
+    };
+    await db.deals.insert(deal);
+    dealId = deal.id;
+
+    const review = new ReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    api = new ReviewApi(review, new ConsoleLogger('error'), { authToken: 'secret-token' });
+    await api.listen(0);
+    // @ts-expect-error reach into the underlying server for the assigned port
+    base = `http://localhost:${(api['server'].address() as AddressInfo).port}`;
+  });
+
+  afterEach(async () => {
+    await api.close();
+  });
+
+  it('rejects approve without a bearer token (401) and does not publish', async () => {
+    const res = await fetch(`${base}/api/candidates/${dealId}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'reviewer' }),
+    });
+    expect(res.status).toBe(401);
+    expect((await db.deals.getById(dealId))!.status).toBe('candidate');
+  });
+
+  it('accepts approve with the correct bearer token', async () => {
+    const res = await fetch(`${base}/api/candidates/${dealId}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer secret-token' },
+      body: JSON.stringify({ approver: 'reviewer' }),
+    });
+    expect(res.status).toBe(200);
+    expect((await db.deals.getById(dealId))!.status).toBe('published');
+  });
+
+  it('still serves read endpoints without a token', async () => {
+    const res = await fetch(`${base}/api/candidates`);
+    expect(res.status).toBe(200);
   });
 });

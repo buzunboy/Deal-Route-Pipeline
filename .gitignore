@@ -10,9 +10,11 @@ dist/
 .env.*
 !.env.example
 
-# Local evidence store (dev)
-.evidence/
-evidence-store/
+# Local evidence store (dev) — anchored to repo root so they never match the
+# source adapter at src/adapters/evidence-store/ (an unanchored `evidence-store/`
+# silently excludes the whole adapter from git).
+/.evidence/
+/evidence-store/
 
 # Test / coverage
 coverage/

@@ -59,10 +59,9 @@ describe('golden: telekom-magenta-disney', () => {
 
   it('maps long-tail conditions to the vocabulary (no invented columns)', async () => {
     const c = (await extract('telekom-magenta-disney'))[0]!;
-    const keys = [
-      ...c.deal.eligibility.conditions,
-      ...c.deal.validity.conditions,
-    ].map((cond) => cond.key);
+    const keys = [...c.deal.eligibility.conditions, ...c.deal.validity.conditions].map(
+      (cond) => cond.key,
+    );
     expect(keys).toContain('requires_other_product');
     expect(keys).toContain('min_contract_term');
     expect(keys).toContain('with_ads');
