@@ -143,6 +143,14 @@ Deployment-agnostic (no Vercel assumption). Build the image and run it as **sche
 [`Dockerfile`](Dockerfile). Bring your own Postgres, evidence store (local volume or S3/R2),
 and LLM key.
 
+The container entrypoint ([`docker-entrypoint.sh`](docker-entrypoint.sh)) applies pending
+DB migrations on start (idempotent — drizzle tracks them), then runs the CLI with the passed
+command, so a fresh deploy never hits missing tables. Set `RUN_MIGRATIONS=false` when a separate
+migration job owns the schema. The Postgres adapter tunes its connection pool and per-statement
+timeout and retries transient errors with backoff (all configurable — see `.env.example`
+`DB_POOL_*` / `DB_STATEMENT_TIMEOUT_MS` / `DB_RETRIES`) so an unattended run can't exhaust the DB
+or wedge on a single query.
+
 ## Tests
 
 Three tiers (see `.github/workflows/` for how CI runs them):

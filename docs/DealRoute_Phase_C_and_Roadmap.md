@@ -64,14 +64,20 @@ it safe and actually useful, and some are trust-critical regardless of Phase C.
    re-proposed — `LaneBSupport.knownDomains()` includes it). Decisions are written
    to an append-only `source_reviews` audit log (log-before-act). Unit + contract +
    integration tested. (Migration `0005`.)
-2. **Pre-C-2 — Persistence/ops hardening for unattended running.** Phase C (and
-   the cron deployment) run autonomously, so close the remaining
-   resilience/scale gaps: DB pool tuning + statement_timeout + `pool.on('error')`
-   + retry/backoff on DB ops (the `withRetry` helper already exists); Dockerfile/
-   compose runs `db:migrate` before the app; evidence-bundle atomic write
-   (temp-then-rename); reliability-driven cadence (a low-reliability source backs
-   off / gets flagged, per the plan). _(The dedupe race + SCAN_LIMIT cliff +
-   monitor next_due were already fixed in the audit pass.)_
+2. **Pre-C-2 — Persistence/ops hardening for unattended running. ✅ DONE.** Closed
+   the resilience/scale gaps for autonomous running: Postgres pool tuning (`max`/
+   idle/connection timeouts) + `statement_timeout` + `pool.on('error')` (log, don't
+   crash) + bounded transient-error retry on every DB op (`postgres/db-resilience.ts`
+   classifies connection/serialization/deadlock SQLSTATEs; non-idempotent inserts
+   treat a retry-time unique violation as "already committed"); the container
+   entrypoint (`docker-entrypoint.sh`) applies migrations before the app runs;
+   evidence bundles are written atomically (sibling staging dir → `rename`) and the
+   stored terms text is hash-verified on read; and reliability now drives cadence —
+   a flaky source backs off (linear inverse-reliability multiplier, capped 5×) and
+   a sub-threshold source logs a warning. Unit + contract + integration tested.
+   _(The field-proposal upsert was already a single atomic SQL statement from
+   `f995bef`; the dedupe race + SCAN_LIMIT cliff + monitor next_due were fixed in
+   the audit pass.)_
 3. **Pre-C-3 — Cost & observability spine.** Phase C is the expensive, agentic
    lane; before turning it on you want: per-run cost already logged on `crawl_runs`
    surfaced/aggregated; a daily/€-budget guard across a discovery batch (not just
@@ -90,18 +96,25 @@ overlap with C but should land before C runs on a schedule against the open web.
 Sequenced into the buckets above. None are critical (nothing auto-publishes;
 the high-severity trust/scale issues were fixed in `3e8aecb`).
 
-**Resilience / ops (→ Pre-C-2):**
-- DB pool has no `max`/timeouts/`statement_timeout`/error handler; DB ops have no
-  retry (the resilience rule wants every external call retried — DB is the gap).
-- Dockerfile never runs migrations → a first deploy hits missing tables. Add a
-  migrate step (entrypoint wrapper or compose `command`).
-- Evidence-bundle write is non-atomic (crash/disk-full mid-write leaves a partial
-  bundle `get()` would surface). Write temp + rename; checksum on read.
-- `field_proposals.upsertAndCount` races on `count` and loses `first_seen_at`
-  under concurrency → do it in one SQL upsert with `count = count + 1`.
-- Concurrent crawl/monitor on one source: the dedupe unique index now prevents
-  duplicate rows, but a source-level advisory lock would avoid wasted duplicate
-  work; consider when the scheduler lands.
+**Resilience / ops (→ Pre-C-2): ✅ DONE (except the advisory lock, deferred).**
+- ✅ DB pool tuning (`max`/idle/connection timeouts) + `statement_timeout` +
+  `pool.on('error')` + bounded transient-error retry on every DB op
+  (`postgres/db-resilience.ts`). Configurable via `DB_POOL_*` / `DB_STATEMENT_TIMEOUT_MS`
+  / `DB_RETRIES`.
+- ✅ Container entrypoint (`docker-entrypoint.sh`) runs migrations before the app.
+- ✅ Evidence-bundle write is atomic (staging dir → `rename`); terms text is
+  hash-verified on read.
+- ✅ `field_proposals.upsertAndCount` was already a single SQL upsert with
+  `count = count + 1` (first_seen_at set only on insert); the contract now pins the
+  first_seen_at-preserved / last_seen_at-advanced invariant.
+- ⏳ Concurrent crawl/monitor on one source: the dedupe unique index prevents
+  duplicate rows; a source-level advisory lock to avoid wasted duplicate *work* is
+  deferred to when the scheduler lands.
+- ⏳ The pg-boss queue adapter opens its own pool against the same DB and is NOT
+  yet pool-bounded like `PostgresDb`. It's intentionally unwired (not in the
+  composition root) in v1's external-cron model, so it's a no-op today — but when
+  the in-process worker lands, apply the same `max`/`statement_timeout` bounds so
+  the two pools' connection caps sum to a known ceiling.
 
 **Fetcher live-edges (→ Pre-C-2, or fold into the Phase-C BrowserAgent work):**
 - Firecrawl response body + screenshot download are unbounded / not size-capped.

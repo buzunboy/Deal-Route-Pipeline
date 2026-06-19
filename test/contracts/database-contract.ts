@@ -176,6 +176,37 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect(proposals[0]!.count).toBe(2);
     });
 
+    it('fieldProposals: a later sighting preserves first_seen_at and advances last_seen_at', async () => {
+      // The upsert is a single SQL statement (count = count + 1); first_seen_at is
+      // set only on the insert branch, so a concurrent/repeat sighting must never
+      // overwrite it — it is the "recurring since" signal the promotion loop reads.
+      const db = await makeDb();
+      const base = {
+        suggested_key: 'requires_pet',
+        label: 'Pet required',
+        rationale: 'r',
+        example_quote: 'q',
+        first_seen_at: '2026-06-19T00:00:00.000Z',
+        last_seen_at: '2026-06-19T00:00:00.000Z',
+      };
+      await db.fieldProposals.upsertAndCount(base);
+      await db.fieldProposals.upsertAndCount({
+        ...base,
+        // A later sighting carries a newer last_seen and a (wrongly) newer
+        // first_seen — the store must keep the ORIGINAL first_seen_at.
+        first_seen_at: '2026-07-01T00:00:00.000Z',
+        last_seen_at: '2026-07-01T00:00:00.000Z',
+      });
+      const proposals = await db.fieldProposals.listOpen(10);
+      expect(proposals).toHaveLength(1);
+      expect(proposals[0]!.count).toBe(2);
+      // Compare by instant, not by exact text: Postgres returns a timestamptz as
+      // `2026-06-19 00:00:00+00` (space/offset), the in-memory store echoes the ISO
+      // input — both denote the same moment, which is what the invariant is about.
+      expect(new Date(proposals[0]!.first_seen_at).toISOString()).toBe('2026-06-19T00:00:00.000Z');
+      expect(new Date(proposals[0]!.last_seen_at).toISOString()).toBe('2026-07-01T00:00:00.000Z');
+    });
+
     it('deals: findByDedupeKey returns the highest-confidence match (canonical)', async () => {
       const db = await makeDb();
       const { dedupeKey } = await import('../../src/domain/index.js');

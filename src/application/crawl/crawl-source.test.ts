@@ -196,6 +196,30 @@ describe('CrawlSourceUseCase', () => {
     expect((await env.db.sources.getById(source.id))!.reliability_score).toBeLessThan(0.5);
   });
 
+  it('reliability decides cadence: a flaky source is scheduled further out than a healthy one', async () => {
+    // A successful crawl of a high-reliability source → tight cadence (≈base).
+    const healthy = makeSource({ reliability_score: 0.95, cadence_days: 3, next_due: null });
+    await env.db.sources.upsert(healthy);
+    await env.uc.execute({ sourceId: healthy.id });
+    const healthyDue = (await env.db.sources.getById(healthy.id))!.next_due!;
+
+    // A failing crawl drops a marginal source below the flag threshold → it backs
+    // off (longer next_due) so we stop hammering an unreliable origin.
+    const flaky = build({
+      fetcher: new FakeFetcher({ outcome: 'error', error: 'boom', text: '' }),
+    });
+    const flakySource = makeSource({ reliability_score: 0.5, cadence_days: 3, next_due: null });
+    await flaky.db.sources.upsert(flakySource);
+    await flaky.uc.execute({ sourceId: flakySource.id });
+    const flakyDue = (await flaky.db.sources.getById(flakySource.id))!.next_due!;
+
+    // FixedClock = 2026-06-19; reliability 0.95 → 1x cadence (3d) = 2026-06-22.
+    expect(healthyDue).toBe('2026-06-22T00:00:00.000Z');
+    // reliability 0.5 → fail → 0.3 → multiplier round(1 + 0.7*4)=4 → 12d = 2026-07-01.
+    expect(flakyDue).toBe('2026-07-01T00:00:00.000Z');
+    expect(new Date(flakyDue).getTime()).toBeGreaterThan(new Date(healthyDue).getTime());
+  });
+
   it('flags a low-confidence extraction as in_review (must-review triage signal)', async () => {
     // A hallucinated grounding quote forces must-review.
     const deal = makeLlmDeal({

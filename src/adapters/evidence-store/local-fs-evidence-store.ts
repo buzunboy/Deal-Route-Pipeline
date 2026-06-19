@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EvidenceSchema, type Evidence, type EvidenceCapture } from '../../domain/index.js';
@@ -34,25 +34,22 @@ const META_FILE = 'evidence.json';
  * Bundles are WRITE-ONCE (trust invariant: monitoring keeps old evidence rather
  * than overwriting it). A collision on the generated id — vanishingly unlikely —
  * fails loudly rather than silently clobbering prior evidence.
+ *
+ * Writes are ATOMIC: every file is written into a sibling staging directory first,
+ * then the staging dir is `rename`d into its final `<id>/` location in one step.
+ * A crash or disk-full mid-write leaves only an orphaned `.tmp-*` staging dir that
+ * {@link get} never looks at — never a half-written bundle that `get()` would
+ * surface as valid evidence (the trust invariant: no partial evidence).
  */
 export class LocalFsEvidenceStore implements EvidenceStore {
   constructor(private readonly baseDir: string) {}
 
   async save(capture: EvidenceCapture): Promise<Evidence> {
     const id = randomUUID();
-    const dir = join(this.baseDir, id);
-
-    // `recursive: false` makes a pre-existing id directory an error, enforcing
-    // write-once. The base dir is created up-front (recursive) so first use works.
-    await mkdir(this.baseDir, { recursive: true });
-    try {
-      await mkdir(dir, { recursive: false });
-    } catch (err) {
-      throw new EvidenceStoreError(
-        `Evidence bundle ${id} already exists; refusing to overwrite (write-once).`,
-        { cause: err },
-      );
-    }
+    const finalDir = join(this.baseDir, id);
+    // Staging dir is a sibling under the SAME base dir, so the final `rename` is a
+    // same-filesystem move (atomic). A random suffix avoids a retry colliding.
+    const stagingDir = join(this.baseDir, `.tmp-${id}-${randomUUID()}`);
 
     const evidence: Evidence = {
       id,
@@ -69,14 +66,23 @@ export class LocalFsEvidenceStore implements EvidenceStore {
     // capture (e.g. empty url) must fail here, never become unreadable evidence.
     const validated = EvidenceSchema.parse(evidence);
 
+    await mkdir(this.baseDir, { recursive: true });
+    await mkdir(stagingDir, { recursive: false });
     try {
+      // Write the whole bundle into staging. If any of these fails, the catch
+      // removes the staging dir and no `<id>/` bundle ever appears.
       await Promise.all([
-        writeFile(join(dir, SCREENSHOT_FILE), capture.screenshot),
-        writeFile(join(dir, HTML_FILE), capture.html, 'utf8'),
-        writeFile(join(dir, TERMS_FILE), capture.termsText, 'utf8'),
-        writeFile(join(dir, META_FILE), JSON.stringify(validated, null, 2), 'utf8'),
+        writeFile(join(stagingDir, SCREENSHOT_FILE), capture.screenshot),
+        writeFile(join(stagingDir, HTML_FILE), capture.html, 'utf8'),
+        writeFile(join(stagingDir, TERMS_FILE), capture.termsText, 'utf8'),
+        writeFile(join(stagingDir, META_FILE), JSON.stringify(validated, null, 2), 'utf8'),
       ]);
+      // Atomic publish: a fully-written staging dir becomes the bundle in one op.
+      // `rename` onto an existing non-empty dir fails, preserving write-once.
+      await rename(stagingDir, finalDir);
     } catch (err) {
+      // Best-effort cleanup of the staging dir; never mask the original failure.
+      await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
       throw new EvidenceStoreError(`Failed to write evidence bundle ${id}.`, { cause: err });
     }
 
@@ -97,6 +103,36 @@ export class LocalFsEvidenceStore implements EvidenceStore {
     if (!parsed.success) {
       throw new EvidenceStoreError(`Stored evidence ${id} is corrupt: ${parsed.error.message}`);
     }
+
+    // Structural-integrity check: every file the metadata references must exist and
+    // be non-empty. The atomic write already makes a torn bundle unreachable; this
+    // is defense-in-depth against later bit-rot / a partial restore that resurrects
+    // the metadata without its body — fail loudly rather than serve a hollow bundle.
+    // (Deliberately structural, NOT a content-hash recompute: `content_hash` is the
+    // monitoring fingerprint over the price/terms REGION, not necessarily the whole
+    // terms file, so re-hashing here would couple the store to a producer detail.)
+    await this.verifyBundleComplete(id, parsed.data);
     return parsed.data;
+  }
+
+  private async verifyBundleComplete(id: string, evidence: Evidence): Promise<void> {
+    const refs = [evidence.screenshot_ref, evidence.html_ref, evidence.terms_ref];
+    for (const ref of refs) {
+      let size: number;
+      try {
+        // Refs are relative to baseDir (they embed the bundle id); resolve from there.
+        size = (await stat(join(this.baseDir, ref))).size;
+      } catch (err) {
+        throw new EvidenceStoreError(
+          `Stored evidence ${id} is incomplete: missing referenced file ${ref}.`,
+          { cause: err },
+        );
+      }
+      if (size === 0) {
+        throw new EvidenceStoreError(
+          `Stored evidence ${id} is corrupt: referenced file ${ref} is empty.`,
+        );
+      }
+    }
   }
 }

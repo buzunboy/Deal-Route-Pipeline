@@ -33,11 +33,47 @@ import type {
   SourceReviewRecord,
   SubscriptionCatalogEntry,
 } from '../../../domain/index.js';
+import type { Logger } from '../../../application/ports/index.js';
 import * as schema from './schema.js';
 import { dealToRow, rowToDeal } from './mappers.js';
 import { newId } from '../../../application/shared/id.js';
+import { DbRetrier, type DbRetryConfig } from './db-resilience.js';
 
 type Db = NodePgDatabase<typeof schema>;
+
+/** Pool + retry tuning for the Postgres adapter. All values come from typed config. */
+export interface PostgresDbOptions {
+  pool: {
+    max: number;
+    idleTimeoutMillis: number;
+    connectionTimeoutMillis: number;
+    statementTimeoutMillis: number;
+  };
+  retry: DbRetryConfig;
+  logger: Logger;
+}
+
+/**
+ * Defaults for `connect(url)` with no options — used by the contract test harness.
+ * The fallback logger writes to the console rather than swallowing: a pool-error or
+ * retry warning on a trust-critical adapter must never vanish silently (code-style:
+ * "no silent catches"). Production always injects the real Logger from the container.
+ */
+const DEFAULT_OPTIONS: PostgresDbOptions = {
+  pool: {
+    max: 10,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+    statementTimeoutMillis: 30_000,
+  },
+  retry: { retries: 3, baseDelayMs: 100 },
+  logger: {
+    debug: (msg, ctx) => console.debug(msg, ctx ?? ''),
+    info: (msg, ctx) => console.info(msg, ctx ?? ''),
+    warn: (msg, ctx) => console.warn(msg, ctx ?? ''),
+    error: (msg, ctx) => console.error(msg, ctx ?? ''),
+  },
+};
 
 /**
  * Postgres Database adapter (drizzle). Implements the same `Database` port as the
@@ -60,22 +96,46 @@ export class PostgresDb implements Database {
   private constructor(
     private readonly pool: pg.Pool,
     db: Db,
+    retrier: DbRetrier,
   ) {
-    this.sources = new PgSourceRepo(db);
-    this.deals = new PgDealRepo(db);
-    this.crawlRuns = new PgCrawlRunRepo(db);
-    this.evidence = new PgEvidenceRepo(db);
-    this.manualCapture = new PgManualCaptureRepo(db);
-    this.fieldProposals = new PgFieldProposalRepo(db);
-    this.changes = new PgChangeRepo(db);
-    this.reviews = new PgReviewRepo(db);
-    this.sourceReviews = new PgSourceReviewRepo(db);
-    this.catalog = new PgCatalogRepo(db);
+    this.sources = new PgSourceRepo(db, retrier);
+    this.deals = new PgDealRepo(db, retrier);
+    this.crawlRuns = new PgCrawlRunRepo(db, retrier);
+    this.evidence = new PgEvidenceRepo(db, retrier);
+    this.manualCapture = new PgManualCaptureRepo(db, retrier);
+    this.fieldProposals = new PgFieldProposalRepo(db, retrier);
+    this.changes = new PgChangeRepo(db, retrier);
+    this.reviews = new PgReviewRepo(db, retrier);
+    this.sourceReviews = new PgSourceReviewRepo(db, retrier);
+    this.catalog = new PgCatalogRepo(db, retrier);
   }
 
-  static connect(connectionString: string): PostgresDb {
-    const pool = new pg.Pool({ connectionString });
-    return new PostgresDb(pool, drizzle(pool, { schema }));
+  static connect(
+    connectionString: string,
+    options: PostgresDbOptions = DEFAULT_OPTIONS,
+  ): PostgresDb {
+    const pool = new pg.Pool({
+      connectionString,
+      max: options.pool.max,
+      idleTimeoutMillis: options.pool.idleTimeoutMillis,
+      connectionTimeoutMillis: options.pool.connectionTimeoutMillis,
+      // Caps any single statement server-side so a wedged query frees its
+      // connection instead of pinning it for the life of the pool.
+      statement_timeout: options.pool.statementTimeoutMillis,
+    });
+
+    // An idle-client error (e.g. the DB killed the connection) is emitted on the
+    // pool, not on any awaited call. Without a handler Node treats it as an
+    // unhandled 'error' event and crashes the process — log and let the pool
+    // evict/replace the client instead (resilience: a transient never crashes us).
+    pool.on('error', (err) => {
+      options.logger.error('db: idle pool client error (connection evicted)', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    const retrier = new DbRetrier(options.retry, options.logger);
+    return new PostgresDb(pool, drizzle(pool, { schema }), retrier);
   }
 
   async close(): Promise<void> {
@@ -83,67 +143,85 @@ export class PostgresDb implements Database {
   }
 }
 
-class PgSourceRepo implements SourceRepository {
-  constructor(private readonly db: Db) {}
-  async upsert(s: Source): Promise<void> {
-    await this.db
-      .insert(schema.sources)
-      .values(toSourceRow(s))
-      .onConflictDoUpdate({
-        target: schema.sources.id,
-        set: toSourceRow(s),
-      });
-  }
-  async getById(id: string): Promise<Source | null> {
-    const rows = await this.db
-      .select()
-      .from(schema.sources)
-      .where(eq(schema.sources.id, id))
-      .limit(1);
-    return rows[0] ? fromSourceRow(rows[0]) : null;
-  }
-  async listDue(now: Date, limit: number): Promise<Source[]> {
-    const rows = await this.db
-      .select()
-      .from(schema.sources)
-      .where(
-        and(
-          eq(schema.sources.status, 'active'),
-          or(isNull(schema.sources.nextDue), lte(schema.sources.nextDue, now.toISOString())),
-        ),
-      )
-      .limit(limit);
-    return rows.map(fromSourceRow);
-  }
-  async listByStatus(status: Source['status']): Promise<Source[]> {
-    const rows = await this.db
-      .select()
-      .from(schema.sources)
-      .where(eq(schema.sources.status, status));
-    return rows.map(fromSourceRow);
-  }
-  async update(s: Source): Promise<void> {
-    await this.db.update(schema.sources).set(toSourceRow(s)).where(eq(schema.sources.id, s.id));
+/**
+ * Base for every Pg repo: holds the drizzle handle + the shared retrier. Repo
+ * methods route their DB calls through `run(op, fn, idempotent?)` so transient
+ * errors retry with backoff and non-idempotent inserts stay safe under retry.
+ */
+abstract class PgRepo {
+  constructor(
+    protected readonly db: Db,
+    private readonly retrier: DbRetrier,
+  ) {}
+  protected run<T>(op: string, fn: () => Promise<T>, idempotent = true): Promise<T> {
+    return this.retrier.run(op, fn, idempotent);
   }
 }
 
-class PgDealRepo implements DealRepository {
-  constructor(private readonly db: Db) {}
+class PgSourceRepo extends PgRepo implements SourceRepository {
+  async upsert(s: Source): Promise<void> {
+    await this.run('sources.upsert', () =>
+      this.db
+        .insert(schema.sources)
+        .values(toSourceRow(s))
+        .onConflictDoUpdate({
+          target: schema.sources.id,
+          set: toSourceRow(s),
+        }),
+    );
+  }
+  async getById(id: string): Promise<Source | null> {
+    const rows = await this.run('sources.getById', () =>
+      this.db.select().from(schema.sources).where(eq(schema.sources.id, id)).limit(1),
+    );
+    return rows[0] ? fromSourceRow(rows[0]) : null;
+  }
+  async listDue(now: Date, limit: number): Promise<Source[]> {
+    const rows = await this.run('sources.listDue', () =>
+      this.db
+        .select()
+        .from(schema.sources)
+        .where(
+          and(
+            eq(schema.sources.status, 'active'),
+            or(isNull(schema.sources.nextDue), lte(schema.sources.nextDue, now.toISOString())),
+          ),
+        )
+        .limit(limit),
+    );
+    return rows.map(fromSourceRow);
+  }
+  async listByStatus(status: Source['status']): Promise<Source[]> {
+    const rows = await this.run('sources.listByStatus', () =>
+      this.db.select().from(schema.sources).where(eq(schema.sources.status, status)),
+    );
+    return rows.map(fromSourceRow);
+  }
+  async update(s: Source): Promise<void> {
+    await this.run('sources.update', () =>
+      this.db.update(schema.sources).set(toSourceRow(s)).where(eq(schema.sources.id, s.id)),
+    );
+  }
+}
+
+class PgDealRepo extends PgRepo implements DealRepository {
   async insert(d: DealRecord): Promise<void> {
     // Idempotent under the (dedupe_key, evidence_id) unique index: a concurrent
     // duplicate insert for the same offer+capture is a no-op rather than a dupe row.
-    await this.db.insert(schema.deals).values(dealToRow(d)).onConflictDoNothing();
+    await this.run('deals.insert', () =>
+      this.db.insert(schema.deals).values(dealToRow(d)).onConflictDoNothing(),
+    );
   }
   async getById(id: string): Promise<DealRecord | null> {
-    const rows = await this.db.select().from(schema.deals).where(eq(schema.deals.id, id)).limit(1);
+    const rows = await this.run('deals.getById', () =>
+      this.db.select().from(schema.deals).where(eq(schema.deals.id, id)).limit(1),
+    );
     return rows[0] ? rowToDeal(rows[0]) : null;
   }
   async listByStatus(status: DealStatus, limit: number): Promise<DealRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(schema.deals)
-      .where(eq(schema.deals.status, status))
-      .limit(limit);
+    const rows = await this.run('deals.listByStatus', () =>
+      this.db.select().from(schema.deals).where(eq(schema.deals.status, status)).limit(limit),
+    );
     return rows.map(rowToDeal);
   }
   async listBySourceUrl(
@@ -152,40 +230,46 @@ class PgDealRepo implements DealRepository {
     limit: number,
   ): Promise<DealRecord[]> {
     if (statuses.length === 0) return [];
-    const rows = await this.db
-      .select()
-      .from(schema.deals)
-      .where(and(eq(schema.deals.sourceUrl, sourceUrl), inArray(schema.deals.status, statuses)))
-      .orderBy(desc(schema.deals.id))
-      .limit(limit);
+    const rows = await this.run('deals.listBySourceUrl', () =>
+      this.db
+        .select()
+        .from(schema.deals)
+        .where(and(eq(schema.deals.sourceUrl, sourceUrl), inArray(schema.deals.status, statuses)))
+        .orderBy(desc(schema.deals.id))
+        .limit(limit),
+    );
     return rows.map(rowToDeal);
   }
   async findActiveByDedupeKeyAndHash(key: string, contentHash: string): Promise<DealRecord | null> {
     // Join to the linked evidence and match its content hash — done in SQL so it
     // scales regardless of how many candidates share the dedupe key.
-    const rows = await this.db
-      .select({ deal: schema.deals })
-      .from(schema.deals)
-      .innerJoin(schema.evidence, eq(schema.deals.evidenceId, schema.evidence.id))
-      .where(
-        and(
-          eq(schema.deals.dedupeKey, key),
-          inArray(schema.deals.status, ['candidate', 'in_review']),
-          eq(schema.evidence.contentHash, contentHash),
-        ),
-      )
-      .limit(1);
+    const rows = await this.run('deals.findActiveByDedupeKeyAndHash', () =>
+      this.db
+        .select({ deal: schema.deals })
+        .from(schema.deals)
+        .innerJoin(schema.evidence, eq(schema.deals.evidenceId, schema.evidence.id))
+        .where(
+          and(
+            eq(schema.deals.dedupeKey, key),
+            inArray(schema.deals.status, ['candidate', 'in_review']),
+            eq(schema.evidence.contentHash, contentHash),
+          ),
+        )
+        .limit(1),
+    );
     return rows[0] ? rowToDeal(rows[0].deal) : null;
   }
   async findByDedupeKey(key: string): Promise<DealRecord | null> {
     // Push the active-row predicate into SQL so a key with many rejected rows
     // can't page the active one out of a JS-side filter.
-    const rows = await this.db
-      .select()
-      .from(schema.deals)
-      .where(and(eq(schema.deals.dedupeKey, key), ne(schema.deals.status, 'rejected')))
-      .orderBy(desc(schema.deals.confidence))
-      .limit(1);
+    const rows = await this.run('deals.findByDedupeKey', () =>
+      this.db
+        .select()
+        .from(schema.deals)
+        .where(and(eq(schema.deals.dedupeKey, key), ne(schema.deals.status, 'rejected')))
+        .orderBy(desc(schema.deals.confidence))
+        .limit(1),
+    );
     return rows[0] ? rowToDeal(rows[0]) : null;
   }
   async updateStatus(
@@ -194,60 +278,79 @@ class PgDealRepo implements DealRepository {
     verifiedBy: string | null,
     verifiedAt: string | null,
   ): Promise<void> {
-    await this.db
-      .update(schema.deals)
-      .set({ status, verifiedBy, verifiedAt })
-      .where(eq(schema.deals.id, id));
+    await this.run('deals.updateStatus', () =>
+      this.db
+        .update(schema.deals)
+        .set({ status, verifiedBy, verifiedAt })
+        .where(eq(schema.deals.id, id)),
+    );
   }
   async expirePublishedBySourceUrl(sourceUrl: string, expiredAt: string): Promise<number> {
-    const rows = await this.db
-      .update(schema.deals)
-      .set({ status: 'expired', verifiedAt: expiredAt })
-      .where(and(eq(schema.deals.sourceUrl, sourceUrl), eq(schema.deals.status, 'published')))
-      .returning({ id: schema.deals.id });
+    const rows = await this.run('deals.expirePublishedBySourceUrl', () =>
+      this.db
+        .update(schema.deals)
+        .set({ status: 'expired', verifiedAt: expiredAt })
+        .where(and(eq(schema.deals.sourceUrl, sourceUrl), eq(schema.deals.status, 'published')))
+        .returning({ id: schema.deals.id }),
+    );
     return rows.length;
   }
   async update(d: DealRecord): Promise<void> {
-    await this.db.update(schema.deals).set(dealToRow(d)).where(eq(schema.deals.id, d.id));
+    await this.run('deals.update', () =>
+      this.db.update(schema.deals).set(dealToRow(d)).where(eq(schema.deals.id, d.id)),
+    );
   }
 }
 
-class PgCrawlRunRepo implements CrawlRunRepository {
-  constructor(private readonly db: Db) {}
+class PgCrawlRunRepo extends PgRepo implements CrawlRunRepository {
   async insert(r: CrawlRun): Promise<void> {
-    await this.db.insert(schema.crawlRuns).values(toRunRow(r));
+    // Plain insert (PK = id): not idempotent, so a retry treats a unique violation
+    // as "the prior attempt committed" rather than a new failure.
+    await this.run(
+      'crawlRuns.insert',
+      () => this.db.insert(schema.crawlRuns).values(toRunRow(r)),
+      false,
+    );
   }
   async update(r: CrawlRun): Promise<void> {
-    await this.db.update(schema.crawlRuns).set(toRunRow(r)).where(eq(schema.crawlRuns.id, r.id));
+    await this.run('crawlRuns.update', () =>
+      this.db.update(schema.crawlRuns).set(toRunRow(r)).where(eq(schema.crawlRuns.id, r.id)),
+    );
   }
 }
 
-class PgEvidenceRepo implements EvidenceRepository {
-  constructor(private readonly db: Db) {}
+class PgEvidenceRepo extends PgRepo implements EvidenceRepository {
   async insert(e: Evidence): Promise<void> {
-    await this.db.insert(schema.evidence).values(toEvidenceRow(e));
+    await this.run(
+      'evidence.insert',
+      () => this.db.insert(schema.evidence).values(toEvidenceRow(e)),
+      false,
+    );
   }
   async getById(id: string): Promise<Evidence | null> {
-    const rows = await this.db
-      .select()
-      .from(schema.evidence)
-      .where(eq(schema.evidence.id, id))
-      .limit(1);
+    const rows = await this.run('evidence.getById', () =>
+      this.db.select().from(schema.evidence).where(eq(schema.evidence.id, id)).limit(1),
+    );
     return rows[0] ? fromEvidenceRow(rows[0]) : null;
   }
 }
 
-class PgManualCaptureRepo implements ManualCaptureRepository {
-  constructor(private readonly db: Db) {}
+class PgManualCaptureRepo extends PgRepo implements ManualCaptureRepository {
   async insert(t: ManualCaptureTask): Promise<void> {
-    await this.db.insert(schema.manualCaptureTasks).values(toManualCaptureRow(t));
+    await this.run(
+      'manualCapture.insert',
+      () => this.db.insert(schema.manualCaptureTasks).values(toManualCaptureRow(t)),
+      false,
+    );
   }
   async listOpen(limit: number): Promise<ManualCaptureTask[]> {
-    const rows = await this.db
-      .select()
-      .from(schema.manualCaptureTasks)
-      .where(eq(schema.manualCaptureTasks.status, 'open'))
-      .limit(limit);
+    const rows = await this.run('manualCapture.listOpen', () =>
+      this.db
+        .select()
+        .from(schema.manualCaptureTasks)
+        .where(eq(schema.manualCaptureTasks.status, 'open'))
+        .limit(limit),
+    );
     return rows.map((r) => ({
       id: r.id,
       source_id: r.sourceId,
@@ -260,37 +363,44 @@ class PgManualCaptureRepo implements ManualCaptureRepository {
   }
 }
 
-class PgFieldProposalRepo implements FieldProposalRepository {
-  constructor(private readonly db: Db) {}
+class PgFieldProposalRepo extends PgRepo implements FieldProposalRepository {
   async upsertAndCount(p: Omit<FieldProposalRecord, 'id' | 'count' | 'status'>): Promise<void> {
-    await this.db
-      .insert(schema.fieldProposals)
-      .values({
-        id: newId(),
-        suggestedKey: p.suggested_key,
-        label: p.label,
-        rationale: p.rationale,
-        exampleQuote: p.example_quote,
-        count: 1,
-        status: 'open',
-        firstSeenAt: p.first_seen_at,
-        lastSeenAt: p.last_seen_at,
-      })
-      .onConflictDoUpdate({
-        target: schema.fieldProposals.suggestedKey,
-        set: {
-          count: sqlIncrement(),
+    // Single-statement upsert: count = count + 1 on conflict, first_seen_at set
+    // only on the insert branch (preserved on repeat). Idempotent under retry only
+    // in the sense that the ON CONFLICT path is safe; an over-count on a retried
+    // commit is acceptable (a proposal tally is advisory, not trust-critical).
+    await this.run('fieldProposals.upsertAndCount', () =>
+      this.db
+        .insert(schema.fieldProposals)
+        .values({
+          id: newId(),
+          suggestedKey: p.suggested_key,
+          label: p.label,
+          rationale: p.rationale,
+          exampleQuote: p.example_quote,
+          count: 1,
+          status: 'open',
+          firstSeenAt: p.first_seen_at,
           lastSeenAt: p.last_seen_at,
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: schema.fieldProposals.suggestedKey,
+          set: {
+            count: sqlIncrement(),
+            lastSeenAt: p.last_seen_at,
+          },
+        }),
+    );
   }
   async listOpen(limit: number): Promise<FieldProposalRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(schema.fieldProposals)
-      .where(eq(schema.fieldProposals.status, 'open'))
-      .orderBy(desc(schema.fieldProposals.count))
-      .limit(limit);
+    const rows = await this.run('fieldProposals.listOpen', () =>
+      this.db
+        .select()
+        .from(schema.fieldProposals)
+        .where(eq(schema.fieldProposals.status, 'open'))
+        .orderBy(desc(schema.fieldProposals.count))
+        .limit(limit),
+    );
     return rows.map((r) => ({
       id: r.id,
       suggested_key: r.suggestedKey,
@@ -305,28 +415,34 @@ class PgFieldProposalRepo implements FieldProposalRepository {
   }
 }
 
-class PgChangeRepo implements ChangeRepository {
-  constructor(private readonly db: Db) {}
+class PgChangeRepo extends PgRepo implements ChangeRepository {
   async insert(c: Change): Promise<void> {
-    await this.db.insert(schema.changes).values({
-      id: c.id,
-      dealId: c.deal_id,
-      sourceId: c.source_id,
-      kind: c.kind,
-      previousHash: c.previous_hash,
-      currentHash: c.current_hash,
-      detectedAt: c.detected_at,
-    });
+    await this.run(
+      'changes.insert',
+      () =>
+        this.db.insert(schema.changes).values({
+          id: c.id,
+          dealId: c.deal_id,
+          sourceId: c.source_id,
+          kind: c.kind,
+          previousHash: c.previous_hash,
+          currentHash: c.current_hash,
+          detectedAt: c.detected_at,
+        }),
+      false,
+    );
   }
   async recentForSource(sourceId: string, limit: number): Promise<Change[]> {
-    const rows = await this.db
-      .select()
-      .from(schema.changes)
-      .where(eq(schema.changes.sourceId, sourceId))
-      // `id` is a deterministic tiebreaker for equal timestamps (matches the
-      // in-memory adapter's contract: newest first, stable).
-      .orderBy(desc(schema.changes.detectedAt), desc(schema.changes.id))
-      .limit(limit);
+    const rows = await this.run('changes.recentForSource', () =>
+      this.db
+        .select()
+        .from(schema.changes)
+        .where(eq(schema.changes.sourceId, sourceId))
+        // `id` is a deterministic tiebreaker for equal timestamps (matches the
+        // in-memory adapter's contract: newest first, stable).
+        .orderBy(desc(schema.changes.detectedAt), desc(schema.changes.id))
+        .limit(limit),
+    );
     return rows.map(rowToChange);
   }
 }
@@ -345,25 +461,31 @@ function rowToChange(r: typeof schema.changes.$inferSelect): Change {
   });
 }
 
-class PgReviewRepo implements ReviewRepository {
-  constructor(private readonly db: Db) {}
+class PgReviewRepo extends PgRepo implements ReviewRepository {
   async insert(r: ReviewRecord): Promise<void> {
-    await this.db.insert(schema.reviews).values({
-      id: r.id,
-      dealId: r.deal_id,
-      action: r.action,
-      approver: r.approver,
-      reason: r.reason,
-      decidedAt: r.decided_at,
-    });
+    await this.run(
+      'reviews.insert',
+      () =>
+        this.db.insert(schema.reviews).values({
+          id: r.id,
+          dealId: r.deal_id,
+          action: r.action,
+          approver: r.approver,
+          reason: r.reason,
+          decidedAt: r.decided_at,
+        }),
+      false,
+    );
   }
   async listForDeal(dealId: string, limit: number): Promise<ReviewRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(schema.reviews)
-      .where(eq(schema.reviews.dealId, dealId))
-      .orderBy(desc(schema.reviews.decidedAt), desc(schema.reviews.id))
-      .limit(limit);
+    const rows = await this.run('reviews.listForDeal', () =>
+      this.db
+        .select()
+        .from(schema.reviews)
+        .where(eq(schema.reviews.dealId, dealId))
+        .orderBy(desc(schema.reviews.decidedAt), desc(schema.reviews.id))
+        .limit(limit),
+    );
     // Re-validate the free-text `action` column at the boundary (matches rowToChange).
     return rows.map((r) =>
       ReviewRecordSchema.parse({
@@ -378,25 +500,31 @@ class PgReviewRepo implements ReviewRepository {
   }
 }
 
-class PgSourceReviewRepo implements SourceReviewRepository {
-  constructor(private readonly db: Db) {}
+class PgSourceReviewRepo extends PgRepo implements SourceReviewRepository {
   async insert(r: SourceReviewRecord): Promise<void> {
-    await this.db.insert(schema.sourceReviews).values({
-      id: r.id,
-      sourceId: r.source_id,
-      action: r.action,
-      approver: r.approver,
-      reason: r.reason,
-      decidedAt: r.decided_at,
-    });
+    await this.run(
+      'sourceReviews.insert',
+      () =>
+        this.db.insert(schema.sourceReviews).values({
+          id: r.id,
+          sourceId: r.source_id,
+          action: r.action,
+          approver: r.approver,
+          reason: r.reason,
+          decidedAt: r.decided_at,
+        }),
+      false,
+    );
   }
   async listForSource(sourceId: string, limit: number): Promise<SourceReviewRecord[]> {
-    const rows = await this.db
-      .select()
-      .from(schema.sourceReviews)
-      .where(eq(schema.sourceReviews.sourceId, sourceId))
-      .orderBy(desc(schema.sourceReviews.decidedAt), desc(schema.sourceReviews.id))
-      .limit(limit);
+    const rows = await this.run('sourceReviews.listForSource', () =>
+      this.db
+        .select()
+        .from(schema.sourceReviews)
+        .where(eq(schema.sourceReviews.sourceId, sourceId))
+        .orderBy(desc(schema.sourceReviews.decidedAt), desc(schema.sourceReviews.id))
+        .limit(limit),
+    );
     return rows.map((r) =>
       SourceReviewRecordSchema.parse({
         id: r.id,
@@ -410,8 +538,7 @@ class PgSourceReviewRepo implements SourceReviewRepository {
   }
 }
 
-class PgCatalogRepo implements SubscriptionCatalogRepository {
-  constructor(private readonly db: Db) {}
+class PgCatalogRepo extends PgRepo implements SubscriptionCatalogRepository {
   async upsert(entry: SubscriptionCatalogEntry): Promise<void> {
     const e = SubscriptionCatalogEntrySchema.parse(entry); // validate at the boundary
     const row = {
@@ -420,13 +547,17 @@ class PgCatalogRepo implements SubscriptionCatalogRepository {
       providerUrl: e.provider_url,
       country: e.country,
     };
-    await this.db
-      .insert(schema.subscriptionCatalog)
-      .values(row)
-      .onConflictDoUpdate({ target: schema.subscriptionCatalog.service, set: row });
+    await this.run('catalog.upsert', () =>
+      this.db
+        .insert(schema.subscriptionCatalog)
+        .values(row)
+        .onConflictDoUpdate({ target: schema.subscriptionCatalog.service, set: row }),
+    );
   }
   async list(): Promise<SubscriptionCatalogEntry[]> {
-    const rows = await this.db.select().from(schema.subscriptionCatalog);
+    const rows = await this.run('catalog.list', () =>
+      this.db.select().from(schema.subscriptionCatalog),
+    );
     return rows.map((r) => ({
       service: r.service,
       category: r.category,

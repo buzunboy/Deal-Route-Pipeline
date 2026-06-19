@@ -201,7 +201,11 @@ export class Container {
         'Persistence enabled but DATABASE_URL is empty. Set it, or run a dry-run/offline command.',
       );
     }
-    const db = PostgresDb.connect(config.database.url);
+    const db = PostgresDb.connect(config.database.url, {
+      pool: config.database.pool,
+      retry: config.database.retry,
+      logger: this.logger,
+    });
     this.closables.push(db);
     return db;
   }

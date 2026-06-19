@@ -47,6 +47,21 @@ const ConfigSchema = z.object({
   // only when it actually constructs the Postgres / pg-boss adapters.
   database: z.object({
     url: z.string(),
+    // Pool + per-statement resilience (Pre-C-2). Bounds connections so an
+    // unattended run can't exhaust Postgres, and caps any single query so a wedged
+    // statement can't hold a connection forever.
+    pool: z.object({
+      max: z.coerce.number().int().positive(),
+      idleTimeoutMillis: z.coerce.number().int().nonnegative(),
+      connectionTimeoutMillis: z.coerce.number().int().positive(),
+      statementTimeoutMillis: z.coerce.number().int().positive(),
+    }),
+    // Retry bounds for transient DB errors (connection reset, serialization
+    // failure, deadlock). Writes stay idempotent (see PostgresDb).
+    retry: z.object({
+      retries: z.coerce.number().int().nonnegative(),
+      baseDelayMs: z.coerce.number().int().nonnegative(),
+    }),
   }),
   queue: z.object({
     databaseUrl: z.string(),
@@ -110,7 +125,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
           }
         : undefined,
     },
-    database: { url: env.DATABASE_URL ?? '' },
+    database: {
+      url: env.DATABASE_URL ?? '',
+      pool: {
+        max: env.DB_POOL_MAX ?? '10',
+        idleTimeoutMillis: env.DB_POOL_IDLE_TIMEOUT_MS ?? '30000',
+        connectionTimeoutMillis: env.DB_POOL_CONNECTION_TIMEOUT_MS ?? '10000',
+        statementTimeoutMillis: env.DB_STATEMENT_TIMEOUT_MS ?? '30000',
+      },
+      retry: {
+        retries: env.DB_RETRIES ?? '3',
+        baseDelayMs: env.DB_RETRY_BASE_DELAY_MS ?? '100',
+      },
+    },
     queue: { databaseUrl: emptyToUndefined(env.QUEUE_DATABASE_URL) ?? env.DATABASE_URL ?? '' },
     crawl: {
       defaultRecrawlDays: env.DEFAULT_RECRAWL_DAYS ?? '3',

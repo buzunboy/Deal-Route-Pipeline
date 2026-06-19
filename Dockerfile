@@ -22,9 +22,14 @@ FROM base AS runtime
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
+# `drizzle/` holds the SQL migrations the entrypoint applies on start.
 COPY drizzle ./drizzle
 COPY docs ./docs
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
-# The CLI is the entrypoint; pass a command, e.g. `crawl --due`, `serve`, `monitor --due`.
-ENTRYPOINT ["node", "dist/adapters/cli/main.js"]
+# The entrypoint applies pending migrations (idempotent), then runs the CLI with
+# the passed command, e.g. `crawl --due`, `serve`, `monitor --due`. Set
+# RUN_MIGRATIONS=false to skip migrating (when a separate job owns the schema).
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["help"]
