@@ -13,7 +13,8 @@ const boolish = z
 
 const ConfigSchema = z.object({
   llm: z.object({
-    provider: z.enum(['anthropic', 'openai']),
+    // `stub` is an offline, no-key provider for demos / e2e dry-run / CI.
+    provider: z.enum(['anthropic', 'openai', 'stub']),
     extractionModel: z.string().min(1),
     discoveryModel: z.string().min(1),
     maxOutputTokens: z.coerce.number().int().positive(),

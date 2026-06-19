@@ -1,0 +1,67 @@
+{
+  "deals": [
+    {
+      "service": "Disney+",
+      "route_type": "bundle",
+      "provider": "Telekom MagentaTV",
+      "headline": "Disney+ included in MagentaTV SmartStream",
+      "price": { "amount": 10, "currency": "EUR", "billing": "monthly" },
+      "country": "DE",
+      "eligibility": {
+        "new_customer_only": true,
+        "residency_kyc": false,
+        "plan_tier_required": "MagentaTV",
+        "min_spend": null,
+        "stackable": null,
+        "conditions": [
+          {
+            "key": "requires_other_product",
+            "label": "Requires a MagentaTV contract",
+            "source_quote": "Voraussetzung ist ein bestehender MagentaTV-Vertrag.",
+            "value": {}
+          },
+          {
+            "key": "min_contract_term",
+            "label": "Minimum contract term 24 months",
+            "source_quote": "Mindestlaufzeit 24 Monate.",
+            "value": { "months": 24 }
+          }
+        ]
+      },
+      "validity": {
+        "start": "2026-01-01",
+        "end": null,
+        "recheck_days": 3,
+        "conditions": [
+          {
+            "key": "with_ads",
+            "label": "Ad-supported tier",
+            "source_quote": "Disney+ Standard mit Werbung inklusive",
+            "value": {}
+          }
+        ]
+      },
+      "included_items": ["Disney+ Standard mit Werbung", "MagentaTV SmartStream Sender"],
+      "attributes": {},
+      "raw_conditions_text": "Nur für Neukunden. Voraussetzung: MagentaTV-Vertrag. Mindestlaufzeit 24 Monate. Preis 10,00 €/Monat. Disney+ Standard mit Werbung. Angebot gültig ab 01.01.2026.",
+      "source_url": "https://www.telekom.de/magenta-tv",
+      "confidence": 0.86,
+      "grounding": [
+        {
+          "field": "price",
+          "quote": "Du zahlst 10,00 € monatlich für\n        MagentaTV SmartStream inklusive Disney+ Standard mit Werbung."
+        },
+        {
+          "field": "eligibility",
+          "quote": "Das Angebot gilt ab dem 01.01.2026 und ist nur für Neukunden verfügbar."
+        },
+        {
+          "field": "validity",
+          "quote": "Das Angebot gilt ab dem 01.01.2026 und ist nur für Neukunden verfügbar."
+        }
+      ],
+      "unmapped_conditions": false,
+      "field_proposals": []
+    }
+  ]
+}
