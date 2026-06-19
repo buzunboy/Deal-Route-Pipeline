@@ -2,3 +2,8 @@ export * from './deal-record/index.js';
 export * from './rules/index.js';
 export * from './errors/index.js';
 export * from './parse-llm-output.js';
+export * from './source/index.js';
+export * from './evidence/index.js';
+export * from './crawl/index.js';
+export * from './proposals/index.js';
+export * from './monitoring/index.js';
