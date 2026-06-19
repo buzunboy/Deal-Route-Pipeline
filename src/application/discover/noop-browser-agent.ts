@@ -9,7 +9,7 @@ import type { BrowserAgent, AgentBudget, AgentRunResult } from '../ports/index.j
 export class NoopBrowserAgent implements BrowserAgent {
   async run(_query: string, _budget: AgentBudget): Promise<AgentRunResult> {
     return {
-      candidates: [],
+      pages: [],
       proposedSources: [],
       stepsUsed: 0,
       costEur: 0,

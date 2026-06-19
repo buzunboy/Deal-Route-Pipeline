@@ -43,3 +43,24 @@ describe('loadConfig — search backend selection', () => {
     expect(() => loadConfig(env({ SEARCH_RESULTS_PER_QUERY: '0' }))).toThrow();
   });
 });
+
+describe('loadConfig — browser agent selection', () => {
+  it('defaults the agent to noop (Tier-4 stays dark)', () => {
+    const cfg = loadConfig(env());
+    expect(cfg.agent.kind).toBe('noop');
+  });
+
+  it('stays noop even when a search key is configured (explicit opt-in required)', () => {
+    const cfg = loadConfig(env({ SEARCH_API_KEY: 'k' }));
+    expect(cfg.agent.kind).toBe('noop');
+  });
+
+  it('honours AGENT=search', () => {
+    const cfg = loadConfig(env({ AGENT: 'search' }));
+    expect(cfg.agent.kind).toBe('search');
+  });
+
+  it('rejects an unknown AGENT value', () => {
+    expect(() => loadConfig(env({ AGENT: 'browseruse' }))).toThrow();
+  });
+});

@@ -9,6 +9,7 @@ import {
   MonitorSourceUseCase,
   MetricsUseCase,
   DailyBudgetGuard,
+  NoopBrowserAgent,
   SystemClock,
   type Fetcher,
   type FeedReader,
@@ -18,6 +19,7 @@ import {
   type Logger,
   type Clock,
   type SearchProvider,
+  type BrowserAgent,
 } from '../application/index.js';
 import { SEED_VOCABULARY, type Vocabulary } from '../domain/index.js';
 import { ConsoleLogger } from '../adapters/logger/console-logger.js';
@@ -31,6 +33,7 @@ import { PoliteFetcher } from '../adapters/fetcher/polite-fetcher.js';
 import { StubSearchProvider } from '../adapters/search/stub-search-provider.js';
 import { BraveSearchProvider } from '../adapters/search/brave-search-provider.js';
 import { FirecrawlSearchProvider } from '../adapters/search/firecrawl-search-provider.js';
+import { SearchBrowserAgent } from '../adapters/agent/search-browser-agent.js';
 import { RssFeedReader } from '../adapters/feed/rss-feed-reader.js';
 import { InMemoryDb } from '../adapters/db/in-memory/in-memory-db.js';
 import { PostgresDb } from '../adapters/db/postgres/postgres-db.js';
@@ -59,6 +62,7 @@ export interface ContainerOptions {
     llm?: Llm;
     clock?: Clock;
     searchProvider?: SearchProvider;
+    browserAgent?: BrowserAgent;
   };
 }
 
@@ -73,6 +77,7 @@ export class Container {
   readonly db: Database;
   readonly vocabulary: Vocabulary;
   readonly searchProvider: SearchProvider;
+  readonly browserAgent: BrowserAgent;
 
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
@@ -101,6 +106,7 @@ export class Container {
     this.evidenceStore = this.buildEvidenceStore(config);
     this.db = this.buildDatabase(config, usePersistence);
     this.searchProvider = overrides.searchProvider ?? this.buildSearchProvider(config);
+    this.browserAgent = overrides.browserAgent ?? this.buildBrowserAgent(config);
     // NB: there is intentionally no job queue wired here. v1 runs as external
     // cron invoking the CLI (`crawl --due`, `monitor --due`, `ingest
     // --community-due`) — see README "Deployment". The `Queue` port + pg-boss/
@@ -202,6 +208,22 @@ export class Container {
       throw new Error('SEARCH_PROVIDER=api requires SEARCH_API_KEY.');
     }
     return new BraveSearchProvider(config.search.apiKey);
+  }
+
+  private buildBrowserAgent(config: Config): BrowserAgent {
+    // `noop` is the DEFAULT off-switch — Tier-4 broad discovery does not run until
+    // AGENT=search is explicitly set, even when a search key is configured.
+    if (config.agent.kind === 'noop') return new NoopBrowserAgent();
+    // The thin search-API-first agent reuses the configured (polite) Fetcher, so
+    // its fetches respect robots + per-domain rate limits exactly like all lanes.
+    return new SearchBrowserAgent(this.searchProvider, this.fetcher, this.clock, this.logger, {
+      resultsPerQuery: config.search.resultsPerQuery,
+      country: config.country,
+      searchTimeoutMs: config.fetcher.timeoutMs,
+      fetchTimeoutMs: config.fetcher.timeoutMs,
+      userAgent: config.fetcher.userAgent,
+      searchCostEur: config.agent.searchCostEur,
+    });
   }
 
   private buildLlm(config: Config): Llm {
