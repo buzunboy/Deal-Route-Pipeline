@@ -16,20 +16,22 @@ The crawl / LLM-extraction / verification / monitoring service for **DealRoute**
 Clean, layered: **domain** → **application** (use-cases) → **adapters/infrastructure**. Dependencies point inward; the domain imports no vendor SDK. Program to **ports**; inject concrete adapters from **one composition root**; every Fetcher / BrowserAgent / LLM / EvidenceStore / DB / Queue is swappable via config. Models are configurable via env (cheap extractor + stronger discovery model) — no hard-coded vendor clients in business logic.
 
 ## Commands
-<!-- Fill these in once the stack is scaffolded, and keep them current. -->
-- Install: `TODO`
-- Build: `TODO`
-- Test: `TODO`
-- Lint + typecheck: `TODO`
-- Dry-run extract a URL: `TODO`
-- Run a crawl (by source / subscription): `TODO`
+Stack: **TypeScript (Node 20+, strict)** · zod · Playwright/Firecrawl · Anthropic/OpenAI/stub · Postgres+drizzle · pg-boss · Vitest.
+- Install: `npm install && npx playwright install chromium`
+- Build: `npm run build`
+- Test: `npm test` (unit + contract + golden + HTTP integration)
+- Lint + typecheck: `npm run lint && npm run typecheck` (or `npm run check` for both + tests)
+- Dry-run extract a URL: `npm run cli -- dry-run-extract <url|file>` (no writes; `LLM_PROVIDER=stub` for offline)
+- Run a crawl: `npm run cli -- crawl --source <id> | --subscription <name> | --due [--dry-run]`
+- Monitor / Review / Serve: `npm run cli -- monitor --due` · `review list|approve|reject|proposals|manual` · `serve`
+- Seed import: `npm run cli -- seed-import` · DB: `npm run db:migrate`
 
 ## Repo layout
-<!-- Update after scaffolding. Indicative: -->
-- `src/domain/` — entities, value objects, pure rules (true-cost, dedupe, vocab mapping, validation)
-- `src/application/` — use-cases (crawl, extract, validate, dedupe, capture-evidence, monitor, review) + ports
-- `src/adapters/` — fetcher, browser-agent, llm, db, evidence-store, queue, http/cli
-- `src/composition/` — wiring / composition root
+- `src/domain/` — deal-record schema (zod) + pure rules: `rules/{true-cost,dedupe-key,vocab-mapping,validate-record,confidence}`, entities (source, evidence, crawl, proposals, monitoring), typed errors, `parse-llm-output` (LLM boundary)
+- `src/application/` — use-cases (`extract`, `crawl/crawl-source`, `review`, `monitor/monitor-source`, `discover/noop-browser-agent`) + `ports/` (Fetcher, Llm, EvidenceStore, repositories+Database, Queue, Clock, BrowserAgent, Logger)
+- `src/adapters/` — `fetcher/` (playwright, firecrawl, page-classifier) · `llm/` (anthropic, openai, stub, pricing) · `evidence-store/` (local-fs) · `db/` (in-memory, postgres+drizzle, migrate) · `queue/` (in-memory, pg-boss) · `http/` (review-api, test-page) · `cli/` · `seeds/` · `logger/` · `shared/retry`
+- `src/composition/container.ts` — the single composition root · `src/config/` — env→typed config (zod)
+- `test/` — `contracts/` (port suites), `fixtures/golden/`, `golden/`, `fakes/`, `factories/` · `drizzle/` — generated migrations
 - `docs/` — design + seed list · `ARCHITECTURE.md` — layers + how to add a source/model/condition
 
 ## Working habits
