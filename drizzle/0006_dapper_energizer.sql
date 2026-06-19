@@ -1,0 +1,1 @@
+CREATE INDEX "crawl_runs_started_at_idx" ON "crawl_runs" USING btree ("started_at");

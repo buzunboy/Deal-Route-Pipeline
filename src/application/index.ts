@@ -12,3 +12,4 @@ export * from './discover/noop-browser-agent.js';
 export * from './discover/discover-site.js';
 export * from './ingest/ingest-community.js';
 export * from './ingest/triage-prompt.js';
+export * from './metrics/metrics.js';

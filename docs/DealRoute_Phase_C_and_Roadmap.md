@@ -83,6 +83,15 @@ it safe and actually useful, and some are trust-critical regardless of Phase C.
    surfaced/aggregated; a daily/€-budget guard across a discovery batch (not just
    per-run); structured run metrics (candidates, proposals, cost, stop-reason)
    queryable. Cheap to add now, essential for a "rate/cost-limited agentic" lane.
+   - ✅ **Cost-aggregation CLI (part 1) DONE.** `CostSummary` domain type +
+     `roundEur` (half-up to cents) + `CrawlRunRepository.costSummary({since,until})`
+     (half-open window, UTC day buckets) implemented on BOTH adapters and pinned by
+     the shared contract suite (in-memory unit tier + Postgres integration tier);
+     `crawl_runs(started_at)` btree index (migration `0006`); `MetricsUseCase` wired
+     in the Container; `stats [--since] [--until]` CLI. The in-memory and Postgres
+     adapters produce bit-for-bit identical summaries (same rounding, sort, bucketing).
+   - ⬜ **Still to do in Pre-C-3:** the daily/€-budget guard across a discovery batch,
+     and the structured run-metrics surface (candidates/proposals/cost/stop-reason).
 4. **Phase C — agentic broad discovery (Tier 4).** See §4.
 5. **Post-C — product-completeness toward the goal.** See §5.
 

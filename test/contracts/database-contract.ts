@@ -1,9 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import type { Database } from '../../src/application/ports/index.js';
-import { DealStatus, type DealRecord } from '../../src/domain/index.js';
+import { DealStatus, type DealRecord, type CrawlRun } from '../../src/domain/index.js';
 import { makeLlmDeal } from '../factories/deal.js';
 import { makeSource } from '../factories/source.js';
 import { randomUUID } from 'node:crypto';
+
+/** A valid succeeded CrawlRun with a fixed started_at + cost, for cost-summary cases. */
+function makeRun(sourceId: string, startedAt: string, costEur: number): CrawlRun {
+  return {
+    id: randomUUID(),
+    source_id: sourceId,
+    status: 'succeeded',
+    started_at: startedAt,
+    finished_at: null,
+    candidates_produced: 0,
+    cost_eur: costEur,
+    error: null,
+  };
+}
 
 function dealRecord(overrides: Partial<DealRecord> = {}): DealRecord {
   return {
@@ -301,6 +315,138 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect(history.map((r) => r.action)).toEqual(['approve', 'reject']);
       expect(history.every((r) => r.source_id === sourceId)).toBe(true);
       expect(history[1]!.reason).toBe('parked');
+    });
+
+    // crawlRuns.costSummary — the shared Postgres DB persists rows ACROSS cases, so
+    // each case scopes its assertions to its own randomUUID() source_ids and bounds
+    // the window to its own far-out timestamps. We assert per_source for our own ids
+    // and never on the global total/run_count, so other cases' rows can't pollute.
+    describe('crawlRuns.costSummary', () => {
+      it('(a) empty window → zeros + empty arrays, never throws', async () => {
+        const db = await makeDb();
+        // A window in a deserted far-future range no other case writes into.
+        const summary = await db.crawlRuns.costSummary({
+          since: new Date('2400-01-01T00:00:00.000Z'),
+          until: new Date('2400-01-02T00:00:00.000Z'),
+        });
+        expect(summary).toEqual({ total_eur: 0, run_count: 0, per_day: [], per_source: [] });
+      });
+
+      it('(b) rolls up across UTC days + sources: per_day asc, per_source cost-desc', async () => {
+        const db = await makeDb();
+        const srcA = randomUUID();
+        const srcB = randomUUID();
+        // Dedicated 2-day window in 2200 so the shared DB can't pollute these ids.
+        const since = new Date('2200-03-01T00:00:00.000Z');
+        const until = new Date('2200-03-03T00:00:00.000Z');
+        // Day 1 (03-01): srcA 1.00 + 2.00, srcB 0.50  → day cost 3.50, 3 runs
+        // Day 2 (03-02): srcA 0.25, srcB 4.00         → day cost 4.25, 2 runs
+        await db.crawlRuns.insert(makeRun(srcA, '2200-03-01T06:00:00.000Z', 1.0));
+        await db.crawlRuns.insert(makeRun(srcA, '2200-03-01T18:00:00.000Z', 2.0));
+        await db.crawlRuns.insert(makeRun(srcB, '2200-03-01T09:00:00.000Z', 0.5));
+        await db.crawlRuns.insert(makeRun(srcA, '2200-03-02T01:00:00.000Z', 0.25));
+        await db.crawlRuns.insert(makeRun(srcB, '2200-03-02T23:00:00.000Z', 4.0));
+
+        const summary = await db.crawlRuns.costSummary({ since, until });
+
+        expect(summary.total_eur).toBe(7.75);
+        expect(summary.run_count).toBe(5);
+        // per_day ascending by day, UTC bucketed.
+        expect(summary.per_day).toEqual([
+          { day: '2200-03-01', cost_eur: 3.5, run_count: 3 },
+          { day: '2200-03-02', cost_eur: 4.25, run_count: 2 },
+        ]);
+        // per_source descending by cost: srcB total 4.50 > srcA total 3.25.
+        expect(summary.per_source).toEqual([
+          { source_id: srcB, cost_eur: 4.5, run_count: 2 },
+          { source_id: srcA, cost_eur: 3.25, run_count: 3 },
+        ]);
+      });
+
+      it('(b2) per_source ties break by source_id ascending', async () => {
+        const db = await makeDb();
+        // Two sources with the SAME total cost; the deterministic tiebreak is
+        // source_id ascending. Pick ids with a known lexical order.
+        const lo = `00000000-0000-4000-8000-${randomUUID().slice(-12)}`;
+        const hi = `ffffffff-ffff-4fff-8fff-${randomUUID().slice(-12)}`;
+        const since = new Date('2201-01-01T00:00:00.000Z');
+        const until = new Date('2201-01-02T00:00:00.000Z');
+        await db.crawlRuns.insert(makeRun(hi, '2201-01-01T05:00:00.000Z', 1.0));
+        await db.crawlRuns.insert(makeRun(lo, '2201-01-01T06:00:00.000Z', 1.0));
+
+        const summary = await db.crawlRuns.costSummary({ since, until });
+        expect(summary.per_source.map((s) => s.source_id)).toEqual([lo, hi]);
+      });
+
+      it('(c) half-open window: started_at === until excluded, === since included', async () => {
+        const db = await makeDb();
+        const src = randomUUID();
+        const since = new Date('2202-05-10T00:00:00.000Z');
+        const until = new Date('2202-05-11T00:00:00.000Z');
+        // exactly at since → INCLUDED; exactly at until → EXCLUDED; just inside → INCLUDED.
+        await db.crawlRuns.insert(makeRun(src, '2202-05-10T00:00:00.000Z', 1.0)); // == since
+        await db.crawlRuns.insert(makeRun(src, '2202-05-10T12:00:00.000Z', 2.0)); // inside
+        await db.crawlRuns.insert(makeRun(src, '2202-05-11T00:00:00.000Z', 9.0)); // == until
+
+        const summary = await db.crawlRuns.costSummary({ since, until });
+        // The 9.00 run at the exclusive upper bound must NOT be counted.
+        expect(summary.per_source).toEqual([{ source_id: src, cost_eur: 3.0, run_count: 2 }]);
+        expect(summary.total_eur).toBe(3.0);
+        expect(summary.run_count).toBe(2);
+      });
+
+      it('(d) rounding: 7 runs of 0.001 sum and round to 0.01 cents identically', async () => {
+        const db = await makeDb();
+        const src = randomUUID();
+        const since = new Date('2203-07-01T00:00:00.000Z');
+        const until = new Date('2203-07-02T00:00:00.000Z');
+        for (let i = 0; i < 7; i++) {
+          await db.crawlRuns.insert(makeRun(src, `2203-07-01T0${i}:00:00.000Z`, 0.001));
+        }
+        const summary = await db.crawlRuns.costSummary({ since, until });
+        expect(summary.per_source).toEqual([{ source_id: src, cost_eur: 0.01, run_count: 7 }]);
+        expect(summary.per_day).toEqual([{ day: '2203-07-01', cost_eur: 0.01, run_count: 7 }]);
+        expect(summary.total_eur).toBe(0.01);
+      });
+
+      it('(e) order-sensitive multiset rounds identically + order-independently', async () => {
+        // Regression guard for float-add order divergence between adapters: the raw
+        // floats {0.005, 0.01, 0.02} sum to 0.035 OR 0.034999999999999996 depending
+        // on fold order, which under "sum raw then round" gives €0.04 vs €0.03 — a
+        // 1-cent disagreement for the SAME rows. With the micro-euro integer-sum
+        // convention the answer is €0.04 regardless of order, in BOTH adapters.
+        const db = await makeDb();
+        const srcA = randomUUID();
+        const srcB = randomUUID();
+        const since = new Date('2300-09-01T00:00:00.000Z');
+        const until = new Date('2300-09-02T00:00:00.000Z');
+        const multiset = [0.005, 0.01, 0.02];
+        // srcA inserts the multiset in one order...
+        for (let i = 0; i < multiset.length; i++) {
+          await db.crawlRuns.insert(makeRun(srcA, `2300-09-01T0${i}:00:00.000Z`, multiset[i]!));
+        }
+        // ...srcB inserts the SAME multiset reversed, proving order-independence
+        // within a single query (Postgres scan/agg order is not insertion order).
+        const reversed = [...multiset].reverse();
+        for (let i = 0; i < reversed.length; i++) {
+          await db.crawlRuns.insert(makeRun(srcB, `2300-09-01T1${i}:00:00.000Z`, reversed[i]!));
+        }
+
+        const summary = await db.crawlRuns.costSummary({ since, until });
+        // Both sources roll up to the SAME rounded cents (€0.04), tie-broken by
+        // source_id ascending. Assert exact values so a regression in either
+        // adapter's convention is caught.
+        const [lo, hi] = [srcA, srcB].sort((a, b) => a.localeCompare(b));
+        expect(summary.per_source).toEqual([
+          { source_id: lo, cost_eur: 0.04, run_count: 3 },
+          { source_id: hi, cost_eur: 0.04, run_count: 3 },
+        ]);
+        // Both multisets land on the same UTC day → one bucket of €0.07 (0.04+0.04
+        // computed from the exact micro sum, not by adding the rounded per-source €).
+        expect(summary.per_day).toEqual([{ day: '2300-09-01', cost_eur: 0.07, run_count: 6 }]);
+        expect(summary.total_eur).toBe(0.07);
+        expect(summary.run_count).toBe(6);
+      });
     });
   });
 }

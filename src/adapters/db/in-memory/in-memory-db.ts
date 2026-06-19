@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
   dedupeKey,
+  toEurMicros,
+  eurFromMicros,
   type Source,
   type DealRecord,
   type CrawlRun,
+  type CostSummary,
   type Evidence,
   type ManualCaptureTask,
   type FieldProposalRecord,
@@ -152,6 +155,62 @@ class InMemoryCrawlRunRepo implements CrawlRunRepository {
   }
   async update(r: CrawlRun): Promise<void> {
     this.store.set(r.id, { ...r });
+  }
+  async costSummary(filter: { since?: Date; until?: Date }): Promise<CostSummary> {
+    // Half-open window on started_at: since inclusive, until exclusive. Mirrors
+    // the Postgres adapter exactly (see CrawlRunRepository.costSummary JSDoc).
+    const sinceMs = filter.since?.getTime();
+    const untilMs = filter.until?.getTime();
+
+    let totalMicros = 0;
+    let runCount = 0;
+    // Accumulate EXACT integer micro-euros per bucket (order-independent), then
+    // round once to cents at the end. Mirrors the Postgres adapter's numeric SUM
+    // of round((cost_eur*1000000)::numeric) — see CostSummarySchema rounding note.
+    const perDay = new Map<string, { micros: number; count: number }>();
+    const perSource = new Map<string, { micros: number; count: number }>();
+
+    for (const r of this.store.values()) {
+      const t = Date.parse(r.started_at);
+      if (sinceMs !== undefined && t < sinceMs) continue;
+      if (untilMs !== undefined && t >= untilMs) continue;
+
+      const micros = toEurMicros(r.cost_eur);
+      totalMicros += micros;
+      runCount += 1;
+
+      const day = new Date(r.started_at).toISOString().slice(0, 10);
+      const d = perDay.get(day) ?? { micros: 0, count: 0 };
+      d.micros += micros;
+      d.count += 1;
+      perDay.set(day, d);
+
+      const s = perSource.get(r.source_id) ?? { micros: 0, count: 0 };
+      s.micros += micros;
+      s.count += 1;
+      perSource.set(r.source_id, s);
+    }
+
+    const perDayArr = [...perDay.entries()]
+      .map(([day, v]) => ({ day, cost_eur: eurFromMicros(v.micros), run_count: v.count }))
+      .sort((a, b) => a.day.localeCompare(b.day)); // ascending by day
+
+    const perSourceArr = [...perSource.entries()]
+      .map(([source_id, v]) => ({
+        source_id,
+        cost_eur: eurFromMicros(v.micros),
+        run_count: v.count,
+      }))
+      // Sort on the ROUNDED cost (desc) so ties break identically to Postgres, then
+      // source_id ascending as the deterministic tiebreaker.
+      .sort((a, b) => b.cost_eur - a.cost_eur || a.source_id.localeCompare(b.source_id));
+
+    return {
+      total_eur: eurFromMicros(totalMicros),
+      run_count: runCount,
+      per_day: perDayArr,
+      per_source: perSourceArr,
+    };
   }
 }
 

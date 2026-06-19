@@ -109,16 +109,24 @@ export const deals = pgTable(
   }),
 );
 
-export const crawlRuns = pgTable('crawl_runs', {
-  id: uuid('id').primaryKey(),
-  sourceId: uuid('source_id').notNull(),
-  status: text('status').notNull(),
-  startedAt: timestamp('started_at', { withTimezone: true, mode: 'string' }).notNull(),
-  finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'string' }),
-  candidatesProduced: integer('candidates_produced').notNull(),
-  costEur: doublePrecision('cost_eur').notNull(),
-  error: text('error'),
-});
+export const crawlRuns = pgTable(
+  'crawl_runs',
+  {
+    id: uuid('id').primaryKey(),
+    sourceId: uuid('source_id').notNull(),
+    status: text('status').notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true, mode: 'string' }).notNull(),
+    finishedAt: timestamp('finished_at', { withTimezone: true, mode: 'string' }),
+    candidatesProduced: integer('candidates_produced').notNull(),
+    costEur: doublePrecision('cost_eur').notNull(),
+    error: text('error'),
+  },
+  // costSummary filters + groups by started_at; a btree serves the window scan and
+  // the per-day grouping.
+  (t) => ({
+    startedAtIdx: index('crawl_runs_started_at_idx').on(t.startedAt),
+  }),
+);
 
 export const manualCaptureTasks = pgTable('manual_capture_tasks', {
   id: uuid('id').primaryKey(),

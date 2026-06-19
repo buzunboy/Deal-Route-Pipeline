@@ -8,6 +8,7 @@ import { review } from './commands/review.js';
 import { serve } from './commands/serve.js';
 import { discover } from './commands/discover.js';
 import { ingest } from './commands/ingest.js';
+import { stats } from './commands/stats.js';
 
 const DEFAULT_SEED_PATH = 'docs/DealRoute_Seed_List_DE.md';
 
@@ -31,6 +32,8 @@ Commands:
   review sources                      List proposed (pending) sources awaiting approval
   review approve-source <id> <who>    Promote a proposed source → active (crawlable)
   review reject-source <id> <who>     Reject a proposed source (never crawled / re-proposed)
+  stats [--since YYYY-MM-DD]          Aggregate logged crawl-run cost (per day + per source).
+        [--until YYYY-MM-DD]          Window is half-open: since inclusive, until exclusive (UTC).
   serve                               Start the review API + thin test page (durable admin contract)
   discover <url> [--max-pages N]      Lane B: bounded same-site discovery → candidates + proposed
           [--dry-run]                 novel domains (capped by pages/€/time; nothing auto-publishes)
@@ -116,6 +119,19 @@ async function main(): Promise<void> {
       });
       break;
     }
+    case 'stats': {
+      const since = parseDateFlag(rest, '--since');
+      const until = parseDateFlag(rest, '--until');
+      // parseDateFlag returns `false` on a present-but-invalid value (already
+      // reported via fail()). Bail before building the container in that case.
+      if (since === false || until === false) return;
+      // Guard a reversed window loudly rather than silently returning empty rows.
+      if (since && until && since.getTime() >= until.getTime()) {
+        return fail('--since must be strictly before --until.');
+      }
+      await stats(config, { since, until });
+      break;
+    }
     default:
       fail(`Unknown command: ${command}\n\n${HELP}`);
   }
@@ -167,6 +183,30 @@ async function runReview(config: Parameters<typeof review>[0], rest: string[]): 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+const DATE_FLAG_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Parse an optional `--since`/`--until` date flag into a UTC-midnight `Date`.
+ * Returns `undefined` when the flag is absent, the validated `Date` when present
+ * and a real `YYYY-MM-DD`, or `false` when present but malformed/impossible — in
+ * which case it has already reported the error via `fail()` (the caller bails).
+ * The round-trip check rejects normalized impossible dates (2026-02-30, 2026-13-01).
+ */
+function parseDateFlag(args: string[], name: string): Date | undefined | false {
+  const raw = flag(args, name);
+  if (raw === undefined) return undefined;
+  if (!DATE_FLAG_RE.test(raw)) {
+    fail(`${name} must be a real YYYY-MM-DD date (got: ${raw}).`);
+    return false;
+  }
+  const d = new Date(`${raw}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== raw) {
+    fail(`${name} must be a real YYYY-MM-DD date (got: ${raw}).`);
+    return false;
+  }
+  return d;
 }
 
 function fail(message: string): void {

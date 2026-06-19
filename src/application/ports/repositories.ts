@@ -10,6 +10,7 @@ import type {
   ReviewRecord,
   SourceReviewRecord,
   SubscriptionCatalogEntry,
+  CostSummary,
 } from '../../domain/index.js';
 
 /**
@@ -60,6 +61,17 @@ export interface DealRepository {
 export interface CrawlRunRepository {
   insert(run: CrawlRun): Promise<void>;
   update(run: CrawlRun): Promise<void>;
+  /**
+   * Aggregate logged run cost over a half-open `started_at` window: `since`
+   * inclusive (`started_at >= since`), `until` exclusive (`started_at < until`).
+   * Both bounds are optional and independent — a run whose `started_at` equals
+   * `until` is EXCLUDED, one equal to `since` is INCLUDED. Day buckets are UTC
+   * (`YYYY-MM-DD`). `per_day` is ascending by day; `per_source` is descending by
+   * `cost_eur` then ascending by `source_id`. An empty window returns zeros +
+   * empty arrays (never throws). Sums are rounded to cents via the domain
+   * `roundEur` helper, applied identically in both adapters.
+   */
+  costSummary(filter: { since?: Date; until?: Date }): Promise<CostSummary>;
 }
 
 export interface EvidenceRepository {

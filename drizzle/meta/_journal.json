@@ -43,6 +43,13 @@
       "when": 1781871054292,
       "tag": "0005_plain_stingray",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781876123101,
+      "tag": "0006_dapper_energizer",
+      "breakpoints": true
     }
   ]
 }

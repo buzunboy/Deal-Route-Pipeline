@@ -1,5 +1,6 @@
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { and, eq, ne, lte, or, isNull, desc, inArray } from 'drizzle-orm';
+import { and, eq, ne, lte, lt, gte, or, isNull, desc, asc, inArray, sql } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
 import pg from 'pg';
 import type {
   Database,
@@ -19,11 +20,14 @@ import {
   ReviewRecordSchema,
   SourceReviewRecordSchema,
   SubscriptionCatalogEntrySchema,
+  CostSummarySchema,
+  eurFromMicros,
 } from '../../../domain/index.js';
 import type {
   Source,
   DealRecord,
   CrawlRun,
+  CostSummary,
   Evidence,
   ManualCaptureTask,
   FieldProposalRecord,
@@ -316,6 +320,83 @@ class PgCrawlRunRepo extends PgRepo implements CrawlRunRepository {
     await this.run('crawlRuns.update', () =>
       this.db.update(schema.crawlRuns).set(toRunRow(r)).where(eq(schema.crawlRuns.id, r.id)),
     );
+  }
+  async costSummary(filter: { since?: Date; until?: Date }): Promise<CostSummary> {
+    // Half-open window on started_at: since inclusive (gte), until exclusive (lt).
+    // started_at is timestamptz mode:'string'; compare against an ISO string exactly
+    // like sources.listDue does, so the boundary matches the in-memory adapter.
+    const predicates: SQL[] = [];
+    if (filter.since) predicates.push(gte(schema.crawlRuns.startedAt, filter.since.toISOString()));
+    if (filter.until) predicates.push(lt(schema.crawlRuns.startedAt, filter.until.toISOString()));
+    const where = predicates.length > 0 ? and(...predicates) : undefined;
+
+    // UTC calendar-day bucket as YYYY-MM-DD — identical string to the in-memory
+    // adapter's `new Date(started_at).toISOString().slice(0,10)`.
+    const dayExpr = sql<string>`to_char(${schema.crawlRuns.startedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
+
+    // Sum EXACT integer micro-euros, not raw floats: round each row to micro-euros
+    // (numeric `round` of the double product cost_eur*1000000 — byte-identical to
+    // the in-memory adapter's `Math.round(cost_eur*1e6)`), then `sum` as numeric,
+    // which is exact and order-independent. Defeats float-add order divergence
+    // between adapters. `::bigint` makes the result a plain integer for JS.
+    // See CostSummarySchema's rounding-convention note.
+    const microSumExpr = sql<number>`coalesce(sum(round((${schema.crawlRuns.costEur} * 1000000)::numeric)), 0)::bigint`;
+
+    return this.run('crawlRuns.costSummary', async () => {
+      const [totalsRows, perDayRows, perSourceRows] = await Promise.all([
+        // (1) totals — coalesce so an empty window returns 0, not NULL.
+        this.db
+          .select({
+            micros: microSumExpr,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(schema.crawlRuns)
+          .where(where),
+        // (2) per-day — group + order by the same UTC to_char expression.
+        this.db
+          .select({
+            day: dayExpr,
+            micros: microSumExpr,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(schema.crawlRuns)
+          .where(where)
+          .groupBy(dayExpr)
+          .orderBy(asc(dayExpr)),
+        // (3) per-source — final sort done in JS on the ROUNDED cost (below).
+        this.db
+          .select({
+            sourceId: schema.crawlRuns.sourceId,
+            micros: microSumExpr,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(schema.crawlRuns)
+          .where(where)
+          .groupBy(schema.crawlRuns.sourceId),
+      ]);
+
+      const totals = totalsRows[0] ?? { micros: 0, count: 0 };
+      const summary = {
+        total_eur: eurFromMicros(Number(totals.micros)),
+        run_count: Number(totals.count),
+        per_day: perDayRows.map((r) => ({
+          day: r.day,
+          cost_eur: eurFromMicros(Number(r.micros)),
+          run_count: Number(r.count),
+        })),
+        per_source: perSourceRows
+          .map((r) => ({
+            source_id: r.sourceId,
+            cost_eur: eurFromMicros(Number(r.micros)),
+            run_count: Number(r.count),
+          }))
+          // Sort on the ROUNDED cost (desc) so ties break identically to the
+          // in-memory adapter, then source_id ascending as the tiebreaker.
+          .sort((a, b) => b.cost_eur - a.cost_eur || a.source_id.localeCompare(b.source_id)),
+      };
+      // Boundary discipline: re-validate the assembled object before returning.
+      return CostSummarySchema.parse(summary);
+    });
   }
 }
 
@@ -647,7 +728,6 @@ function fromEvidenceRow(r: typeof schema.evidence.$inferSelect): Evidence {
 }
 
 // drizzle helper to express `count = count + 1` without a raw string everywhere.
-import { sql } from 'drizzle-orm';
 function sqlIncrement() {
   return sql`${schema.fieldProposals.count} + 1`;
 }
