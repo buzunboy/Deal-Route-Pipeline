@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { Llm, LlmRequest, LlmResponse } from '../../application/ports/index.js';
 import { withRetry, withTimeout } from '../shared/retry.js';
 import { estimateCostEur } from './pricing.js';
+import { recoverJsonText } from './json-recovery.js';
 
 export interface AnthropicLlmOptions {
   apiKey: string;
@@ -54,7 +55,7 @@ export class AnthropicLlm implements Llm {
     const inputTokens = message.usage.input_tokens;
     const outputTokens = message.usage.output_tokens;
     return {
-      text: stripJsonFence(text),
+      text: recoverJsonText(text),
       usage: {
         inputTokens,
         outputTokens,
@@ -71,11 +72,4 @@ function isTransient(err: unknown): boolean {
     return err.status === 429 || err.status === undefined || err.status >= 500;
   }
   return true;
-}
-
-/** Models occasionally wrap JSON in a ```json fence; strip it if present. */
-function stripJsonFence(text: string): string {
-  const trimmed = text.trim();
-  const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed);
-  return fence ? fence[1]!.trim() : trimmed;
 }

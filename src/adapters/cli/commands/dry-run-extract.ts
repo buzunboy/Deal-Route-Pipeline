@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { Container } from '../../../composition/container.js';
 import type { Config } from '../../../config/index.js';
+import { BoundaryValidationError } from '../../../domain/index.js';
 import { formatCandidate } from '../format.js';
 
 /**
@@ -22,12 +23,32 @@ export async function dryRunExtract(config: Config, target: string): Promise<voi
       return;
     }
 
-    const result = await container.extract.execute({
-      pageText,
-      sourceUrl,
-      targetService: null,
-      vocabulary: container.vocabulary,
-    });
+    let result;
+    try {
+      result = await container.extract.execute({
+        pageText,
+        sourceUrl,
+        targetService: null,
+        vocabulary: container.vocabulary,
+      });
+    } catch (err) {
+      if (err instanceof BoundaryValidationError) {
+        // The "never trust raw LLM data" guard fired: the model's JSON didn't
+        // match the schema. Surface the specific issues so it's diagnosable
+        // (e.g. a prompt that needs tightening) rather than a bare fatal.
+        console.log(
+          '\nLLM output failed boundary validation (rejected before it could be trusted):',
+        );
+        for (const issue of err.issues) {
+          console.log(`  - ${issue.path || '(root)'}: ${issue.message}`);
+        }
+        console.log(
+          '\nNothing was written. The page may not contain a parseable offer, or the model returned a non-conforming shape.',
+        );
+        return;
+      }
+      throw err;
+    }
 
     console.log(`\nExtracted ${result.candidates.length} candidate(s) from ${sourceUrl}`);
     console.log(`Estimated LLM cost: €${result.costEur.toFixed(6)}`);
@@ -51,7 +72,10 @@ async function loadPageText(
     const raw = await readFile(target, 'utf8');
     return { pageText: raw, sourceUrl: `file://${target}` };
   }
-  const fetched = await container.fetcher.fetch(target);
+  const fetched = await container.fetcher.fetch(target, {
+    timeoutMs: container.config.fetcher.timeoutMs,
+    userAgent: container.config.fetcher.userAgent,
+  });
   if (fetched.outcome !== 'ok') {
     console.log(`Fetch outcome: ${fetched.outcome}${fetched.error ? ` (${fetched.error})` : ''}`);
     if (

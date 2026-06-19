@@ -24,19 +24,39 @@ export const LlmExtractedDealSchema = z.object({
   country: Country,
   eligibility: EligibilitySchema,
   validity: ValiditySchema,
-  included_items: z.array(z.string()).default([]),
+  // The LLM may send `null` for an "empty" optional list/object; accept absent OR
+  // null and normalise to the empty default rather than rejecting the whole deal.
+  included_items: z
+    .array(z.string())
+    .nullish()
+    .transform((v) => v ?? []),
   /** Free-form structured extras that don't fit the typed core. Never dropped. */
-  attributes: z.record(z.unknown()).default({}),
+  attributes: z
+    .record(z.unknown())
+    .nullish()
+    .transform((v) => v ?? {}),
   /** Verbatim terms text from the page. Kept exactly as found. */
-  raw_conditions_text: z.string().default(''),
+  raw_conditions_text: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? ''),
   source_url: z.string().url(),
   /** 0..1 model confidence. Sanity rules may downgrade this; never upgrade. */
   confidence: z.number().min(0).max(1),
-  grounding: z.array(GroundingSchema).default([]),
+  grounding: z
+    .array(GroundingSchema)
+    .nullish()
+    .transform((v) => v ?? []),
   /** True when at least one condition could not be mapped to the vocabulary. */
-  unmapped_conditions: z.boolean().default(false),
+  unmapped_conditions: z
+    .boolean()
+    .nullish()
+    .transform((v) => v ?? false),
   /** Proposed new vocabulary keys for unmapped conditions. */
-  field_proposals: z.array(FieldProposalSchema).default([]),
+  field_proposals: z
+    .array(FieldProposalSchema)
+    .nullish()
+    .transform((v) => v ?? []),
 });
 export type LlmExtractedDeal = z.infer<typeof LlmExtractedDealSchema>;
 

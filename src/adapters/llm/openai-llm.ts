@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import type { Llm, LlmRequest, LlmResponse } from '../../application/ports/index.js';
 import { withRetry, withTimeout } from '../shared/retry.js';
 import { estimateCostEur } from './pricing.js';
+import { recoverJsonText } from './json-recovery.js';
 
 export interface OpenAiLlmOptions {
   apiKey: string;
@@ -48,7 +49,8 @@ export class OpenAiLlm implements Llm {
     const inputTokens = completion.usage?.prompt_tokens ?? 0;
     const outputTokens = completion.usage?.completion_tokens ?? 0;
     return {
-      text,
+      // json_object mode rarely fences, but recover defensively for substitutability.
+      text: recoverJsonText(text),
       usage: {
         inputTokens,
         outputTokens,

@@ -15,19 +15,50 @@ export interface ExtractionPromptInput {
 
 const SYSTEM = `You extract subscription "deal records" from a web page for DealRoute (Germany v1).
 
-Hard rules — follow exactly:
-- You PROPOSE candidates. You never decide what gets published.
-- Return STRICT JSON only: an object { "deals": [ ... ] }. Zero or more deals (a page may hold several offers, or none).
-- Currency for Germany is EUR. Country is "DE".
-- route_type is one of: bundle | standalone | promo | regional.
-- price.billing is one of: monthly | annual | one_time | unknown. If you cannot tell, use "unknown" — do NOT guess.
-- Eligibility flags (new_customer_only, residency_kyc, plan_tier_required, min_spend, stackable) are nullable. If the page does not clearly state a flag, set it to null and add a condition. NEVER guess a flag.
-- Long-tail eligibility/validity conditions go into the respective "conditions" arrays. Map each to a known vocabulary key when one fits; otherwise use key "other", set unmapped_conditions=true on the deal, and add a field_proposals entry. NEVER invent a new top-level field/column.
-- raw_conditions_text: copy the verbatim terms text you saw. Do not summarise it. Never drop information.
-- grounding: for each key field (price, eligibility, validity) include the EXACT sentence from the page text that supports it. Quotes must be copied verbatim from the provided page text. Do not fabricate quotes.
-- confidence: 0..1, your honest calibrated confidence.
+You PROPOSE candidates; you never decide what gets published.
+Return STRICT JSON ONLY — a single object { "deals": [ ... ] } — with NO markdown fences and NO prose before or after. Zero or more deals (a page may hold several offers, or none).
 
-If the page is a login wall, paywall, or has no offer, return { "deals": [] }.`;
+Each deal MUST use EXACTLY these field names and shapes (do not rename, omit, or add top-level fields):
+{
+  "service": string,                      // the subscription service, e.g. "Spotify Premium"
+  "route_type": "bundle" | "standalone" | "promo" | "regional",
+  "provider": string,                     // who offers it, e.g. "Spotify"
+  "headline": string,                     // a short human title for the offer
+  "price": { "amount": number, "currency": "EUR", "billing": "monthly" | "annual" | "one_time" | "unknown" },
+  "country": "DE",
+  "eligibility": {
+    "new_customer_only": boolean | null,
+    "residency_kyc": boolean | null,
+    "plan_tier_required": string | null,
+    "min_spend": number | null,
+    "stackable": boolean | null,
+    "conditions": [ { "key": string, "label": string, "source_quote": string, "value"?: object } ]
+  },
+  "validity": {
+    "start": string | null,               // ISO-8601 date "YYYY-MM-DD" or null if not stated
+    "end": string | null,                 // ISO-8601 date or null for open-ended
+    "recheck_days": number,               // how often to re-verify; default 3
+    "conditions": [ { "key": string, "label": string, "source_quote": string, "value"?: object } ]
+  },
+  "included_items": [ string ],
+  "attributes": { },                      // free-form extras that don't fit above; never drop info
+  "raw_conditions_text": string,          // verbatim terms text, not summarised
+  "source_url": string,                   // the source URL given below
+  "confidence": number,                   // 0..1, honestly calibrated
+  "grounding": [ { "field": "price" | "eligibility" | "validity" | string, "quote": string } ],
+  "unmapped_conditions": boolean,
+  "field_proposals": [ { "suggested_key": string, "label": string, "rationale": string, "example_quote": string } ]
+}
+
+Hard rules — follow exactly:
+- Currency for Germany is EUR; country is "DE".
+- price.billing: if you cannot tell, use "unknown" — do NOT guess.
+- Eligibility flags are nullable: if the page doesn't clearly state one, set it to null and add a condition. NEVER guess a flag.
+- "grounding" is an ARRAY of { "field", "quote" } objects (NOT an object keyed by field name). Include one entry each for price, eligibility, and validity, with the EXACT verbatim sentence from the page text. Quotes must be verbatim substrings of the page text — never fabricated.
+- Long-tail conditions go in the eligibility/validity "conditions" arrays. Map each to a known vocabulary key when one fits; otherwise use key "other", set unmapped_conditions=true, and add a "field_proposals" entry with EXACTLY { "suggested_key", "label", "rationale", "example_quote" }. NEVER invent a new top-level field/column.
+- "raw_conditions_text": copy the verbatim terms text. Do not summarise. Never drop information.
+
+If the page is a login wall, paywall, error page, or has no offer, return { "deals": [] } and nothing else.`;
 
 export function buildExtractionPrompt(input: ExtractionPromptInput): {
   system: string;

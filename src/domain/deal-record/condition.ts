@@ -16,8 +16,15 @@ export const ConditionSchema = z.object({
   key: z.string().min(1),
   /** Human-readable label (from the vocabulary, or a proposed label for `other`). */
   label: z.string().min(1),
-  /** Optional structured payload for the condition (e.g. `{ months: 6 }`). */
-  value: z.record(z.unknown()).optional(),
+  /**
+   * Optional structured payload for the condition (e.g. `{ months: 6 }`).
+   * The LLM may send `null` for "no payload"; we accept absent OR null and treat
+   * both as "no value" (a benign optional — not worth rejecting the whole deal).
+   */
+  value: z
+    .record(z.unknown())
+    .nullish()
+    .transform((v) => v ?? undefined),
   /** Exact source sentence supporting this condition. Required — no grounding, no condition. */
   source_quote: z.string().min(1),
 });

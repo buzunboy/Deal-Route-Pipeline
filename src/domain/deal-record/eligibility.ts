@@ -21,6 +21,9 @@ export const EligibilitySchema = z.object({
   /** Whether the offer stacks with other promos. null = unclear. */
   stackable: z.boolean().nullable(),
   /** Long-tail eligibility conditions mapped to the vocabulary. */
-  conditions: z.array(ConditionSchema).default([]),
+  conditions: z
+    .array(ConditionSchema)
+    .nullish()
+    .transform((v) => v ?? []),
 });
 export type Eligibility = z.infer<typeof EligibilitySchema>;

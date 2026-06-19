@@ -84,7 +84,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       provider: env.LLM_PROVIDER ?? 'anthropic',
       extractionModel: env.LLM_EXTRACTION_MODEL ?? 'claude-haiku-4-5-20251001',
       discoveryModel: env.LLM_DISCOVERY_MODEL ?? 'claude-opus-4-8',
-      maxOutputTokens: env.LLM_MAX_OUTPUT_TOKENS ?? '4096',
+      // Headroom for multi-deal pages: a page with several plans + verbose
+      // German terms can exceed 4k output tokens and truncate mid-JSON.
+      maxOutputTokens: env.LLM_MAX_OUTPUT_TOKENS ?? '8192',
       timeoutMs: env.LLM_TIMEOUT_MS ?? '60000',
       anthropicApiKey: emptyToUndefined(env.ANTHROPIC_API_KEY),
       openaiApiKey: emptyToUndefined(env.OPENAI_API_KEY),

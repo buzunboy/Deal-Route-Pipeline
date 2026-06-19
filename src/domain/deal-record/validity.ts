@@ -19,6 +19,9 @@ export const ValiditySchema = z.object({
   /** Days until this deal should be re-crawled/re-verified. */
   recheck_days: z.number().int().positive(),
   /** Long-tail validity conditions mapped to the vocabulary. */
-  conditions: z.array(ConditionSchema).default([]),
+  conditions: z
+    .array(ConditionSchema)
+    .nullish()
+    .transform((v) => v ?? []),
 });
 export type Validity = z.infer<typeof ValiditySchema>;
