@@ -35,6 +35,31 @@ const BLOCK_SIGNALS = [
   'zugriff verweigert',
 ];
 
+/**
+ * Soft-404 / maintenance / expired-offer interstitials served with HTTP 200.
+ * These must NOT classify as `ok` — extracting from a "page not found" or
+ * "maintenance" body would capture wrong/empty evidence and let a stale or
+ * hallucinated record reach review. Routed to `error` (a contained skip: no
+ * evidence, no candidate).
+ */
+const NON_CONTENT_SIGNALS = [
+  'seite nicht gefunden',
+  'seite wurde nicht gefunden',
+  'page not found',
+  '404',
+  'nicht mehr verfügbar',
+  'angebot abgelaufen',
+  'angebot ist abgelaufen',
+  'offer expired',
+  'no longer available',
+  'wartungsarbeiten',
+  'wartung',
+  'maintenance',
+  "we'll be back",
+  'temporarily unavailable',
+  'vorübergehend nicht verfügbar',
+];
+
 export interface ClassifyInput {
   httpStatus: number;
   text: string;
@@ -56,6 +81,10 @@ export function classifyPage(input: ClassifyInput): FetchOutcome {
   if (containsAny(lower, BLOCK_SIGNALS)) return 'blocked';
   // A password field on an otherwise-OK page = a login-gated offer.
   if (input.hasPasswordField && isThinPage(input.text)) return 'login_required';
+  // Soft-404 / maintenance / expired interstitial at HTTP 200. Guarded by a thin
+  // body so a real offer page that merely mentions "maintenance"/"404" in prose
+  // isn't misclassified — these interstitials carry little other content.
+  if (isThinPage(input.text) && containsAny(lower, NON_CONTENT_SIGNALS)) return 'error';
   return 'ok';
 }
 

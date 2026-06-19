@@ -35,7 +35,26 @@ export class PoliteFetcher implements Fetcher {
       return outcomeOnly('robots_disallowed', url);
     }
     await this.throttle(url);
-    return this.inner.fetch(url, options);
+    const result = await this.inner.fetch(url, options);
+
+    // A redirect can land on a path/origin we DIDN'T robots-check up front. Re-check
+    // the final URL; if it's now disallowed, discard the captured content (we
+    // already fetched it, but must not extract/store a page robots forbids) and
+    // report robots_disallowed. The destination origin's robots is loaded+cached
+    // here for the cross-origin case.
+    if (
+      this.opts.respectRobotsTxt &&
+      result.outcome === 'ok' &&
+      result.finalUrl !== url &&
+      !(await this.isAllowed(result.finalUrl))
+    ) {
+      this.opts.logger.info('final URL disallowed by robots.txt after redirect; discarding', {
+        requested: url,
+        finalUrl: result.finalUrl,
+      });
+      return outcomeOnly('robots_disallowed', result.finalUrl);
+    }
+    return result;
   }
 
   /** Wait until at least `minIntervalMs` has elapsed since the last hit to this host. */

@@ -110,6 +110,34 @@ describe('CrawlSourceUseCase', () => {
     expect(inReview[0]!.evidence_id).not.toBe(first.evidence_id);
   });
 
+  it('pins persisted source_url to the FETCHED url, ignoring an LLM-supplied URL', async () => {
+    // The model emits a wrong/hallucinated source_url; it must NOT be trusted —
+    // the stored URL must match the page the evidence was captured from, or the
+    // reviewer verifies against the wrong page and monitoring can't find the deal.
+    const deal = makeLlmDeal({ source_url: 'https://evil-competitor.example/not-the-page' });
+    env = build({ llmJson: JSON.stringify({ deals: [deal] }) });
+    const source = makeSource({ url: 'https://www.telekom.de/magenta-disney' });
+    await env.db.sources.upsert(source);
+
+    await env.uc.execute({ sourceId: source.id });
+    const persisted = (await env.db.deals.listByStatus('candidate', 10))[0]!;
+    expect(persisted.source_url).toBe('https://www.telekom.de/magenta-disney');
+    expect(persisted.source_url).not.toContain('evil-competitor');
+    // And it matches the evidence bundle's source_url (one provenance chain).
+    const ev = await env.db.evidence.getById(persisted.evidence_id);
+    expect(ev!.source_url).toBe(persisted.source_url);
+  });
+
+  it('re-crawling identical content twice never queues a duplicate candidate (idempotent)', async () => {
+    await env.uc.execute({ sourceId });
+    await env.uc.execute({ sourceId });
+    await env.uc.execute({ sourceId });
+    const total =
+      (await env.db.deals.listByStatus('candidate', 10)).length +
+      (await env.db.deals.listByStatus('in_review', 10)).length;
+    expect(total).toBe(1);
+  });
+
   it('records field proposals for unknown conditions', async () => {
     const deal = makeLlmDeal({
       validity: {

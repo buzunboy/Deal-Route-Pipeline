@@ -92,6 +92,20 @@ describe('DiscoverSiteUseCase', () => {
     expect(result.proposedSources.map((p) => p.url)).toContain(OFF_DOMAIN);
   });
 
+  it('a same-site URL that REDIRECTS off-domain is proposed, not extracted/persisted', async () => {
+    // The start URL itself redirects (finalUrl) to an off-allowlist domain on the
+    // very first fetch — so the ONLY page seen resolves off-domain.
+    const env = build({
+      [LISTING]: { finalUrl: 'https://tracker.evil/landing', text: 'Disney+ gratis', html: '' },
+    });
+    const result = await env.uc.execute({ startUrl: LISTING, maxPages: 50, budget: BUDGET });
+
+    // Nothing extracted from the off-domain final URL…
+    expect(result.candidatesFound).toBe(0);
+    // …and the off-domain landing is recorded as a proposed source for approval.
+    expect(result.proposedSources.map((p) => p.url)).toContain('https://tracker.evil/landing');
+  });
+
   it('stops at the page cap', async () => {
     const env = build({
       [LISTING]: { html: `<a href="${DEAL_A}">A</a><a href="${DEAL_B}">B</a>` },

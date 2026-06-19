@@ -1,4 +1,4 @@
-import { chromium, type Browser } from 'playwright';
+import { chromium, type Browser, type Page } from 'playwright';
 import TurndownService from 'turndown';
 import type { Fetcher, FetchOptions, FetchResult } from '../../application/ports/index.js';
 import { withTimeout } from '../shared/retry.js';
@@ -13,6 +13,11 @@ import { classifyPage } from './page-classifier.js';
  * fetch never throws on a reachable failure — it returns an `error`/`blocked`
  * outcome the caller routes appropriately (resilience).
  */
+/** Hard cap on captured HTML — a huge/infinite-scroll page must not OOM the worker. */
+const MAX_HTML_BYTES = 8 * 1024 * 1024; // 8 MB
+/** Max full-page screenshot height (px); taller pages are clipped, not unbounded. */
+const MAX_SCREENSHOT_HEIGHT = 20000;
+
 export class PlaywrightFetcher implements Fetcher {
   private browser: Browser | null = null;
   private readonly turndown = new TurndownService();
@@ -39,8 +44,19 @@ export class PlaywrightFetcher implements Fetcher {
         );
         const httpStatus = response?.status() ?? 0;
         const html = await page.content();
+        // Size guard: an enormous page (infinite scroll, multi-MB listing) would
+        // OOM the worker via content()+turndown()+screenshot held at once. Bail to
+        // a contained `error` rather than risk crashing the whole batch.
+        if (Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) {
+          return {
+            ...empty,
+            outcome: 'error',
+            finalUrl: page.url(),
+            error: `page HTML exceeds ${MAX_HTML_BYTES} bytes`,
+          };
+        }
         const hasPasswordField = (await page.locator('input[type="password"]').count()) > 0;
-        const screenshot = await page.screenshot({ fullPage: true, timeout: timeoutMs });
+        const screenshot = await this.boundedScreenshot(page, timeoutMs);
         // `document` runs in the browser context, not Node — typed loosely here
         // to avoid pulling the DOM lib into the whole server build. Bounded too,
         // so a wedged JS context can't hang the fetch indefinitely.
@@ -76,6 +92,33 @@ export class PlaywrightFetcher implements Fetcher {
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  }
+
+  /**
+   * Full-page screenshot bounded to a max height — a fullPage shot of an
+   * infinite/very tall page produces a giant, useless PNG (and can OOM). Clip to
+   * MAX_SCREENSHOT_HEIGHT when the page is taller; otherwise capture fullPage.
+   */
+  private async boundedScreenshot(page: Page, timeoutMs: number): Promise<Buffer> {
+    const height = await page
+      .evaluate(
+        () =>
+          (globalThis as { document?: { body?: { scrollHeight?: number } } }).document?.body
+            ?.scrollHeight ?? 0,
+      )
+      .catch(() => 0);
+    if (height > MAX_SCREENSHOT_HEIGHT) {
+      const width = await page
+        .evaluate(
+          () => (globalThis as { window?: { innerWidth?: number } }).window?.innerWidth ?? 1280,
+        )
+        .catch(() => 1280);
+      return page.screenshot({
+        clip: { x: 0, y: 0, width, height: MAX_SCREENSHOT_HEIGHT },
+        timeout: timeoutMs,
+      });
+    }
+    return page.screenshot({ fullPage: true, timeout: timeoutMs });
   }
 
   private async ensureBrowser(): Promise<Browser> {

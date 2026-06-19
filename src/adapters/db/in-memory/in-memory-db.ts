@@ -33,9 +33,11 @@ import type {
  */
 export class InMemoryDb implements Database {
   sources: SourceRepository = new InMemorySourceRepo();
-  deals: DealRepository = new InMemoryDealRepo();
+  // Evidence repo built first so the deal repo can resolve a deal's evidence hash
+  // (the content-hash join behind findActiveByDedupeKeyAndHash).
+  evidence: InMemoryEvidenceRepo = new InMemoryEvidenceRepo();
+  deals: DealRepository = new InMemoryDealRepo(this.evidence);
   crawlRuns: CrawlRunRepository = new InMemoryCrawlRunRepo();
-  evidence: EvidenceRepository = new InMemoryEvidenceRepo();
   manualCapture: ManualCaptureRepository = new InMemoryManualCaptureRepo();
   fieldProposals: FieldProposalRepository = new InMemoryFieldProposalRepo();
   changes: ChangeRepository = new InMemoryChangeRepo();
@@ -71,6 +73,7 @@ class InMemorySourceRepo implements SourceRepository {
 
 class InMemoryDealRepo implements DealRepository {
   private store = new Map<string, DealRecord>();
+  constructor(private readonly evidence: InMemoryEvidenceRepo) {}
   async insert(d: DealRecord): Promise<void> {
     this.store.set(d.id, { ...d });
   }
@@ -81,6 +84,17 @@ class InMemoryDealRepo implements DealRepository {
   async listByStatus(status: DealStatus, limit: number): Promise<DealRecord[]> {
     return [...this.store.values()]
       .filter((d) => d.status === status)
+      .slice(0, limit)
+      .map((d) => ({ ...d }));
+  }
+  async listBySourceUrl(
+    sourceUrl: string,
+    statuses: DealStatus[],
+    limit: number,
+  ): Promise<DealRecord[]> {
+    const set = new Set(statuses);
+    return [...this.store.values()]
+      .filter((d) => d.source_url === sourceUrl && set.has(d.status))
       .slice(0, limit)
       .map((d) => ({ ...d }));
   }
@@ -95,6 +109,15 @@ class InMemoryDealRepo implements DealRepository {
     }
     return best ? { ...best } : null;
   }
+  async findActiveByDedupeKeyAndHash(key: string, contentHash: string): Promise<DealRecord | null> {
+    for (const d of this.store.values()) {
+      if (d.status !== 'candidate' && d.status !== 'in_review') continue;
+      if (dedupeKey(d) !== key) continue;
+      const ev = await this.evidence.getById(d.evidence_id);
+      if (ev && ev.content_hash === contentHash) return { ...d };
+    }
+    return null;
+  }
   async updateStatus(
     id: string,
     status: DealStatus,
@@ -103,6 +126,16 @@ class InMemoryDealRepo implements DealRepository {
   ): Promise<void> {
     const d = this.store.get(id);
     if (d) this.store.set(id, { ...d, status, verified_by: verifiedBy, verified_at: verifiedAt });
+  }
+  async expirePublishedBySourceUrl(sourceUrl: string, expiredAt: string): Promise<number> {
+    let n = 0;
+    for (const d of this.store.values()) {
+      if (d.status === 'published' && d.source_url === sourceUrl) {
+        this.store.set(d.id, { ...d, status: 'expired', verified_at: expiredAt });
+        n++;
+      }
+    }
+    return n;
   }
   async update(d: DealRecord): Promise<void> {
     this.store.set(d.id, { ...d });

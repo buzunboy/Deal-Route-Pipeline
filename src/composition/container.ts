@@ -12,7 +12,6 @@ import {
   type Llm,
   type EvidenceStore,
   type Database,
-  type Queue,
   type Logger,
   type Clock,
 } from '../application/index.js';
@@ -28,8 +27,6 @@ import { PoliteFetcher } from '../adapters/fetcher/polite-fetcher.js';
 import { RssFeedReader } from '../adapters/feed/rss-feed-reader.js';
 import { InMemoryDb } from '../adapters/db/in-memory/in-memory-db.js';
 import { PostgresDb } from '../adapters/db/postgres/postgres-db.js';
-import { InMemoryQueue } from '../adapters/queue/in-memory-queue.js';
-import { PgBossQueue } from '../adapters/queue/pg-boss-queue.js';
 
 /**
  * The ONE composition root. It reads typed config and constructs concrete
@@ -66,7 +63,6 @@ export class Container {
   readonly llm: Llm;
   readonly evidenceStore: EvidenceStore;
   readonly db: Database;
-  readonly queue: Queue;
   readonly vocabulary: Vocabulary;
 
   readonly extract: ExtractUseCase;
@@ -92,7 +88,11 @@ export class Container {
     this.llm = overrides.llm ?? this.buildLlm(config);
     this.evidenceStore = this.buildEvidenceStore(config);
     this.db = this.buildDatabase(config, usePersistence);
-    this.queue = this.buildQueue(config, usePersistence);
+    // NB: there is intentionally no job queue wired here. v1 runs as external
+    // cron invoking the CLI (`crawl --due`, `monitor --due`, `ingest
+    // --community-due`) — see README "Deployment". The `Queue` port + pg-boss/
+    // in-memory adapters remain in the tree for the future in-process worker
+    // (Phase C scheduler), but are not a runtime dependency of the container.
 
     this.extract = new ExtractUseCase(this.llm, this.logger);
     this.crawlSource = new CrawlSourceUseCase(
@@ -201,18 +201,6 @@ export class Container {
     const db = PostgresDb.connect(config.database.url);
     this.closables.push(db);
     return db;
-  }
-
-  private buildQueue(config: Config, usePersistence: boolean): Queue {
-    if (!usePersistence) return new InMemoryQueue();
-    if (config.queue.databaseUrl.trim() === '') {
-      throw new Error(
-        'Persistence enabled but QUEUE_DATABASE_URL/DATABASE_URL is empty. Set it, or run a dry-run/offline command.',
-      );
-    }
-    const queue = new PgBossQueue(config.queue.databaseUrl);
-    this.closables.push({ close: () => queue.stop() });
-    return queue;
   }
 
   async shutdown(): Promise<void> {

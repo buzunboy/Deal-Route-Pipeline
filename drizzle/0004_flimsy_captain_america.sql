@@ -1,0 +1,2 @@
+CREATE INDEX "deals_source_url_idx" ON "deals" USING btree ("source_url","status");--> statement-breakpoint
+CREATE UNIQUE INDEX "deals_dedupe_evidence_unique" ON "deals" USING btree ("dedupe_key","evidence_id");

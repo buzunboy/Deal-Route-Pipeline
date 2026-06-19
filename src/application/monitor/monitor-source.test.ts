@@ -109,6 +109,42 @@ describe('MonitorSourceUseCase', () => {
     expect(env.evidenceStore.saved.length).toBeGreaterThan(oldEvidenceCount + 1);
   });
 
+  it('advances next_due on an unchanged pass so the source is not perpetually due', async () => {
+    const fetcher = new FakeFetcher({ text: PAGE_TEXT });
+    const env = build(fetcher);
+    await env.db.sources.upsert(source); // next_due starts null → "due now"
+    await seedPublishedDeal(env.db, env.evidenceStore, source.url, sha256(PAGE_TEXT));
+
+    await env.monitor.execute({ sourceId: source.id });
+
+    const updated = await env.db.sources.getById(source.id);
+    expect(updated!.next_due).not.toBeNull();
+    // next_due is in the future (cadence_days ahead of the fixed clock).
+    expect(Date.parse(updated!.next_due!)).toBeGreaterThan(env.clock.now().getTime());
+    expect(updated!.last_seen).not.toBeNull();
+  });
+
+  it('a repository failure records an `error` change (not disappeared) and never expires', async () => {
+    const fetcher = new FakeFetcher({ text: PAGE_TEXT });
+    const env = build(fetcher);
+    await env.db.sources.upsert(source);
+    const deal = await seedPublishedDeal(env.db, env.evidenceStore, source.url, sha256(PAGE_TEXT));
+
+    // Make the diff-baseline lookup throw (an infra blip), on every pass.
+    env.db.deals.listBySourceUrl = async () => {
+      throw new Error('connection terminated unexpectedly');
+    };
+
+    const r1 = await env.monitor.execute({ sourceId: source.id });
+    const r2 = await env.monitor.execute({ sourceId: source.id });
+    expect(r1.change.kind).toBe('error');
+    expect(r2.change.kind).toBe('error');
+    expect(r1.expired).toBe(0);
+    expect(r2.expired).toBe(0);
+    // Two consecutive infra errors must NOT trip the disappearance debounce.
+    expect((await env.db.deals.getById(deal.id))!.status).toBe('published');
+  });
+
   it('does NOT expire on a single transient failure (debounced)', async () => {
     const fetcher = new FakeFetcher({ outcome: 'error', text: '' });
     const env = build(fetcher);

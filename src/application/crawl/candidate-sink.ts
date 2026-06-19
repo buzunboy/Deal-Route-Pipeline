@@ -30,6 +30,14 @@ export class CandidateSink {
 
       if (existing === null) {
         await this.db.deals.insert(this.toDealRecord(candidate, evidence));
+      } else if (await this.alreadyQueuedForThisCapture(candidate.dedupeKey, evidence)) {
+        // A non-rejected candidate already exists for this route AND this exact
+        // content hash → don't re-queue. Prevents a page with a rotating token
+        // (timestamp, CSRF, A/B banner) from flooding the review queue with a new
+        // in_review row every monitor cycle even though the offer hasn't changed.
+        this.logger.info('route already queued for this capture — skipping duplicate', {
+          dedupeKey: candidate.dedupeKey,
+        });
       } else if (await this.contentDiffers(existing, evidence)) {
         this.logger.info('route changed — queuing a fresh candidate for re-review', {
           dedupeKey: candidate.dedupeKey,
@@ -57,6 +65,17 @@ export class CandidateSink {
   }
 
   /**
+   * Is there already a non-rejected candidate for this route whose evidence has
+   * THIS exact content hash? If so, the current capture is identical to one we've
+   * already queued — re-queuing would just duplicate it (idempotency on re-crawl /
+   * flapping content). Compares by hash, not by which row `findByDedupeKey` picks.
+   */
+  private async alreadyQueuedForThisCapture(dedupeKey: string, fresh: Evidence): Promise<boolean> {
+    const match = await this.db.deals.findActiveByDedupeKeyAndHash(dedupeKey, fresh.content_hash);
+    return match !== null;
+  }
+
+  /**
    * Has the page content changed since the matched deal was captured? Compares
    * evidence content hashes; a missing prior bundle counts as changed (fail toward
    * review, never silently keep a possibly-stale record).
@@ -76,6 +95,11 @@ export class CandidateSink {
       candidate.mustReview || forceReview ? DealStatus.enum.in_review : DealStatus.enum.candidate;
     return {
       ...candidate.deal,
+      // Pin source_url to the URL we actually fetched (the evidence bundle's), NOT
+      // the LLM-supplied value — never trust raw LLM data for a provenance field.
+      // The reviewer must verify against the page the evidence came from, and
+      // monitoring finds/expires deals by source_url, so it must match the source.
+      source_url: evidence.source_url,
       id: newId(),
       schema_version: candidate.schemaVersion,
       true_cost_monthly: candidate.trueCostMonthly,

@@ -48,4 +48,30 @@ describe('classifyPage', () => {
     expect(classifyPage({ httpStatus: 429, text: '', hasPasswordField: false })).toBe('error');
     expect(classifyPage({ httpStatus: 503, text: '', hasPasswordField: false })).toBe('error');
   });
+
+  it('classifies a 200-OK soft-404 / maintenance / expired interstitial as error (no fake evidence)', () => {
+    expect(
+      classifyPage({ httpStatus: 200, text: 'Seite nicht gefunden', hasPasswordField: false }),
+    ).toBe('error');
+    expect(
+      classifyPage({
+        httpStatus: 200,
+        text: 'Wir führen Wartungsarbeiten durch',
+        hasPasswordField: false,
+      }),
+    ).toBe('error');
+    expect(
+      classifyPage({
+        httpStatus: 200,
+        text: 'Dieses Angebot ist abgelaufen.',
+        hasPasswordField: false,
+      }),
+    ).toBe('error');
+  });
+
+  it('does NOT misclassify a rich offer page that merely mentions "maintenance"/"404" in prose', () => {
+    // Guarded by thinness: a real content page with an incidental keyword stays ok.
+    const rich = okText + ' Wartung der Hardware inklusive. Fehlerseite 404 vermeiden. '.repeat(5);
+    expect(classifyPage({ httpStatus: 200, text: rich, hasPasswordField: false })).toBe('ok');
+  });
 });

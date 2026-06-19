@@ -72,6 +72,63 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect(await db.deals.findByDedupeKey(dedupeKey(deal))).toBeNull();
     });
 
+    it('deals: listBySourceUrl is source-scoped + status-filtered', async () => {
+      const db = await makeDb();
+      const a = dealRecord({ source_url: 'https://a.de/x', status: DealStatus.enum.published });
+      const b = dealRecord({ source_url: 'https://b.de/y', status: DealStatus.enum.published });
+      const aCand = dealRecord({ source_url: 'https://a.de/x', status: DealStatus.enum.candidate });
+      await db.deals.insert(a);
+      await db.deals.insert(b);
+      await db.deals.insert(aCand);
+
+      const pub = await db.deals.listBySourceUrl('https://a.de/x', [DealStatus.enum.published], 10);
+      expect(pub.map((d) => d.id)).toEqual([a.id]); // only a.de + published
+
+      const both = await db.deals.listBySourceUrl(
+        'https://a.de/x',
+        [DealStatus.enum.published, DealStatus.enum.candidate],
+        10,
+      );
+      expect(both.map((d) => d.id).sort()).toEqual([a.id, aCand.id].sort());
+    });
+
+    it('deals: expirePublishedBySourceUrl expires only that source’s published deals', async () => {
+      const db = await makeDb();
+      const a1 = dealRecord({ source_url: 'https://a.de/x', status: DealStatus.enum.published });
+      const a2 = dealRecord({ source_url: 'https://a.de/x', status: DealStatus.enum.candidate });
+      const b1 = dealRecord({ source_url: 'https://b.de/y', status: DealStatus.enum.published });
+      await db.deals.insert(a1);
+      await db.deals.insert(a2);
+      await db.deals.insert(b1);
+
+      const n = await db.deals.expirePublishedBySourceUrl('https://a.de/x', '2026-06-19T00:00:00Z');
+      expect(n).toBe(1);
+      expect((await db.deals.getById(a1.id))!.status).toBe('expired');
+      expect((await db.deals.getById(a2.id))!.status).toBe('candidate'); // not published → untouched
+      expect((await db.deals.getById(b1.id))!.status).toBe('published'); // other source → untouched
+    });
+
+    it('deals: findActiveByDedupeKeyAndHash matches a queued candidate by its evidence hash', async () => {
+      const db = await makeDb();
+      const { dedupeKey } = await import('../../src/domain/index.js');
+      const ev = {
+        id: randomUUID(),
+        source_url: 'https://x.de',
+        screenshot_ref: 's',
+        html_ref: 'h',
+        terms_ref: 't',
+        captured_at: '2026-06-19T00:00:00.000Z',
+        content_hash: 'HASH_A',
+      };
+      await db.evidence.insert(ev);
+      const deal = dealRecord({ evidence_id: ev.id, status: DealStatus.enum.candidate });
+      await db.deals.insert(deal);
+      const key = dedupeKey(deal);
+
+      expect((await db.deals.findActiveByDedupeKeyAndHash(key, 'HASH_A'))!.id).toBe(deal.id);
+      expect(await db.deals.findActiveByDedupeKeyAndHash(key, 'OTHER_HASH')).toBeNull();
+    });
+
     it('evidence: insert + getById; unknown id returns null', async () => {
       const db = await makeDb();
       const ev = {

@@ -8,6 +8,7 @@ import {
 } from '../../domain/index.js';
 import type { Fetcher, Database, Clock, Logger, FetchResult } from '../ports/index.js';
 import { CrawlSourceUseCase } from '../crawl/crawl-source.js';
+import { nextDueIso } from '../crawl/source-policy.js';
 import { newId } from '../shared/id.js';
 
 export interface MonitorSourceInput {
@@ -77,18 +78,41 @@ export class MonitorSourceUseCase {
         await this.db.changes.insert(change);
         return { change, reQueued: false, routedToManualCapture: false, expired: 0 };
       }
-      if (isBlockedOutcome(fetched)) return this.handleBlocked(source, fetched);
-      if (fetched.outcome !== 'ok') return this.handleUnreachable(source);
+      if (isBlockedOutcome(fetched)) return await this.handleBlocked(source, fetched);
+      if (fetched.outcome !== 'ok') return await this.handleUnreachable(source);
 
       return await this.handleOk(source, fetched);
     } catch (err) {
-      // Contain any repository/re-crawl failure: log with context, record a
-      // disappeared change so the run is auditable, and return without expiring.
+      // Contain any repository/re-crawl failure so one bad source never crashes a
+      // `monitor --due` batch. Record an `error` change — NOT `disappeared` — so an
+      // infrastructure blip can never count toward auto-expiry of verified deals.
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error('monitor failed', { sourceId: source.id, error: message });
-      const change = this.recordChange(source, 'disappeared', null, null);
+      const change = this.recordChange(source, 'error', null, null);
       await this.safeInsert(change);
       return { change, reQueued: false, routedToManualCapture: false, expired: 0 };
+    } finally {
+      // Advance the recheck cadence on EVERY pass (success, blocked, unreachable,
+      // error) so an unchanged source isn't perpetually `due` and re-fetched every
+      // tick. The content_changed path also re-crawls, which advances next_due too;
+      // a double-advance is harmless (cadence is a floor, not exact).
+      await this.advanceSchedule(source);
+    }
+  }
+
+  /** Bump last_seen + next_due by the source's cadence (best-effort; never throws). */
+  private async advanceSchedule(source: Source): Promise<void> {
+    try {
+      await this.db.sources.update({
+        ...source,
+        last_seen: this.clock.nowIso(),
+        next_due: nextDueIso(this.clock.now(), source.cadence_days),
+      });
+    } catch (err) {
+      this.logger.error('monitor: failed to advance source schedule', {
+        sourceId: source.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -158,20 +182,9 @@ export class MonitorSourceUseCase {
   }
 
   private async expirePublishedForSource(source: Source): Promise<number> {
-    const published = await this.db.deals.listByStatus(DealStatus.enum.published, SCAN_LIMIT);
-    let expired = 0;
-    for (const deal of published) {
-      if (deal.source_url === source.url) {
-        await this.db.deals.updateStatus(
-          deal.id,
-          DealStatus.enum.expired,
-          deal.verified_by,
-          this.clock.nowIso(),
-        );
-        expired++;
-      }
-    }
-    return expired;
+    // Source-scoped, single-statement expiry — deterministic regardless of how
+    // many published deals exist globally (no fetch-N-then-filter scaling cliff).
+    return this.db.deals.expirePublishedBySourceUrl(source.url, this.clock.nowIso());
   }
 
   /** Count the trailing run of `disappeared` changes (newest first) for a source. */
@@ -189,21 +202,18 @@ export class MonitorSourceUseCase {
   }
 
   private async lastHashForSource(source: Source): Promise<string | null> {
-    // Find the most recent deal for this source (across pre-publish + published
-    // states) and read its evidence hash. Kept simple in v1; richer per-region
-    // diffing can slot in. `in_review` is included so a flagged candidate still
-    // anchors the diff baseline (otherwise every check looks like a first sight).
-    for (const status of [
-      DealStatus.enum.published,
-      DealStatus.enum.candidate,
-      DealStatus.enum.in_review,
-    ]) {
-      const deals = await this.db.deals.listByStatus(status, SCAN_LIMIT);
-      const match = deals.find((d) => d.source_url === source.url);
-      if (match) {
-        const evidence = await this.db.evidence.getById(match.evidence_id);
-        if (evidence) return evidence.content_hash;
-      }
+    // Source-scoped lookup of the most recent deal across pre-publish + published
+    // states, then its evidence hash — the diff baseline. `in_review` is included
+    // so a flagged candidate still anchors the baseline (else every check looks
+    // like a first sight). Deterministic regardless of total table size.
+    const deals = await this.db.deals.listBySourceUrl(
+      source.url,
+      [DealStatus.enum.published, DealStatus.enum.candidate, DealStatus.enum.in_review],
+      SCAN_LIMIT,
+    );
+    for (const match of deals) {
+      const evidence = await this.db.evidence.getById(match.evidence_id);
+      if (evidence) return evidence.content_hash;
     }
     return null;
   }

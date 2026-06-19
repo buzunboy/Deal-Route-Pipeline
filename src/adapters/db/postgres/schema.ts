@@ -8,6 +8,7 @@ import {
   timestamp,
   jsonb,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 /**
@@ -99,6 +100,12 @@ export const deals = pgTable(
   (t) => ({
     statusIdx: index('deals_status_idx').on(t.status),
     dedupeIdx: index('deals_dedupe_idx').on(t.dedupeKey),
+    sourceUrlIdx: index('deals_source_url_idx').on(t.sourceUrl, t.status),
+    // One candidate per (route, evidence bundle): blocks the read-then-write race
+    // where two concurrent crawls of the same offer both insert. A content change
+    // produces a NEW evidence id, so the legitimate candidate+in_review pair for a
+    // route still coexists; only true duplicates from the same capture collide.
+    dedupeEvidenceUnique: uniqueIndex('deals_dedupe_evidence_unique').on(t.dedupeKey, t.evidenceId),
   }),
 );
 

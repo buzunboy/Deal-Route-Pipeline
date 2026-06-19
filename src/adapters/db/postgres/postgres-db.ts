@@ -1,5 +1,5 @@
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { and, eq, ne, lte, or, isNull, desc } from 'drizzle-orm';
+import { and, eq, ne, lte, or, isNull, desc, inArray } from 'drizzle-orm';
 import pg from 'pg';
 import type {
   Database,
@@ -125,7 +125,9 @@ class PgSourceRepo implements SourceRepository {
 class PgDealRepo implements DealRepository {
   constructor(private readonly db: Db) {}
   async insert(d: DealRecord): Promise<void> {
-    await this.db.insert(schema.deals).values(dealToRow(d));
+    // Idempotent under the (dedupe_key, evidence_id) unique index: a concurrent
+    // duplicate insert for the same offer+capture is a no-op rather than a dupe row.
+    await this.db.insert(schema.deals).values(dealToRow(d)).onConflictDoNothing();
   }
   async getById(id: string): Promise<DealRecord | null> {
     const rows = await this.db.select().from(schema.deals).where(eq(schema.deals.id, id)).limit(1);
@@ -138,6 +140,37 @@ class PgDealRepo implements DealRepository {
       .where(eq(schema.deals.status, status))
       .limit(limit);
     return rows.map(rowToDeal);
+  }
+  async listBySourceUrl(
+    sourceUrl: string,
+    statuses: DealStatus[],
+    limit: number,
+  ): Promise<DealRecord[]> {
+    if (statuses.length === 0) return [];
+    const rows = await this.db
+      .select()
+      .from(schema.deals)
+      .where(and(eq(schema.deals.sourceUrl, sourceUrl), inArray(schema.deals.status, statuses)))
+      .orderBy(desc(schema.deals.id))
+      .limit(limit);
+    return rows.map(rowToDeal);
+  }
+  async findActiveByDedupeKeyAndHash(key: string, contentHash: string): Promise<DealRecord | null> {
+    // Join to the linked evidence and match its content hash — done in SQL so it
+    // scales regardless of how many candidates share the dedupe key.
+    const rows = await this.db
+      .select({ deal: schema.deals })
+      .from(schema.deals)
+      .innerJoin(schema.evidence, eq(schema.deals.evidenceId, schema.evidence.id))
+      .where(
+        and(
+          eq(schema.deals.dedupeKey, key),
+          inArray(schema.deals.status, ['candidate', 'in_review']),
+          eq(schema.evidence.contentHash, contentHash),
+        ),
+      )
+      .limit(1);
+    return rows[0] ? rowToDeal(rows[0].deal) : null;
   }
   async findByDedupeKey(key: string): Promise<DealRecord | null> {
     // Push the active-row predicate into SQL so a key with many rejected rows
@@ -160,6 +193,14 @@ class PgDealRepo implements DealRepository {
       .update(schema.deals)
       .set({ status, verifiedBy, verifiedAt })
       .where(eq(schema.deals.id, id));
+  }
+  async expirePublishedBySourceUrl(sourceUrl: string, expiredAt: string): Promise<number> {
+    const rows = await this.db
+      .update(schema.deals)
+      .set({ status: 'expired', verifiedAt: expiredAt })
+      .where(and(eq(schema.deals.sourceUrl, sourceUrl), eq(schema.deals.status, 'published')))
+      .returning({ id: schema.deals.id });
+    return rows.length;
   }
   async update(d: DealRecord): Promise<void> {
     await this.db.update(schema.deals).set(dealToRow(d)).where(eq(schema.deals.id, d.id));

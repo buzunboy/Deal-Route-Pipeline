@@ -147,6 +147,19 @@ export class DiscoverSiteUseCase {
         continue;
       }
 
+      // A redirect can land us on a DIFFERENT domain (tracker, partner microsite,
+      // parked/typosquatted target). Re-check the FINAL url against the allowlist:
+      // if it's off-allowlist, propose the domain for human approval and do NOT
+      // extract/persist or seed its links — a human approves the source domain.
+      if (!this.isAllowed(fetched.finalUrl, allowDomains)) {
+        this.logger.warn('discovery: redirected off-allowlist — proposing, not extracting', {
+          requested: url,
+          finalUrl: fetched.finalUrl,
+        });
+        this.recordProposal(proposed, fetched.finalUrl, input.startUrl);
+        continue;
+      }
+
       // Extract candidates from this page (same boundary-validated path as Lane A).
       try {
         const extraction = await this.extract.execute({

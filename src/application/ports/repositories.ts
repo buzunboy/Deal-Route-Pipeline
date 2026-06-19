@@ -31,14 +31,28 @@ export interface DealRepository {
   insert(deal: DealRecord): Promise<void>;
   getById(id: string): Promise<DealRecord | null>;
   listByStatus(status: DealStatus, limit: number): Promise<DealRecord[]>;
+  /**
+   * Source-scoped, status-filtered lookup — newest first. Used by monitoring so
+   * diff-baseline + expiry are deterministic regardless of total table size (no
+   * fetch-1000-then-filter-in-JS scaling cliff).
+   */
+  listBySourceUrl(sourceUrl: string, statuses: DealStatus[], limit: number): Promise<DealRecord[]>;
   /** Find an existing non-rejected deal sharing this dedupe key (canonicalisation). */
   findByDedupeKey(dedupeKey: string): Promise<DealRecord | null>;
+  /**
+   * Find a non-rejected candidate/in_review deal for this dedupe key whose linked
+   * evidence has the given content hash — used to avoid re-queuing an identical
+   * candidate when a page's hash changes but the offer hasn't (flapping content).
+   */
+  findActiveByDedupeKeyAndHash(dedupeKey: string, contentHash: string): Promise<DealRecord | null>;
   updateStatus(
     id: string,
     status: DealStatus,
     verifiedBy: string | null,
     verifiedAt: string | null,
   ): Promise<void>;
+  /** Expire every published deal for a source URL in one statement. Returns the count. */
+  expirePublishedBySourceUrl(sourceUrl: string, expiredAt: string): Promise<number>;
   update(deal: DealRecord): Promise<void>;
 }
 

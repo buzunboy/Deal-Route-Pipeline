@@ -9,9 +9,18 @@ import { z } from 'zod';
  *    never retracts a verified deal;
  *  - `blocked`         → login/captcha/anti-bot. NOT proof the offer is gone:
  *    routed to manual capture, never auto-expired;
+ *  - `error`           → an infrastructure failure during monitoring (DB/re-crawl
+ *    threw), NOT a page disappearance. Recorded for audit; never counts toward
+ *    auto-expiry, so a transient blip can't retract verified deals;
  *  - `unchanged`       → recorded for audit.
  */
-export const ChangeKind = z.enum(['content_changed', 'disappeared', 'blocked', 'unchanged']);
+export const ChangeKind = z.enum([
+  'content_changed',
+  'disappeared',
+  'blocked',
+  'error',
+  'unchanged',
+]);
 export type ChangeKind = z.infer<typeof ChangeKind>;
 
 export const ChangeSchema = z.object({
