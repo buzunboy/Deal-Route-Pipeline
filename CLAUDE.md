@@ -38,6 +38,7 @@ Stack: **TypeScript (Node 20+, strict)** · zod · Playwright/Firecrawl · Anthr
 
 ## Working habits
 - Small, reviewable commits; tests for all pure logic before wiring I/O.
+- **Every new/changed feature gets unit AND integration tests** (and a live smoke test for new external edges). The three tiers + exactly what each feature must add are in `.claude/rules/testing.md` — follow it.
 - After scaffolding, **update Commands + Repo layout above**.
 - **Ask before** changing the deal-record schema, the verification rules, or anything affecting trust.
 - Build **Phase A** (deterministic core) first and keep it working; B/C slot in.
