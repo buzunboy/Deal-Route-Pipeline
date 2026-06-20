@@ -16,8 +16,8 @@ jobs:
         # Exercise the documented minimum (Node 20, the deploy target) plus 22.
         node-version: [20, 22]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -53,8 +53,8 @@ jobs:
     env:
       DATABASE_URL_TEST: postgres://dealroute:dealroute@localhost:5432/dealroute_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
