@@ -1,0 +1,1 @@
+ALTER TABLE "deals" ADD COLUMN "price_prepaid_months" integer;

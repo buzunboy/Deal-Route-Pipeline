@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ExtractUseCase, ExtractionFailedError } from './extract.js';
-import { SEED_VOCABULARY } from '../../domain/index.js';
-import { FakeLlm, FakeLogger } from '../../../test/fakes/fakes.js';
+import { SEED_VOCABULARY, CURRENT_SCHEMA_VERSION } from '../../domain/index.js';
+import { FakeLlm, FakeLogger, SequencedFakeLlm } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
 
 const PAGE_TEXT = 'Disney+ ist im Tarif MagentaTV SmartStream enthalten.';
@@ -25,7 +25,7 @@ describe('ExtractUseCase', () => {
     const c = result.candidates[0]!;
     expect(c.trueCostMonthly).toBe(10);
     expect(c.dedupeKey).toContain('disney plus');
-    expect(c.schemaVersion).toBe(1);
+    expect(c.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(result.costEur).toBeGreaterThan(0);
   });
 
@@ -101,17 +101,51 @@ describe('ExtractUseCase', () => {
     expect(logger.entries.some((e) => /truncat/i.test(e.msg))).toBe(false);
   });
 
-  it('throws ExtractionFailedError carrying the already-spent cost on a boundary failure', async () => {
-    // The LLM call ran (and was billed) before the boundary rejected its output.
-    // The thrown error must surface that cost so the caller can charge the budget.
+  it('throws ExtractionFailedError carrying the TOTAL spend (first + re-ask) on a boundary failure', async () => {
+    // A bad reply triggers one re-ask; FakeLlm returns the same bad text both times,
+    // so both calls fail and are billed. The thrown error must surface the SUM so the
+    // caller charges the full spend against the run/daily budget (not just the first).
     try {
       await runExtract('not json at all');
       throw new Error('expected throw');
     } catch (err) {
       expect(err).toBeInstanceOf(ExtractionFailedError);
-      // FakeLlm bills 0.001 per call regardless of the (malformed) text.
-      expect((err as ExtractionFailedError).costEur).toBeCloseTo(0.001);
+      // Two FakeLlm calls billed at 0.001 each = 0.002.
+      expect((err as ExtractionFailedError).costEur).toBeCloseTo(0.002);
     }
+  });
+
+  it('recovers on a single re-ask when the FIRST reply is unparseable (one bad reply ≠ lost page)', async () => {
+    // First reply is junk (parse fails → recovery can't save it), second is valid.
+    // The use-case must re-ask once and succeed, charging BOTH calls.
+    const good = JSON.stringify({ deals: [makeLlmDeal()] });
+    const llm = new SequencedFakeLlm(['totally broken {not json', good]);
+    const logger = new FakeLogger();
+    const uc = new ExtractUseCase(llm, logger);
+    const result = await uc.execute({
+      pageText: PAGE_TEXT,
+      sourceUrl: 'https://www.telekom.de/magenta-tv',
+      targetService: 'Disney+',
+      vocabulary: SEED_VOCABULARY,
+    });
+    expect(result.candidates).toHaveLength(1);
+    expect(result.costEur).toBeCloseTo(0.002); // both calls billed
+    expect(llm.calls).toBe(2); // exactly one re-ask, not a loop
+    expect(logger.entries.some((e) => /re-ask|recovered/i.test(e.msg))).toBe(true);
+  });
+
+  it('re-asks at most ONCE — a second failure throws, never loops', async () => {
+    const llm = new SequencedFakeLlm(['bad one {', 'bad two {']);
+    const uc = new ExtractUseCase(llm, new FakeLogger());
+    await expect(
+      uc.execute({
+        pageText: PAGE_TEXT,
+        sourceUrl: 'https://x.de',
+        targetService: null,
+        vocabulary: SEED_VOCABULARY,
+      }),
+    ).rejects.toBeInstanceOf(ExtractionFailedError);
+    expect(llm.calls).toBe(2); // first + exactly one re-ask, then give up
   });
 
   // Tier-4 ingests arbitrary open-web pages. An injected page that tries to

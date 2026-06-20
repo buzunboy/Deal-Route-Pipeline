@@ -15,6 +15,19 @@ import {
 import type { Llm, Logger } from '../ports/index.js';
 import { buildExtractionPrompt } from './extraction-prompt.js';
 
+/**
+ * Corrective suffix appended to the prompt on the single re-ask after a first
+ * reply failed to parse/validate. Keeps the same task + schema (no new freedom for
+ * the model) — it only insists on a complete, valid JSON object and warns against
+ * the common truncation cause (over-long verbatim text). The retry is still parsed
+ * through the same boundary, so this can only help the model comply, never relax it.
+ */
+const RETRY_CORRECTION =
+  'IMPORTANT: your previous reply could not be parsed as valid JSON matching the required schema. ' +
+  'Return ONLY a single complete, valid JSON object exactly matching the schema above — no prose, ' +
+  'no markdown fences, no trailing commentary. Ensure it is not truncated: keep verbatim quotes ' +
+  '(grounding, raw_conditions_text, source_quote) concise enough that the whole object fits.';
+
 export interface ExtractInput {
   pageText: string;
   sourceUrl: string;
@@ -88,41 +101,79 @@ export class ExtractUseCase {
       vocabulary: input.vocabulary,
     });
 
-    const response = await this.llm.complete({ role: 'extraction', system, user, jsonMode: true });
-    // Cost is incurred the moment the LLM call returns — capture it NOW so a later
-    // boundary/processing throw still surfaces it to the caller (budget accounting).
-    const costEur = response.usage.costEur;
+    const first = await this.llm.complete({ role: 'extraction', system, user, jsonMode: true });
+    // Cost is incurred the moment the LLM call returns — accumulate it NOW so a later
+    // boundary/processing throw (or a retry) still surfaces the full spend to the
+    // caller (budget accounting). The LLM adapter already runs the reply through
+    // json-recovery, so `parseLlmDeals` failing here means the JSON was unrecoverable
+    // (severe truncation) or the SHAPE was wrong — neither of which local repair fixes.
+    let costEur = first.usage.costEur;
 
-    // A reply truncated at the output-token cap is usually invalid JSON that the
-    // boundary then rejects — which would otherwise look like a silent "this page
-    // had no offers". Surface it loudly so the zero/partial-candidate outcome is
-    // attributable to truncation (raise LLM_MAX_OUTPUT_TOKENS), not a real miss.
-    if (response.truncated) {
+    if (first.truncated) {
       this.logger.warn('extraction LLM reply was truncated at the token limit', {
         sourceUrl: input.sourceUrl,
-        outputTokens: response.usage.outputTokens,
+        outputTokens: first.usage.outputTokens,
       });
     }
 
-    let candidates: ExtractedCandidate[];
-    try {
-      // Boundary: raw model text → typed deals (throws BoundaryValidationError on bad shape).
-      const rawDeals = parseLlmDeals(response.text);
-      candidates = rawDeals.map((deal) =>
-        this.processDeal(deal, input.pageText, input.vocabulary, input.sourceUrl),
-      );
-    } catch (err) {
-      // Re-throw carrying the already-spent cost so the run/daily budget still sees it.
-      throw new ExtractionFailedError(costEur, { cause: err });
+    const firstParse = this.tryParse(first.text);
+    if (firstParse.ok) {
+      return this.finish(firstParse.deals, input, costEur);
     }
 
+    // The first reply was unparseable/wrong-shape (truncation past recovery, or a
+    // schema mismatch). Re-ask ONCE with a corrective nudge before giving up — one
+    // bad reply shouldn't discard a whole page. The retry's output goes through the
+    // SAME boundary (parseLlmDeals/zod): repair/retry never weakens trust validation.
+    this.logger.warn('extraction parse failed; re-asking the model once', {
+      sourceUrl: input.sourceUrl,
+      reason: firstParse.error.message,
+      truncated: first.truncated,
+    });
+    const retry = await this.llm.complete({
+      role: 'extraction',
+      system,
+      user: `${user}\n\n${RETRY_CORRECTION}`,
+      jsonMode: true,
+    });
+    costEur += retry.usage.costEur; // both calls are billed — charge the full spend.
+
+    const retryParse = this.tryParse(retry.text);
+    if (!retryParse.ok) {
+      // Both attempts failed: throw carrying the TOTAL spent cost so the run/daily
+      // budget sees every paid call (not just the first).
+      throw new ExtractionFailedError(costEur, { cause: retryParse.error });
+    }
+    this.logger.info('extraction recovered on re-ask', { sourceUrl: input.sourceUrl });
+    return this.finish(retryParse.deals, input, costEur);
+  }
+
+  /** Parse raw model text through the trust boundary; never throws (returns a result). */
+  private tryParse(
+    text: string,
+  ): { ok: true; deals: LlmExtractedDeal[] } | { ok: false; error: Error } {
+    try {
+      return { ok: true, deals: parseLlmDeals(text) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err : new Error(String(err)) };
+    }
+  }
+
+  /** Map validated deals → candidates, log, and return. Shared by the first/retry paths. */
+  private finish(
+    rawDeals: LlmExtractedDeal[],
+    input: ExtractInput,
+    costEur: number,
+  ): ExtractResult {
+    const candidates = rawDeals.map((deal) =>
+      this.processDeal(deal, input.pageText, input.vocabulary, input.sourceUrl),
+    );
     this.logger.info('extraction complete', {
       sourceUrl: input.sourceUrl,
       deals: candidates.length,
       mustReview: candidates.filter((c) => c.mustReview).length,
       costEur,
     });
-
     return { candidates, costEur };
   }
 

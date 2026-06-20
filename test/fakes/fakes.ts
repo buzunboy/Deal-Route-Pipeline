@@ -95,6 +95,30 @@ export class FakeLlm implements Llm {
   }
 }
 
+/**
+ * Llm fake that returns queued replies in order — one per `complete` call,
+ * repeating the last once exhausted — and counts calls. For exercising the bounded
+ * re-ask in ExtractUseCase (e.g. a first unparseable reply then a valid one). Each
+ * call is billed `costEur` so retry cost accounting can be asserted.
+ */
+export class SequencedFakeLlm implements Llm {
+  public calls = 0;
+  constructor(
+    private readonly replies: string[],
+    private readonly costEur = 0.001,
+  ) {}
+  async complete(_request: LlmRequest): Promise<LlmResponse> {
+    const text = this.replies[Math.min(this.calls, this.replies.length - 1)] ?? '{}';
+    this.calls++;
+    return {
+      text,
+      usage: { inputTokens: 100, outputTokens: 50, costEur: this.costEur },
+      model: 'fake-model',
+      truncated: false,
+    };
+  }
+}
+
 /** Llm fake that returns a different scripted response per role (triage vs extract). */
 export class RoleAwareFakeLlm implements Llm {
   constructor(

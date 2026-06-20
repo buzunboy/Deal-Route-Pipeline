@@ -88,6 +88,30 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect((await db.deals.getById(deal.id))!.verified_by).toBe('reviewer');
     });
 
+    it('deals: prepaid price round-trips (amount + billing + prepaid_months)', async () => {
+      // The prepaid-term column (schema v2) must survive write→read in both adapters
+      // (LSP), incl. the domain-undefined ↔ DB-null mapping. A monthly deal reads back
+      // with no prepaid_months; a prepaid deal preserves its stated term.
+      const db = await makeDb();
+      const prepaid = dealRecord({
+        price: { amount: 49.19, currency: 'EUR', billing: 'prepaid', prepaid_months: 24 },
+      });
+      const monthly = dealRecord({
+        price: { amount: 9.99, currency: 'EUR', billing: 'monthly' },
+      });
+      await db.deals.insert(prepaid);
+      await db.deals.insert(monthly);
+
+      const readPrepaid = (await db.deals.getById(prepaid.id))!;
+      expect(readPrepaid.price.billing).toBe('prepaid');
+      expect(readPrepaid.price.amount).toBe(49.19);
+      expect(readPrepaid.price.prepaid_months).toBe(24);
+
+      const readMonthly = (await db.deals.getById(monthly.id))!;
+      expect(readMonthly.price.billing).toBe('monthly');
+      expect(readMonthly.price.prepaid_months).toBeUndefined();
+    });
+
     it('deals: findByDedupeKey ignores rejected and matches the canonical key', async () => {
       const db = await makeDb();
       const deal = dealRecord();

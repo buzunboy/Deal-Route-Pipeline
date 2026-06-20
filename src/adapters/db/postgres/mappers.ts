@@ -23,6 +23,8 @@ export function dealToRow(d: DealRecord): DealRow {
     priceAmount: d.price.amount,
     priceCurrency: d.price.currency,
     priceBilling: d.price.billing,
+    // domain `undefined` (not-applicable) ↔ DB `null`.
+    pricePrepaidMonths: d.price.prepaid_months ?? null,
     trueCostMonthly: d.true_cost_monthly,
     country: d.country,
     newCustomerOnly: d.eligibility.new_customer_only,
@@ -86,7 +88,13 @@ export function rowToDeal(r: DealSelect): DealRecord {
     route_type: r.routeType,
     provider: r.provider,
     headline: r.headline,
-    price: { amount: r.priceAmount, currency: r.priceCurrency, billing: r.priceBilling },
+    price: {
+      amount: r.priceAmount,
+      currency: r.priceCurrency,
+      billing: r.priceBilling,
+      // DB `null` ↔ domain `undefined` (the schema transform normalises null→undefined).
+      prepaid_months: r.pricePrepaidMonths,
+    },
     true_cost_monthly: r.trueCostMonthly,
     country: r.country,
     eligibility: {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { hasDb, applyMigrations, resetDb, makeContainer } from './harness.js';
-import { ScriptedFetcher, RoleAwareFakeLlm, FixedClock } from '../fakes/fakes.js';
+import { ScriptedFetcher, RoleAwareFakeLlm, SequencedFakeLlm, FixedClock } from '../fakes/fakes.js';
 import { makeLlmDeal } from '../factories/deal.js';
 import { makeSource } from '../factories/source.js';
 import type { Container } from '../../src/composition/container.js';
@@ -153,5 +153,37 @@ suite('Phase A pipeline (Container + Postgres)', () => {
     // ONCE — not overwritten by a stale flat/duplicate schedule from the finally.
     const expectedDueMs = now.getTime() + 9 * 24 * 60 * 60 * 1000;
     expect(Date.parse(updated!.next_due!)).toBe(expectedDueMs);
+  });
+
+  it('extraction re-asks once on a first unparseable reply and persists the candidate (full Container + Postgres)', async () => {
+    // The changed extract use-case end-to-end: the first LLM reply is junk (parse
+    // fails past recovery), the second is valid → one bounded re-ask recovers the
+    // page, the candidate lands in Postgres, and the run's logged cost reflects BOTH
+    // billed calls (not just the first). A fake can't prove the persisted row + ledger.
+    const source = makeSource({ url: 'https://www.telekom.de/magenta-retry' });
+    const PER_CALL = 0.01;
+    container = makeContainer({
+      fetcher: new ScriptedFetcher({ [source.url]: { text: PAGE, html: '<html></html>' } }),
+      // Junk first (unrecoverable), valid JSON second → exercises the single re-ask.
+      llm: new SequencedFakeLlm(
+        ['totally broken {not json', JSON.stringify({ deals: [makeLlmDeal()] })],
+        PER_CALL,
+      ),
+    });
+    await container.db.sources.upsert(source);
+
+    const result = await container.crawlSource.execute({ sourceId: source.id });
+    expect(result.candidates).toHaveLength(1);
+
+    // The candidate round-tripped through Postgres.
+    const candidates = await container.db.deals.listByStatus('candidate', 10);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]!.service).toBe('Disney+');
+
+    // The run ledger charged BOTH the failed first call and the successful re-ask.
+    const runs = await container.db.crawlRuns.recentRuns({ limit: 10 });
+    const run = runs.find((r) => r.source_id === source.id);
+    expect(run).toBeDefined();
+    expect(run!.cost_eur).toBeCloseTo(PER_CALL * 2, 10);
   });
 });

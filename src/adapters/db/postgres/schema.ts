@@ -67,6 +67,9 @@ export const deals = pgTable(
     priceAmount: doublePrecision('price_amount').notNull(),
     priceCurrency: text('price_currency').notNull(),
     priceBilling: text('price_billing').notNull(),
+    // For billing='prepaid' only: the page-stated term the up-front amount covers
+    // (months). Nullable — absent/not-applicable for other billing modes.
+    pricePrepaidMonths: integer('price_prepaid_months'),
     trueCostMonthly: doublePrecision('true_cost_monthly').notNull(),
     country: text('country').notNull(),
     // Typed-core eligibility flags (nullable = unknown).

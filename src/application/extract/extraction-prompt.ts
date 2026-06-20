@@ -24,7 +24,7 @@ Each deal MUST use EXACTLY these field names and shapes (do not rename, omit, or
   "route_type": "bundle" | "standalone" | "promo" | "regional",
   "provider": string,                     // who offers it, e.g. "Spotify"
   "headline": string,                     // a short human title for the offer
-  "price": { "amount": number, "currency": "EUR", "billing": "monthly" | "annual" | "one_time" | "unknown" },
+  "price": { "amount": number, "currency": "EUR", "billing": "monthly" | "annual" | "one_time" | "prepaid" | "unknown", "prepaid_months"?: number },
   "country": "DE",
   "eligibility": {
     "new_customer_only": boolean | null,
@@ -53,6 +53,8 @@ Each deal MUST use EXACTLY these field names and shapes (do not rename, omit, or
 Hard rules — follow exactly:
 - Currency for Germany is EUR; country is "DE".
 - price.billing: if you cannot tell, use "unknown" — do NOT guess.
+- price.billing = "prepaid" when a SINGLE up-front payment covers a fixed multi-month term the page states (e.g. "2 Jahre für 49,19 €", "1 year plan, billed once"). Set price.amount to the up-front sum AND price.prepaid_months to the stated months (e.g. 24). If the term is not stated, use "prepaid" WITHOUT prepaid_months (a human will confirm). Do NOT compute or guess a monthly figure yourself.
+- For an intro/promo offer like "3 months free, then 12,99 €/month": set price.amount to the headline (e.g. 0), price.billing = "monthly" (the recurring cadence — NOT "one_time"), and capture the intro terms as an "intro_period" condition. Reserve "one_time" for a genuine single non-recurring charge.
 - Eligibility flags are nullable: if the page doesn't clearly state one, set it to null and add a condition. NEVER guess a flag.
 - "grounding" is an ARRAY of { "field", "quote" } objects (NOT an object keyed by field name). Include one entry each for price, eligibility, and validity, with the EXACT verbatim sentence from the page text. Quotes must be verbatim substrings of the page text — never fabricated.
 - Long-tail conditions go in the eligibility/validity "conditions" arrays. Map each to a known vocabulary key when one fits; otherwise use key "other", set unmapped_conditions=true, and add a "field_proposals" entry with EXACTLY { "suggested_key", "label", "rationale", "example_quote" }. NEVER invent a new top-level field/column.

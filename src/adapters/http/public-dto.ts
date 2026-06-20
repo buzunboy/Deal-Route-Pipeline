@@ -20,6 +20,9 @@ export interface PublicDeal {
     amount: number;
     currency: DealRecord['price']['currency'];
     billing: DealRecord['price']['billing'];
+    /** For billing='prepaid': the months the up-front `amount` covers (lets the UI
+     *  render "X for N months"). Omitted for other billing modes. */
+    prepaid_months?: number;
   };
   true_cost_monthly: number;
   eligibility: {
@@ -138,6 +141,10 @@ export function toPublicDeal(deal: DealRecord, opts: PublicDealOptions): PublicD
       amount: deal.price.amount,
       currency: deal.price.currency,
       billing: deal.price.billing,
+      // Only present for prepaid deals (omit the key otherwise, like the domain shape).
+      ...(deal.price.prepaid_months !== undefined && {
+        prepaid_months: deal.price.prepaid_months,
+      }),
     },
     true_cost_monthly: deal.true_cost_monthly,
     eligibility: {

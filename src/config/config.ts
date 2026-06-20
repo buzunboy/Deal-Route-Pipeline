@@ -15,7 +15,12 @@ const ConfigSchema = z.object({
     provider: z.enum(['anthropic', 'openai', 'stub']),
     extractionModel: z.string().min(1),
     discoveryModel: z.string().min(1),
-    maxOutputTokens: z.coerce.number().int().positive(),
+    // Floor at 4096 (backstop against an absurd env value). A live test
+    // (2026-06-20) showed a content-rich bundler page (Telekom MagentaTV: many
+    // tariffs + verbose German terms) overflows the extraction JSON at 4096 and
+    // truncates — so the default below is 8192, and truncation now triggers a
+    // bounded repair/re-ask in the extract use-case rather than failing the page.
+    maxOutputTokens: z.coerce.number().int().min(4096),
     timeoutMs: z.coerce.number().int().positive(),
     anthropicApiKey: z.string().optional(),
     openaiApiKey: z.string().optional(),

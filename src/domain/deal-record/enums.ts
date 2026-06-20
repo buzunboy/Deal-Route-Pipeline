@@ -12,7 +12,11 @@ import { z } from 'zod';
 export const RouteType = z.enum(['bundle', 'standalone', 'promo', 'regional']);
 export type RouteType = z.infer<typeof RouteType>;
 
-export const Billing = z.enum(['monthly', 'annual', 'one_time', 'unknown']);
+// `prepaid` = a single up-front payment covering a FIXED number of months that the
+// page states (e.g. "2 Jahre für 49,19 €" = 24 months). Distinct from `one_time`
+// (a genuine one-off with no monthly equivalent) — true-cost amortises a `prepaid`
+// price over its stated term (`price.prepaid_months`), never a guessed length.
+export const Billing = z.enum(['monthly', 'annual', 'one_time', 'prepaid', 'unknown']);
 export type Billing = z.infer<typeof Billing>;
 
 /**

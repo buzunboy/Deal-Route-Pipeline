@@ -25,6 +25,20 @@ describe('validateRecord — sanity rules', () => {
     expect(result.failures.some((f) => f.rule === 'billing_known')).toBe(true);
   });
 
+  it('flags a prepaid price with no stated term (cannot amortise without guessing)', () => {
+    const deal = makeLlmDeal({ price: { amount: 49.19, currency: 'EUR', billing: 'prepaid' } });
+    const result = validateRecord(deal, SOURCE_TEXT);
+    expect(result.failures.some((f) => f.rule === 'prepaid_term_needed')).toBe(true);
+  });
+
+  it('does NOT flag a prepaid price WITH a stated term (amortises cleanly)', () => {
+    const deal = makeLlmDeal({
+      price: { amount: 49.19, currency: 'EUR', billing: 'prepaid', prepaid_months: 24 },
+    });
+    const result = validateRecord(deal, SOURCE_TEXT);
+    expect(result.failures.some((f) => f.rule === 'prepaid_term_needed')).toBe(false);
+  });
+
   it('flags a start date after the end date', () => {
     const deal = makeLlmDeal({
       validity: { start: '2026-12-01', end: '2026-01-01', recheck_days: 3, conditions: [] },

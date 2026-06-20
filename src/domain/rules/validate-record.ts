@@ -69,6 +69,19 @@ export function validateRecord(deal: LlmExtractedDeal, sourceText?: string): Val
     });
   }
 
+  // ── Prepaid price with no stated term: the up-front amount can't be amortised
+  //    to a monthly figure without inventing a length, so true_cost_monthly is the
+  //    raw lump sum and would mis-rank. Force review so a human supplies the term.
+  if (deal.price.billing === 'prepaid' && deal.price.prepaid_months === undefined) {
+    failures.push({
+      rule: 'prepaid_term_needed',
+      field: 'price.prepaid_months',
+      message:
+        'Prepaid price has no stated term (prepaid_months); true cost cannot be amortised. ' +
+        'A human must confirm the months the up-front amount covers before this deal can rank.',
+    });
+  }
+
   // ── Promo / intro pricing: the headline price understates the steady-state
   //    cost, so true_cost_monthly is misleading (a "0 € for 6 months" deal
   //    normalises to 0 and would rank as permanently free). Force must-review so

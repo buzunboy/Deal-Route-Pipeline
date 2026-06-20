@@ -31,6 +31,23 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### No golden fixture for a prepaid offer
+- **Severity**: low (coverage gap, not a defect)
+- **Area**: extraction / testing
+- **Location**: `test/fixtures/golden/` (only `telekom-magenta-disney` exists).
+- **What**: the prepaid-billing path (`billing:'prepaid'` + `prepaid_months`, schema v2) was
+  added after a live dry-run found CyberGhost "2 Jahre für 49,19 €" mis-ranked. It's covered by
+  unit tests (true-cost amortisation, validate-record `prepaid_term_needed`) + the DB contract
+  round-trip + a live dry-run, but there's no saved-HTML→expected-record golden asserting a
+  prepaid offer extracts the term + amortised `true_cost_monthly` with grounding and no
+  hallucinated monthly figure (`.claude/rules/testing.md`: "add a fixture whenever a real page
+  breaks extraction").
+- **Why deferred**: the behaviour is already covered by the three tiers above; the golden adds a
+  regression pin against prompt/model drift, not new correctness.
+- **Fix-when**: next time the extraction prompt/model/schema changes — save a prepaid page's HTML
+  as a golden fixture and assert `billing:'prepaid'` + `prepaid_months` + amortised cost.
+- **Logged**: 2026-06-20
+
 ### Interactive multi-step BrowserAgent (Phase C-2 "Option B") — not built
 - **Severity**: low (a capability gap, not a defect)
 - **Area**: discovery / fetcher

@@ -5,7 +5,9 @@ import { EligibilitySchema } from './eligibility.js';
 import { ValiditySchema } from './validity.js';
 import { GroundingSchema, FieldProposalSchema } from './grounding.js';
 
-export const CURRENT_SCHEMA_VERSION = 1 as const;
+// v2 (2026-06-20): added `price.prepaid_months` for prepaid-term amortisation
+// (additive/optional; v1 rows parse unchanged — the field is nullish).
+export const CURRENT_SCHEMA_VERSION = 2 as const;
 
 /**
  * The fields the LLM is allowed to PROPOSE for a single deal record.

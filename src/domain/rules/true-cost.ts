@@ -6,11 +6,15 @@ const MONTHS_PER_YEAR = 12;
 /**
  * Normalise a price to a comparable monthly cost (the figure we rank on).
  *
- * Pure and deterministic. Annual prices are divided across 12 months; one-time
- * prices are treated as a single up-front cost with no monthly amortisation in
- * v1 (we surface them as-is rather than guessing a contract length — guessing
- * would be a trust violation). `unknown` billing returns the raw amount so the
- * value is never silently dropped; validation flags `unknown` billing for review.
+ * Pure and deterministic. Annual prices are divided across 12 months. A `prepaid`
+ * price (a single up-front amount covering a fixed, page-stated term) is amortised
+ * over its `prepaid_months` — this is NOT a guess: the term is extracted from the
+ * page. A `prepaid` price with no `prepaid_months` can't be normalised, so we
+ * return the raw amount and let validation force review (never invent a length).
+ * `one_time` prices are a single up-front cost with no monthly amortisation (a
+ * genuine one-off; guessing a length would be a trust violation). `unknown`
+ * billing returns the raw amount so the value is never silently dropped;
+ * validation flags `unknown`/term-less `prepaid` billing for review.
  *
  * IMPORTANT (intro/promo pricing): this normalises only the *headline* price.
  * A deal that is "0 € for 6 months, then 15 €/mo" is extracted with
@@ -29,6 +33,13 @@ export function trueCostMonthly(price: Price): number {
       return roundCents(amount);
     case 'annual':
       return roundCents(amount / MONTHS_PER_YEAR);
+    case 'prepaid':
+      // Amortise over the page-stated term when we have it; otherwise we can't
+      // normalise without inventing a length, so surface the raw amount and let
+      // validateRecord force must-review (`prepaid_term_needed`).
+      return price.prepaid_months !== undefined && price.prepaid_months > 0
+        ? roundCents(amount / price.prepaid_months)
+        : roundCents(amount);
     case 'one_time':
     case 'unknown':
       return roundCents(amount);
