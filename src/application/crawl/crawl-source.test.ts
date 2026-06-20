@@ -153,6 +153,33 @@ describe('CrawlSourceUseCase', () => {
     expect(total).toBe(1);
   });
 
+  it('a cross-domain-redirecting source still dedupes on re-crawl (extract key uses finalUrl)', async () => {
+    // Trust-critical (split-by-source): the dedupe key folds in the registrable
+    // domain of the SOURCE. The configured source.url redirects to a DIFFERENT
+    // domain, so the extract-time key MUST use fetched.finalUrl (the URL evidence
+    // pins as source_url) — not source.url — or the second crawl's lookup misses
+    // its own prior row and inserts a duplicate. Regression for the Lane-A
+    // key-consistency bug the adversarial verify pass caught.
+    const fetcher = new FakeFetcher({
+      text: PAGE_TEXT,
+      finalUrl: 'https://www.telekom.de/magenta-disney', // post-redirect, different domain
+    });
+    const localEnv = build({ fetcher });
+    const source = makeSource({ url: 'https://magenta-tv.de/disney' }); // configured (pre-redirect)
+    await localEnv.db.sources.upsert(source);
+
+    await localEnv.uc.execute({ sourceId: source.id });
+    await localEnv.uc.execute({ sourceId: source.id });
+
+    const total =
+      (await localEnv.db.deals.listByStatus('candidate', 10)).length +
+      (await localEnv.db.deals.listByStatus('in_review', 10)).length;
+    expect(total).toBe(1); // deduped — would be 2 if extract used source.url
+    // And the persisted key's source segment is the final (redirected) domain.
+    const persisted = (await localEnv.db.deals.listByStatus('candidate', 10))[0]!;
+    expect(persisted.source_url).toBe('https://www.telekom.de/magenta-disney');
+  });
+
   it('records field proposals for unknown conditions', async () => {
     const deal = makeLlmDeal({
       validity: {

@@ -122,7 +122,12 @@ export class CrawlSourceUseCase {
       const evidence = await this.captureEvidence(fetched, input.dryRun ?? false);
       const extraction = await this.extract.execute({
         pageText: fetched.text,
-        sourceUrl: source.url,
+        // Use the POST-REDIRECT final URL (what evidence pins as source_url), NOT the
+        // configured source.url — so the extract-time dedupe key folds in the SAME
+        // registrable domain the recompute-from-row sites use. A configured URL that
+        // redirects cross-domain would otherwise produce a key that never matches its
+        // own persisted row (silent duplicate every re-crawl). Matches the Lane B paths.
+        sourceUrl: fetched.finalUrl,
         targetService: source.subscription_service,
         vocabulary: this.vocabulary,
       });

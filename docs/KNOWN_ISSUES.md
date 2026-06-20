@@ -96,30 +96,6 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   then tighten (consider a repair-retry or a stricter parser). Don't build a full JSON parser.
 - **Logged**: 2026-06-20
 
-### CI jobs not dependency-ordered
-- **Severity**: low
-- **Area**: ci
-- **Location**: `.github/workflows/ci.yml`
-- **What**: The unit `check` job and the `integration` job run in parallel (no `needs:`).
-  Migrations are applied idempotently inside the integration harness, so it works, but a
-  unit-only break still spins up Postgres before failing.
-- **Why deferred**: Purely cosmetic / minor CI-time waste; correctness is unaffected.
-- **Fix-when**: touching CI for another reason — add `needs: check` to the integration job.
-- **Logged**: 2026-06-20
-
-### Dedupe-key omits source/origin (provenance)
-- **Severity**: medium (trust-relevant)
-- **Area**: domain / schema
-- **Location**: `src/domain/rules/dedupe-key.ts` (`service + provider + route_type + country`)
-- **What**: Two sources reporting the same route collapse to (or churn) the same dedupe key,
-  producing duplicate `in_review` candidates. It's unclear whether that's the intended
-  canonicalization (one offer regardless of who reports it) or should split by source.
-- **Why deferred**: It's a **schema-owner decision** that affects the trust model — must be
-  confirmed with the owner before changing, not decided unilaterally (roadmap §6.3).
-- **Fix-when**: Tier-4 churn makes duplicates a real review-queue problem, or the schema
-  owner rules on canonicalization-vs-provenance.
-- **Logged**: 2026-06-20
-
 ### pg-boss queue pool not bounded
 - **Severity**: low
 - **Area**: db / queue
@@ -193,3 +169,57 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   wiring the Postgres contract into the integration run — add a `resetBetweenTests` hook to
   `databaseContract` and include the file in `vitest.integration.config.ts`.
 - **Logged**: 2026-06-20
+
+### Monitor source-scoped lookups key off `source.url`, not the resolved `finalUrl`
+- **Severity**: medium (trust-relevant for cross-domain-redirecting sources)
+- **Area**: monitor / db
+- **Location**: `src/application/monitor/monitor-source.ts` (`expirePublishedBySourceUrl(source.url, …)`
+  and `listBySourceUrl(source.url, …)` in `lastHashForSource`); the deals carry
+  `source_url = fetched.finalUrl` (pinned by CandidateSink).
+- **What**: Monitor finds/expires a source's deals by exact-string match of `source.url` against
+  the persisted `deal.source_url`. But deals pin `source_url` to `fetched.finalUrl` (post-redirect).
+  If a source's canonical URL redirects to a **different** URL/domain, monitor's lookups never match
+  its own deals → every monitor pass looks like a first observation (needless re-crawl each cycle),
+  and `expirePublishedBySourceUrl` never matches so those published deals can't auto-expire.
+  Pre-existing (evidence pinned `finalUrl` before split-by-source too); surfaced by the P1 review.
+  NOT the same as the crawl-source extract-key bug, which IS fixed (see Resolved below).
+- **Why deferred**: only bites sources whose canonical URL redirects across the matched URL; the
+  proper fix means tracking the resolved/final URL on the `sources` row (or matching by registrable
+  domain), a separate behavioural change with its own schema touch + tests.
+- **Fix-when**: before unattended Lane-A monitoring of sources known to redirect; track the
+  resolved URL on the source (set on first successful crawl) and have monitor match on it.
+- **Logged**: 2026-06-20
+
+---
+
+## Resolved
+
+### Dedupe-key omits source/origin (provenance) — RESOLVED 2026-06-20
+- **Was**: medium (trust-relevant), domain / schema, `src/domain/rules/dedupe-key.ts`.
+- **Problem**: the key was `service + provider + route_type + country`, so two sources
+  reporting the same route collapsed to (or churned) the same key.
+- **Resolution**: schema-owner decision was **split-by-source**. `dedupeKey` now takes the
+  trusted fetched source URL and folds `registrableDomain(sourceUrl)` (sentinel
+  `unknown-source` when unparseable) as a 5th key segment after country. Each source's report
+  of a route is its own record, preserving per-source evidence/confidence/terms. The
+  registrable domain (not the full URL) is the discriminator, so `www.`/bare-host, trailing
+  slash, and path/query variants on the same site still collapse (re-crawl idempotency holds).
+  Consistency invariant: the extract-time key and the recompute-from-row key are identical
+  because `CandidateSink` pins `deal.source_url = evidence.source_url` (the same fetched
+  finalUrl extract received), and every recompute site passes `dedupeKey(d, d.source_url)`.
+  Greenfield — no data migration; the `(dedupe_key, evidence_id)` unique index +
+  `deals_dedupe_idx` are unchanged (they index whatever the key is).
+
+### Lane-A extract-key used `source.url` instead of `fetched.finalUrl` — RESOLVED 2026-06-20
+- **Was**: medium (trust), `src/application/crawl/crawl-source.ts`. Caught by the P1
+  adversarial-verify pass.
+- **Problem**: with split-by-source live, the dedupe key folds in the source's registrable
+  domain. Lane A called `extract.execute({ sourceUrl: source.url })` while evidence pinned
+  `source_url = fetched.finalUrl`. A source redirecting to a different registrable domain made
+  the extract-time key (from `source.url`) differ from the recompute-from-row key (from
+  `finalUrl`), so `findByDedupeKey` missed the prior row → silent duplicate every re-crawl.
+- **Resolution**: Lane A now passes `fetched.finalUrl` to `extract.execute` (matching the Lane-B
+  paths + the evidence pin), so extract-time and recompute-from-row keys are identical. Pinned by
+  a crawl-source regression test (cross-domain redirect → dedupes to one record; proven to fail
+  without the fix). NB: monitor's source-scoped lookups have a RELATED but distinct gap, still
+  open above ("Monitor source-scoped lookups key off `source.url`…").
