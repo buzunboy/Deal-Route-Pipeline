@@ -2,7 +2,7 @@
 
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`<set-on-merge>`** (Step 3). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
+**`0c98be8`** (Step 3). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
 disclosure) AND 3 (reliability-blended ranking) are DONE + merged; the next step is
 Step 4 (scheduler / unattended-run harness).** This supersedes
 `docs/DealRoute_PostC_Handoff.md` (kept, banner-marked). (`NEXT_SESSION_HANDOFF.md` was deleted.)_
@@ -183,7 +183,7 @@ Original plan below, retained for context:_
 - **Workflow-shaped?** No — small, decision-gated, trust-critical; do it inline after the
   human decision. `code-reviewer` + an adversarial-verify pass before merge.
 
-### Step 3 — Reliability-driven ranking — ✅ DONE (merged `<set-on-merge>`, 2026-06-20)
+### Step 3 — Reliability-driven ranking — ✅ DONE (merged `0c98be8`, 2026-06-20)
 _Shipped as an owner-decided **read-time tiebreaker** (no new column, no migration). A
 source's `reliability_score` breaks ties on the primary sort key: `cost_asc` (equal
 `true_cost_monthly` → reliability DESC → id) and `verified_desc` (equal `verified_at` NULLS
