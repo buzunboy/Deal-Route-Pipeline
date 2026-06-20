@@ -2,7 +2,7 @@
 
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`<set-on-merge>`** (Step 6). **ALL post-C Steps 1–6 are DONE + merged (1 public API,
+**`49a228e`** (Step 6). **ALL post-C Steps 1–6 are DONE + merged (1 public API,
 2 GDPR/affiliate disclosure, 3 reliability ranking, 4 scheduler, 5 observability, 6
 multi-country foundation). The pipeline is post-C FEATURE-COMPLETE for DE v1** — no
 roadmap step remains; what's left is the deferred-findings register (`docs/KNOWN_ISSUES.md`)
@@ -324,7 +324,7 @@ Original plan below, retained for context:_
 - **Tests:** port contract suite + unit; thresholds are pure logic → table-driven.
 - **Workflow-shaped?** Partly (discrete signal types could fan out) but small; likely inline.
 
-### Step 6 — Multi-country FOUNDATION — ✅ DONE (merged `<set-on-merge>`, 2026-06-21)
+### Step 6 — Multi-country FOUNDATION — ✅ DONE (merged `49a228e`, 2026-06-21)
 _Shipped the multi-country PREREQUISITES (DE stays the only ENABLED country — no real 2nd
 country wired, per the owner decision). Three parts:_
 - **(1) Real Public Suffix List.** The naive last-two-labels `registrableDomain` (wrong on
