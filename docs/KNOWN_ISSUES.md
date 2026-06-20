@@ -170,6 +170,30 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   `databaseContract` and include the file in `vitest.integration.config.ts`.
 - **Logged**: 2026-06-20
 
+### `cdnBaseUrl` config parsed but not yet consumed
+- **Severity**: low
+- **Area**: api / config
+- **Location**: `src/config/config.ts` (`evidence.s3.cdnBaseUrl`, env `S3_CDN_BASE_URL`).
+- **What**: Added in P2 (S3 adapter) for the upcoming public read API to turn an evidence ref
+  into `${cdnBaseUrl}/${ref}`, but nothing reads it yet (no public API exists).
+- **Why deferred**: P3 (public `/v1/` read API) is the consumer — it lands next.
+- **Fix-when**: P3 — the public DTO resolves evidence URLs via `cdnBaseUrl`. If P3 is dropped,
+  remove the field rather than leave it dead.
+- **Logged**: 2026-06-20
+
+### Two differently-named EvidenceStore error classes
+- **Severity**: low
+- **Area**: evidence-store
+- **Location**: `EvidenceStoreError` (`local-fs-evidence-store.ts`) vs `S3EvidenceStoreError`
+  (`s3-evidence-store.ts`).
+- **What**: Each adapter throws its own error class. The port contract only requires `rejects`,
+  so substitutability (LSP) holds and the contract suite passes both — but a caller that
+  pattern-matches on one error type won't catch the other.
+- **Why deferred**: no caller currently type-matches EvidenceStore errors; purely a consistency nit.
+- **Fix-when**: if error-type-based handling is ever added — extract a shared base class (or one
+  exported `EvidenceStoreError`) both adapters throw.
+- **Logged**: 2026-06-20
+
 ### Monitor source-scoped lookups key off `source.url`, not the resolved `finalUrl`
 - **Severity**: medium (trust-relevant for cross-domain-redirecting sources)
 - **Area**: monitor / db

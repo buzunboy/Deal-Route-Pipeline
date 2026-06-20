@@ -23,8 +23,10 @@ import {
   type BrowserAgent,
 } from '../application/index.js';
 import { SEED_VOCABULARY, DomainDenylist, type Vocabulary } from '../domain/index.js';
+import { S3Client } from '@aws-sdk/client-s3';
 import { ConsoleLogger } from '../adapters/logger/console-logger.js';
 import { LocalFsEvidenceStore } from '../adapters/evidence-store/local-fs-evidence-store.js';
+import { S3EvidenceStore } from '../adapters/evidence-store/s3-evidence-store.js';
 import { AnthropicLlm } from '../adapters/llm/anthropic-llm.js';
 import { OpenAiLlm } from '../adapters/llm/openai-llm.js';
 import { StubLlm } from '../adapters/llm/stub-llm.js';
@@ -285,9 +287,29 @@ export class Container {
   }
 
   private buildEvidenceStore(config: Config): EvidenceStore {
-    // S3 adapter is a documented extension point; local-fs is the dev default.
+    // local-fs is the dev default; S3/R2 is the production sibling.
     if (config.evidence.kind === 's3') {
-      throw new Error('S3 evidence store is not wired in Phase A. Use EVIDENCE_STORE=local.');
+      const s3 = config.evidence.s3;
+      // The config schema requires the full S3 block once S3_BUCKET is set, but a
+      // bare EVIDENCE_STORE=s3 with no S3_BUCKET leaves it undefined — fail loud
+      // here rather than at first write (loud-failure policy).
+      if (!s3) {
+        throw new Error(
+          'EVIDENCE_STORE=s3 requires the S3 config block (S3_BUCKET, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY).',
+        );
+      }
+      const client = new S3Client({
+        region: s3.region,
+        // Custom endpoint ⇒ R2/MinIO-compatible; force path-style addressing so the
+        // bucket is in the path, not a vhost subdomain those stores don't serve.
+        ...(s3.endpoint ? { endpoint: s3.endpoint, forcePathStyle: true } : {}),
+        credentials: { accessKeyId: s3.accessKeyId, secretAccessKey: s3.secretAccessKey },
+      });
+      const store = new S3EvidenceStore({ client, bucket: s3.bucket });
+      // Register for teardown so shutdown() releases the S3 HTTP agent/sockets
+      // (like every other vendor-backed adapter).
+      this.closables.push(store);
+      return store;
     }
     return new LocalFsEvidenceStore(config.evidence.localDir);
   }

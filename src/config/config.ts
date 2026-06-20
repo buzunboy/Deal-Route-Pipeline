@@ -59,6 +59,10 @@ const ConfigSchema = z.object({
         endpoint: z.string().optional(),
         accessKeyId: z.string().min(1),
         secretAccessKey: z.string().min(1),
+        // Optional public CDN/base URL for resolving an evidence ref into a public
+        // URL (the public read API turns `screenshot_ref` into `${cdnBaseUrl}/${ref}`).
+        // Unset ⇒ no public evidence URL is exposed (admin-only access via get()).
+        cdnBaseUrl: z.string().url().optional(),
       })
       .optional(),
   }),
@@ -166,6 +170,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
             endpoint: emptyToUndefined(env.S3_ENDPOINT),
             accessKeyId: env.S3_ACCESS_KEY_ID ?? '',
             secretAccessKey: env.S3_SECRET_ACCESS_KEY ?? '',
+            cdnBaseUrl: emptyToUndefined(env.S3_CDN_BASE_URL),
           }
         : undefined,
     },

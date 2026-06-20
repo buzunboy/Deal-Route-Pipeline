@@ -52,3 +52,40 @@ describe('Container — fetcher selection', () => {
     );
   });
 });
+
+describe('Container — evidence store selection', () => {
+  let container: Container | undefined;
+  afterEach(async () => {
+    await container?.shutdown();
+    container = undefined;
+  });
+
+  it('builds the local-fs evidence store by default', () => {
+    container = new Container(cfg(), { usePersistence: false });
+    expect(container.evidenceStore).toBeDefined();
+  });
+
+  it('fails loudly when EVIDENCE_STORE=s3 but the S3 block is missing (no S3_BUCKET)', () => {
+    // Config loads (kind=s3, s3=undefined); the composition root must fail loud.
+    expect(() => new Container(cfg({ EVIDENCE_STORE: 's3' }), { usePersistence: false })).toThrow(
+      /S3/,
+    );
+  });
+
+  it('builds the S3 evidence store (+ registers it for shutdown) with a full S3 block', async () => {
+    container = new Container(
+      cfg({
+        EVIDENCE_STORE: 's3',
+        S3_BUCKET: 'b',
+        S3_REGION: 'eu-central-1',
+        S3_ACCESS_KEY_ID: 'AK',
+        S3_SECRET_ACCESS_KEY: 'SK',
+      }),
+      { usePersistence: false },
+    );
+    expect(container.evidenceStore).toBeDefined();
+    // shutdown() must close the S3 client without throwing (closable registered).
+    await expect(container.shutdown()).resolves.toBeUndefined();
+    container = undefined; // already shut down
+  });
+});
