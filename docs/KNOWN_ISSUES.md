@@ -31,6 +31,22 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### Tier-4 can surface a non-DE source that passes the confidence gate
+- **Severity**: low (curation/scoping; not a trust breach — nothing auto-publishes)
+- **Area**: discovery / extraction
+- **Location**: Tier-4 broad discovery (`discover --broad`); the deny-list
+  (`src/domain/discovery/domain-denylist.ts`); country enum (`src/domain/deal-record/enums.ts`).
+- **What**: the 2026-06-20 all-tiers live test surfaced a Swisscom (`.ch`) bluebinge deal via
+  Tier-4 broad discovery that extracted with `mustReview:0` (passed the gate). Tier-4 is open-web,
+  so non-DE sources can appear. Country is hard-coded `DE` in the schema but extraction doesn't
+  reject a deal whose source/offer is plainly non-DE.
+- **Why deferred**: not a trust breach — nothing auto-publishes, and a human reviews the proposed
+  domain before it ever enters deterministic crawling. It's a relevance/curation matter.
+- **Fix-when**: when curating Tier-4 output / building multi-country — add non-DE domains to the
+  deny-list and/or a country sanity rule that flags a deal whose source registrable domain is a
+  non-DE ccTLD for a DE-only catalog. Overlaps the multi-country generalization work.
+- **Logged**: 2026-06-20
+
 ### Tier-4 inline-scrape robots gate keys on `result.url`, no field for a Firecrawl-side redirect
 - **Severity**: low (watch-item; not exploitable in the current data model)
 - **Area**: discovery / fetcher
