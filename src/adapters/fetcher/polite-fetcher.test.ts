@@ -175,6 +175,27 @@ describe('PoliteFetcher robots.txt runtime (injected RobotsClient)', () => {
     expect(inner.calls).toEqual(['https://host.de/angebote']);
   });
 
+  // checkAccess() is the body-less gate used by the Tier-4 inline-scrape path:
+  // it applies OUR robots policy without fetching the page, so a caller holding
+  // page content from elsewhere still honours the public-only invariant.
+  it('checkAccess returns robots_disallowed for a forbidden path, never calling inner.fetch', async () => {
+    const robots = scriptedRobots({ 'https://host.de/robots.txt': 'User-agent: *\nDisallow: /' });
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base(robots));
+    expect(await pf.checkAccess('https://host.de/secret')).toBe('robots_disallowed');
+    expect(inner.calls).toEqual([]); // never fetched the page body
+  });
+
+  it('checkAccess returns ok for an allowed path (still no body fetch)', async () => {
+    const robots = scriptedRobots({
+      'https://host.de/robots.txt': 'User-agent: *\nDisallow: /admin',
+    });
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base(robots));
+    expect(await pf.checkAccess('https://host.de/angebote')).toBe('ok');
+    expect(inner.calls).toEqual([]);
+  });
+
   it('missing robots.txt fails open (allowed) and still hits inner.fetch', async () => {
     const robots = scriptedRobots({ 'https://host.de/robots.txt': { notFound: true } });
     const inner = countingInner();

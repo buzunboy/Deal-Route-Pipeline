@@ -31,21 +31,36 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
-### Firecrawl adapters target `/v1`; the official guideline documents `/v2` (different shape)
-- **Severity**: low (v1 works today; a forward-compat note)
+### Tier-4 inline-scrape robots gate keys on `result.url`, no field for a Firecrawl-side redirect
+- **Severity**: low (watch-item; not exploitable in the current data model)
+- **Area**: discovery / fetcher
+- **Location**: `src/adapters/agent/search-browser-agent.ts` (`obtainPage`, the `checkAccess`
+  call + `finalUrl: result.url`); `src/application/ports/search-provider.ts` (`SearchResult.content`).
+- **What**: when `AGENT_INLINE_SCRAPE=true`, the agent gates the inline-scraped content through
+  `PoliteFetcher.checkAccess(result.url)` (our robots + rate-limit). If Firecrawl's server-side
+  search-scrape silently followed a redirect to a DIFFERENT final URL, our robots check would be
+  on the pre-redirect URL. Today this is unrepresentable — `SearchResult.content` carries no
+  `finalUrl`, so there's only one URL per result, and the regular Firecrawl-as-fetcher path has
+  the identical property (it trusts `data.url` without re-checking robots on a surfaced redirect).
+- **Why deferred**: no second URL exists in the model; the inline path is no weaker than the
+  already-shipped v2 fetch path. Confirmed by the 2026-06-20 adversarial verification (public-only
+  HOLDS).
+- **Fix-when**: if `SearchResult.content` ever gains a `finalUrl` (Firecrawl exposes the redirect
+  chain), move the `checkAccess` gate to that final URL.
+- **Logged**: 2026-06-20
+
+### Unbounded screenshot data-URI string held in memory on the inline-scrape search path
+- **Severity**: low
 - **Area**: search / fetcher
-- **Location**: `src/adapters/search/firecrawl-search-provider.ts` (`/v1/search`),
-  `src/adapters/fetcher/firecrawl-fetcher.ts` (`/v1/scrape`).
-- **What**: the official Firecrawl onboarding guideline (saved at
-  `docs/Firecrawl_Integration_Reference.md`) documents base URL `https://api.firecrawl.dev/v2`.
-  Our adapters call `/v1/*`. Verified live 2026-06-20: `/v1/search` returns HTTP 200 with
-  `data: [ … ]` (a flat array — what our zod schema expects), while `/v2/search` returns HTTP 200
-  with `data: { web: [ … ] }` (nested) — a DIFFERENT response shape. So v1 works correctly now,
-  but a switch to v2 would silently parse to zero results without a schema change.
-- **Why deferred**: v1 is still served and our schema matches it; the Tier-4 run worked end-to-end
-  on v1. No functional issue today.
-- **Fix-when**: if Firecrawl deprecates v1, or we want v2 features — update both adapters' base URL
-  to `/v2` AND change the response schemas (`data.web[]` for search) + re-run the live Tier-4 smoke.
+- **Location**: `src/adapters/search/firecrawl-search-provider.ts` (the `screenshot` string in a
+  v2 search result) → bounded at `src/adapters/shared/screenshot-download.ts`.
+- **What**: the 16 MB body cap is on the *fetcher* path; a v2 *search*-with-scrape response isn't
+  body-capped, so a huge inline `screenshot` data-URI string is held until `resolveScreenshotBytes`
+  decodes + caps it (8 MB). Transient memory bloat on the opt-in `AGENT_INLINE_SCRAPE` path only;
+  not a trust issue (the bytes are still capped before use).
+- **Why deferred**: opt-in path, bounded at decode, no trust impact.
+- **Fix-when**: if inline-scrape becomes a default/high-volume path — cap the search response body
+  like the scrape body, or reject an over-long `screenshot` string before decode.
 - **Logged**: 2026-06-20
 
 ### JS-heavy provider pages yield no deals from the homepage URL (seed-URL + render-fetcher)
@@ -315,6 +330,19 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 ---
 
 ## Resolved
+
+### Firecrawl adapters on `/v1` while the guideline documents `/v2` — RESOLVED 2026-06-20
+- **Was**: low (forward-compat), search/fetcher, the two Firecrawl adapters.
+- **Problem**: adapters called `/v1/search` (flat `data[]`) + `/v1/scrape`; the official guideline
+  documents `/v2`, whose search returns the different shape `data.web[]`.
+- **Resolution**: both adapters refactored to `/v2`. `firecrawl-search-provider` parses
+  `data.web[]` (+ optional `position`); `firecrawl-fetcher` calls `/v2/scrape` and now
+  **zod-validates** the response (was a TS cast — fixed in the same pass per the boundary rule).
+  Added the v2 value-add: optional inline search-scrape (`SearchOptions.scrape` →
+  `SearchResult.content`), consumed by the Tier-4 agent ONLY behind our authoritative robots/
+  rate-limit gate (`PoliteFetcher.checkAccess`) so the public-only invariant holds; off by default
+  (`AGENT_INLINE_SCRAPE`). Screenshot resolution shared via `adapters/shared/screenshot-download`.
+  Verified live + adversarially (public-only, evidence-required, v2-boundary all HOLD); 566 tests green.
 
 ### RSS feed items bypassed zod validation at the boundary (B1) — RESOLVED 2026-06-20
 - **Was**: high (broken invariant "never trust raw external data"), feed/ingestion,

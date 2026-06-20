@@ -44,4 +44,17 @@ export interface Fetcher {
   /** Fetch a single public URL. Timeout-bounded; resolves (never throws) on a
    *  reachable failure, returning an `error`/`blocked` outcome for the caller. */
   fetch(url: string, options?: FetchOptions): Promise<FetchResult>;
+
+  /**
+   * Apply the public-crawling access gate to `url` WITHOUT fetching its body:
+   * robots.txt + the per-domain rate-limit. Returns `'robots_disallowed'` when our
+   * robots policy forbids it, else `'ok'`. Lets a caller that already has page
+   * content from elsewhere (e.g. a search provider's inline scrape) reuse our
+   * authoritative guardrails before using that content — so the public-only
+   * invariant holds even when WE didn't do the fetch. Optional: only the politeness
+   * layer implements it; a caller MUST treat an absent method as "no gate available"
+   * and fall back to a real `fetch()` (which always gates). The check still respects
+   * the rate-limit (it counts as a hit to that host).
+   */
+  checkAccess?(url: string): Promise<'ok' | 'robots_disallowed'>;
 }

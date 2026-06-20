@@ -3,13 +3,16 @@ import type {
   AgentBudget,
   AgentRunResult,
   FetchedPage,
+  FetchResult,
   ProposedSource,
   SearchProvider,
+  SearchResult,
   Fetcher,
   Logger,
   Clock,
 } from '../../application/ports/index.js';
 import { registrableDomain } from '../../domain/index.js';
+import { resolveScreenshotBytes } from '../shared/screenshot-download.js';
 
 /**
  * Search-API-first `BrowserAgent` (Phase C, stage C-1). Implements the bounded
@@ -43,6 +46,13 @@ export class SearchBrowserAgent implements BrowserAgent {
       userAgent: string;
       /** Estimated € cost of a single search call (for the agent's own budget). */
       searchCostEur: number;
+      /**
+       * Ask the search provider for inline page content (Firecrawl v2 search-scrape)
+       * and reuse it instead of a second full fetch — gated by OUR robots/rate-limit
+       * via `fetcher.checkAccess` so the public-only invariant still holds. Off by
+       * default; only providers that support it populate `SearchResult.content`.
+       */
+      inlineScrape?: boolean;
     },
   ) {}
 
@@ -77,6 +87,7 @@ export class SearchBrowserAgent implements BrowserAgent {
         limit: this.opts.resultsPerQuery,
         country: this.opts.country,
         timeoutMs: this.opts.searchTimeoutMs,
+        scrape: this.opts.inlineScrape === true,
       });
       costEur += this.opts.searchCostEur;
       if (costEur > budget.maxCostEur) {
@@ -102,10 +113,7 @@ export class SearchBrowserAgent implements BrowserAgent {
         // never auto-crawled. (knownDomains dedupe happens in the use-case.)
         recordProposal(result.url);
 
-        const fetched = await this.fetcher.fetch(result.url, {
-          timeoutMs: this.opts.fetchTimeoutMs,
-          userAgent: this.opts.userAgent,
-        });
+        const fetched = await this.obtainPage(result);
         stepsUsed += 1;
 
         // Carry every fetched page (with its outcome) back; the use-case dispatches
@@ -125,4 +133,58 @@ export class SearchBrowserAgent implements BrowserAgent {
 
     return { pages, proposedSources, stepsUsed, costEur, stoppedReason };
   }
+
+  /**
+   * Get page material for a search result, preferring the provider's inline scrape
+   * when available (saves a second full fetch) and falling back to a real
+   * `fetcher.fetch()` otherwise.
+   *
+   * TRUST-CRITICAL: inline content was fetched by the SEARCH PROVIDER, not our
+   * PoliteFetcher — so before using it we apply OUR access gate via
+   * `fetcher.checkAccess` (robots + rate-limit). If our robots policy forbids the
+   * URL we return `robots_disallowed` and discard the inline content (the
+   * public-only invariant holds regardless of who fetched). We also require a
+   * resolvable screenshot → bytes, because evidence is required before any
+   * candidate; if the inline screenshot can't be resolved we fall back to a normal
+   * fetch (which captures its own screenshot) rather than emit an evidence-less ok page.
+   */
+  private async obtainPage(result: SearchResult): Promise<FetchResult> {
+    const fetchOpts = { timeoutMs: this.opts.fetchTimeoutMs, userAgent: this.opts.userAgent };
+
+    const inline = result.content;
+    const canGate = typeof this.fetcher.checkAccess === 'function';
+    if (this.opts.inlineScrape && inline && inline.text.trim() !== '' && canGate) {
+      // Authoritative robots/rate-limit gate on the result URL (no body fetch).
+      const access = await this.fetcher.checkAccess!(result.url);
+      if (access === 'robots_disallowed') {
+        return outcomeOnly('robots_disallowed', result.url);
+      }
+      // Evidence requires a real screenshot; resolve the inline ref to bytes.
+      const screenshot = await resolveScreenshotBytes(
+        inline.screenshotRef,
+        this.opts.fetchTimeoutMs,
+      );
+      if (screenshot !== null) {
+        this.logger.debug('search agent: using inline search-scrape content', { url: result.url });
+        return {
+          outcome: 'ok',
+          url: result.url,
+          finalUrl: result.url,
+          text: inline.text,
+          html: inline.html,
+          screenshot,
+        };
+      }
+      // No usable inline screenshot → fall through to a normal fetch (captures one).
+      this.logger.debug('search agent: inline scrape lacked a usable screenshot; fetching', {
+        url: result.url,
+      });
+    }
+
+    return this.fetcher.fetch(result.url, fetchOpts);
+  }
+}
+
+function outcomeOnly(outcome: FetchResult['outcome'], url: string): FetchResult {
+  return { outcome, url, finalUrl: url, text: '', html: '', screenshot: new Uint8Array() };
 }

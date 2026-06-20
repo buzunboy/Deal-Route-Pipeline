@@ -19,17 +19,20 @@ Firecrawl from code, behind ports, in exactly two adapters:
    adapter (vendor scrape). Selected by `FETCHER=firecrawl`. Wrapped by `PoliteFetcher`
    like every other fetcher (robots + rate-limit + size caps still apply).
 2. **`FirecrawlSearchProvider`** (`src/adapters/search/firecrawl-search-provider.ts`) —
-   a `SearchProvider` adapter using Firecrawl `/v1/search`. Selected by
-   `SEARCH_PROVIDER=firecrawl`. Backs the Tier-4 broad-discovery lane (`discover --broad`,
-   `AGENT=search`).
+   a `SearchProvider` adapter using Firecrawl `/v2/search` (+ optional inline scrape).
+   Selected by `SEARCH_PROVIDER=firecrawl`. Backs the Tier-4 broad-discovery lane
+   (`discover --broad`, `AGENT=search`).
 
 Both are injected from the single composition root and are swappable. The agentic lane
 stays dark by default (`AGENT=noop`, `SEARCH_PROVIDER=stub`).
 
-**Base URL** the guideline documents: `https://api.firecrawl.dev/v2`
-(NB: our search adapter currently targets `/v1/search` — see the code-review note in
-`docs/KNOWN_ISSUES.md` / the session that ran Tier-4; v2 is the newer surface.)
-**Auth header:** `Authorization: Bearer fc-YOUR_API_KEY`.
+**Base URL:** `https://api.firecrawl.dev/v2` — both adapters are on **v2** (refactored
+2026-06-20). Search returns `data.web[]` (`{url,title,description,position}`); scrape returns
+`data.{markdown,html,screenshot,metadata}`; both zod-validated at the boundary.
+**Inline search-scrape (v2 value-add):** `/v2/search` with `scrapeOptions:{formats:[...]}` returns
+page content per result. We expose it on `SearchResult.content` and the Tier-4 agent reuses it
+(saving a fetch) ONLY behind our own robots/rate-limit gate (`PoliteFetcher.checkAccess`) — opt-in
+via `AGENT_INLINE_SCRAPE=true` (default off). **Auth header:** `Authorization: Bearer fc-YOUR_API_KEY`.
 
 ### Tier-4 enablement (Path E, from `.env`)
 ```

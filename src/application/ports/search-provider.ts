@@ -13,6 +13,21 @@ export interface SearchResult {
   url: string;
   title: string;
   snippet: string;
+  /** 1-based rank of this result in the provider's ordering, when reported. */
+  position?: number;
+  /**
+   * Inline page content, present ONLY when `opts.scrape` was requested AND the
+   * provider supports search-time scraping (Firecrawl v2). Lets the Tier-4 lane
+   * reuse the search-time scrape instead of a second full fetch — but the caller
+   * MUST still apply its own robots/rate-limit gate before using this (the
+   * provider's fetch is not our PoliteFetcher). `screenshotRef` is a URL or
+   * data-URI to be resolved to bytes for the evidence bundle.
+   */
+  content?: {
+    text: string;
+    html: string;
+    screenshotRef?: string;
+  };
 }
 
 export interface SearchOptions {
@@ -22,6 +37,13 @@ export interface SearchOptions {
   country: string;
   /** Per-call timeout; the adapter bounds the network call by this. */
   timeoutMs: number;
+  /**
+   * Request inline page content (markdown + html + screenshot) per result when the
+   * provider supports it (Firecrawl v2 `scrapeOptions`). Default false (results
+   * only — the historical behaviour). When true, the provider MAY populate
+   * `SearchResult.content`; callers must not assume it is present.
+   */
+  scrape?: boolean;
 }
 
 export interface SearchProvider {

@@ -166,3 +166,123 @@ describe('SearchBrowserAgent', () => {
     expect(result.pages).toEqual([]);
   });
 });
+
+// A tiny valid PNG as a data: URI — resolveScreenshotBytes decodes it offline (no network).
+const PNG_DATA_URI =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+
+/**
+ * A Fetcher that supports the access gate (checkAccess) and records whether the
+ * full fetch() was called — to prove the inline path skips it. Robots verdict is
+ * scriptable per URL so we can test the robots-disallowed inline case.
+ */
+class InlineAwareFetcher {
+  fetchedUrls: string[] = [];
+  constructor(private readonly robotsBlock: Set<string> = new Set()) {}
+  async checkAccess(url: string): Promise<'ok' | 'robots_disallowed'> {
+    return this.robotsBlock.has(url) ? 'robots_disallowed' : 'ok';
+  }
+  async fetch(url: string): Promise<import('../../application/ports/index.js').FetchResult> {
+    this.fetchedUrls.push(url);
+    return {
+      outcome: 'ok',
+      url,
+      finalUrl: url,
+      text: 'FELL BACK TO FETCH',
+      html: '<html>fetch</html>',
+      screenshot: new Uint8Array([1, 2, 3]),
+    };
+  }
+}
+
+describe('SearchBrowserAgent — inline scrape (Tier-4 v2 search-scrape)', () => {
+  const budget = { maxSteps: 10, maxSeconds: 300, maxCostEur: 1 };
+  const INLINE_OPTS = { ...OPTS, inlineScrape: true };
+
+  function inlineResult(url: string): SearchResult {
+    return {
+      url,
+      title: 't',
+      snippet: 's',
+      content: {
+        text: 'INLINE deal text',
+        html: '<html>inline</html>',
+        screenshotRef: PNG_DATA_URI,
+      },
+    };
+  }
+
+  it('uses inline content WITHOUT a second fetch when robots allows + screenshot resolves', async () => {
+    const url = 'https://telekom.de/inline';
+    const fetcher = new InlineAwareFetcher();
+    const search = new StubSearchProvider({ [QUERY]: [inlineResult(url)] });
+    const agent = new SearchBrowserAgent(
+      search,
+      fetcher,
+      new FixedClock(),
+      new FakeLogger(),
+      INLINE_OPTS,
+    );
+
+    const result = await agent.run(QUERY, budget);
+    expect(result.pages).toHaveLength(1);
+    expect(result.pages[0]!.fetched.text).toBe('INLINE deal text'); // inline content used
+    expect(result.pages[0]!.fetched.screenshot.byteLength).toBeGreaterThan(0); // evidence present
+    expect(fetcher.fetchedUrls).toEqual([]); // the full fetch was skipped
+  });
+
+  it('TRUST: a robots-disallowed URL discards the inline content (our gate is authoritative)', async () => {
+    const url = 'https://blocked.de/inline';
+    const fetcher = new InlineAwareFetcher(new Set([url]));
+    const search = new StubSearchProvider({ [QUERY]: [inlineResult(url)] });
+    const agent = new SearchBrowserAgent(
+      search,
+      fetcher,
+      new FixedClock(),
+      new FakeLogger(),
+      INLINE_OPTS,
+    );
+
+    const result = await agent.run(QUERY, budget);
+    expect(result.pages).toEqual([]); // robots_disallowed → dropped, inline content NOT used
+    expect(fetcher.fetchedUrls).toEqual([]); // and we did not fetch it either
+  });
+
+  it('falls back to a real fetch when the inline screenshot cannot be resolved (evidence required)', async () => {
+    const url = 'https://telekom.de/noshot';
+    const fetcher = new InlineAwareFetcher();
+    const search = new StubSearchProvider({
+      [QUERY]: [
+        {
+          url,
+          title: 't',
+          snippet: 's',
+          content: { text: 'INLINE', html: '<i>', screenshotRef: undefined },
+        },
+      ],
+    });
+    const agent = new SearchBrowserAgent(
+      search,
+      fetcher,
+      new FixedClock(),
+      new FakeLogger(),
+      INLINE_OPTS,
+    );
+
+    const result = await agent.run(QUERY, budget);
+    expect(fetcher.fetchedUrls).toEqual([url]); // fell back to fetch (which captures a screenshot)
+    expect(result.pages[0]!.fetched.text).toBe('FELL BACK TO FETCH');
+  });
+
+  it('ignores inline content entirely when inlineScrape is OFF (default)', async () => {
+    const url = 'https://telekom.de/inline';
+    const fetcher = new InlineAwareFetcher();
+    const search = new StubSearchProvider({ [QUERY]: [inlineResult(url)] });
+    // OPTS has no inlineScrape → off.
+    const agent = new SearchBrowserAgent(search, fetcher, new FixedClock(), new FakeLogger(), OPTS);
+
+    const result = await agent.run(QUERY, budget);
+    expect(fetcher.fetchedUrls).toEqual([url]); // always the polite fetch
+    expect(result.pages[0]!.fetched.text).toBe('FELL BACK TO FETCH');
+  });
+});

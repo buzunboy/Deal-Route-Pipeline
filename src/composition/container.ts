@@ -265,6 +265,7 @@ export class Container {
       fetchTimeoutMs: config.fetcher.timeoutMs,
       userAgent: config.fetcher.userAgent,
       searchCostEur: config.agent.searchCostEur,
+      inlineScrape: config.agent.inlineScrape,
     });
   }
 

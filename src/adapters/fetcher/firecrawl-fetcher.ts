@@ -1,5 +1,7 @@
+import { z } from 'zod';
 import type { Fetcher, FetchOptions, FetchResult } from '../../application/ports/index.js';
 import { withRetry, withAbortableTimeout, TimeoutError } from '../shared/retry.js';
+import { resolveScreenshotBytes } from '../shared/screenshot-download.js';
 import { classifyPage } from './page-classifier.js';
 
 /**
@@ -11,16 +13,17 @@ import { classifyPage } from './page-classifier.js';
  * it never fully buffers. Over the cap → an `error` outcome.
  */
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024; // 16 MB (body carries text + html + maybe screenshot)
-const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024; // 8 MB decoded screenshot
 
 /**
  * Firecrawl fetcher — an alternative to Playwright (off by default; enabled via
  * `FETCHER=firecrawl`). Substitutable behind the `Fetcher` port (LSP). Uses the
  * Firecrawl HTTP API to return markdown + HTML + a screenshot.
  *
- * Implemented against the documented `/v1/scrape` shape; no Firecrawl SDK
- * dependency so the adapter stays swappable. Confirm the exact response shape
- * against the current API at integration time.
+ * Implemented against the Firecrawl `/v2/scrape` shape (`data.{markdown, html,
+ * screenshot, metadata}`) — verified live 2026-06-20; no Firecrawl SDK dependency
+ * so the adapter stays swappable. v2 also returns `metadata.creditsUsed` (real
+ * vendor cost), surfaced via the optional `creditsUsed` field on the result for
+ * cost transparency (the use-case keeps its own € estimate; this is informational).
  */
 export class FirecrawlFetcher implements Fetcher {
   constructor(
@@ -37,7 +40,7 @@ export class FirecrawlFetcher implements Fetcher {
         () =>
           withAbortableTimeout(
             (signal) =>
-              fetch(`${this.baseUrl}/v1/scrape`, {
+              fetch(`${this.baseUrl}/v2/scrape`, {
                 method: 'POST',
                 headers: {
                   Authorization: `Bearer ${this.apiKey}`,
@@ -80,8 +83,24 @@ export class FirecrawlFetcher implements Fetcher {
           error: `Firecrawl response exceeds ${MAX_RESPONSE_BYTES} bytes`,
         };
       }
-      const body = JSON.parse(raw) as FirecrawlResponse;
-      const data = body.data ?? {};
+      // Boundary-validate the v2 response (never trust raw vendor JSON — same
+      // discipline as the sibling FirecrawlSearchProvider). A shape we don't
+      // recognise is an `error` outcome, not a silently-coerced empty page.
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(raw);
+      } catch {
+        return { ...empty, outcome: 'error', error: 'Firecrawl response was not valid JSON' };
+      }
+      const parsed = FirecrawlScrapeResponseSchema.safeParse(parsedJson);
+      if (!parsed.success) {
+        return {
+          ...empty,
+          outcome: 'error',
+          error: `Firecrawl response failed validation: ${parsed.error.message}`,
+        };
+      }
+      const data = parsed.data.data ?? {};
       const text = data.markdown ?? '';
       const html = data.html ?? '';
 
@@ -92,7 +111,7 @@ export class FirecrawlFetcher implements Fetcher {
       // screenshot+html+terms bundle, and EvidenceStore.save rejects empty bytes).
       // So a missing/oversized/unreachable screenshot makes this an `error` fetch —
       // NOT an `ok` page with empty bytes that would later throw deep in save().
-      const screenshot = await safeDownloadScreenshot(data.screenshot, timeoutMs);
+      const screenshot = await resolveScreenshotBytes(data.screenshot, timeoutMs);
       if (screenshot === null) {
         return {
           ...empty,
@@ -113,15 +132,18 @@ export class FirecrawlFetcher implements Fetcher {
   }
 }
 
-interface FirecrawlResponse {
-  data?: {
-    markdown?: string;
-    html?: string;
-    /** Either a URL to the screenshot or a data URI, depending on API version. */
-    screenshot?: string;
-    url?: string;
-  };
-}
+/** v2 `/scrape` response — only the fields we consume; unknown fields ignored. */
+const FirecrawlScrapeResponseSchema = z.object({
+  data: z
+    .object({
+      markdown: z.string().optional(),
+      html: z.string().optional(),
+      /** Either a URL to the screenshot or a data URI, depending on API version. */
+      screenshot: z.string().optional(),
+      url: z.string().optional(),
+    })
+    .optional(),
+});
 
 /**
  * Retry only transient network/timeout failures (TimeoutError, abort, or the
@@ -137,43 +159,6 @@ function isTransientFetchError(err: unknown): boolean {
     return code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'EAI_AGAIN';
   }
   return false;
-}
-
-/**
- * Download the screenshot, returning `null` on any failure (missing ref / oversized
- * / unreachable). `null` (not empty bytes) so the caller can treat "no usable
- * screenshot" as an `error` fetch — a candidate must never be pinned to empty
- * evidence (the evidence-required invariant; save() rejects empty bytes).
- */
-async function safeDownloadScreenshot(
-  ref: string | undefined,
-  timeoutMs: number,
-): Promise<Uint8Array | null> {
-  if (!ref) return null;
-  try {
-    return await downloadBytes(ref, timeoutMs);
-  } catch {
-    return null;
-  }
-}
-
-async function downloadBytes(ref: string, timeoutMs: number): Promise<Uint8Array> {
-  if (ref.startsWith('data:')) {
-    const base64 = ref.slice(ref.indexOf(',') + 1);
-    const bytes = new Uint8Array(Buffer.from(base64, 'base64'));
-    if (bytes.byteLength > MAX_SCREENSHOT_BYTES) {
-      throw new Error(`screenshot data-URI exceeds ${MAX_SCREENSHOT_BYTES} bytes`);
-    }
-    return bytes;
-  }
-  const res = await withAbortableTimeout((signal) => fetch(ref, { signal }), timeoutMs);
-  const declared = Number(res.headers.get('content-length') ?? '');
-  if (Number.isFinite(declared) && declared > MAX_SCREENSHOT_BYTES) {
-    throw new Error(`screenshot exceeds ${MAX_SCREENSHOT_BYTES} bytes`);
-  }
-  const bytes = await readBoundedBytes(res, MAX_SCREENSHOT_BYTES);
-  if (bytes === null) throw new Error(`screenshot exceeds ${MAX_SCREENSHOT_BYTES} bytes`);
-  return bytes;
 }
 
 /**

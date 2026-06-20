@@ -117,6 +117,14 @@ const ConfigSchema = z.object({
     maxCostEur: z.coerce.number().nonnegative(),
     /** Estimated € cost of a single search-API call (the search agent's own spend). */
     searchCostEur: z.coerce.number().nonnegative(),
+    /**
+     * Tier-4: reuse the search provider's inline page scrape (Firecrawl v2) instead
+     * of a second full fetch. OFF by default. When on, the agent still gates each
+     * URL through OUR robots/rate-limit (PoliteFetcher.checkAccess) before using the
+     * inline content, so the public-only invariant holds. Only effective with a
+     * provider that supports search-time scraping (Firecrawl).
+     */
+    inlineScrape: boolish,
     // Aggregate €/UTC-day ceiling across ALL agentic/discovery runs (Pre-C-3),
     // distinct from the per-run `maxCostEur`. A batch checks spend-so-far-today
     // before each run and stops once this is reached, so a runaway day can't blow
@@ -219,6 +227,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       maxSeconds: env.AGENT_MAX_SECONDS ?? '300',
       maxCostEur: env.AGENT_MAX_COST_EUR ?? '1.00',
       searchCostEur: env.SEARCH_COST_EUR ?? '0.005',
+      // Off by default — Tier-4 keeps doing its own polite fetch unless explicitly enabled.
+      inlineScrape: env.AGENT_INLINE_SCRAPE ?? 'false',
       // €10/day: comfortable v1 headroom for the agentic lane while still a hard
       // stop well short of real money. Raise as Phase C proves out; 0 disables.
       dailyBudgetEur: env.DAILY_BUDGET_EUR ?? '10.00',

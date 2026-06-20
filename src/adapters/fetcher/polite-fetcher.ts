@@ -89,6 +89,22 @@ export class PoliteFetcher implements Fetcher {
     return result;
   }
 
+  /**
+   * Apply the access gate (robots + rate-limit) to `url` without fetching its body.
+   * Used by callers that already hold page content (e.g. a search provider's inline
+   * scrape) so OUR robots/rate-limit policy stays authoritative even when we didn't
+   * do the fetch (the public-only invariant). Mirrors the robots decision in
+   * `fetch()`; also throttles, since this counts as touching that host.
+   */
+  async checkAccess(url: string): Promise<'ok' | 'robots_disallowed'> {
+    if (this.opts.respectRobotsTxt && !(await this.isAllowed(url))) {
+      this.opts.logger.info('skipped by robots.txt', { url });
+      return 'robots_disallowed';
+    }
+    await this.throttle(url);
+    return 'ok';
+  }
+
   /** Wait until at least `minIntervalMs` has elapsed since the last hit to this host. */
   private async throttle(url: string): Promise<void> {
     const host = hostOf(url);

@@ -12,6 +12,11 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
   return { ok, status, json: async () => body } as unknown as Response;
 }
 
+/** v2 nests results under data.web; build that shape from plain result objects. */
+function v2(web: unknown[]): { success: boolean; data: { web: unknown[] } } {
+  return { success: true, data: { web } };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -25,10 +30,10 @@ searchProviderContract('FirecrawlSearchProvider', () => {
     'fetch',
     vi.fn(async (_url: string, init: RequestInit) => {
       const q = JSON.parse(init.body as string).query as string;
-      const data = q.includes('Disney')
+      const web = q.includes('Disney')
         ? sampleResults(5).map((r) => ({ url: r.url, title: r.title, description: r.snippet }))
         : [];
-      return jsonResponse({ data });
+      return jsonResponse(v2(web));
     }),
   );
   return {
@@ -39,16 +44,20 @@ searchProviderContract('FirecrawlSearchProvider', () => {
   };
 });
 
-describe('FirecrawlSearchProvider', () => {
-  it('maps a well-formed response into SearchResult[]', async () => {
+describe('FirecrawlSearchProvider (v2)', () => {
+  it('maps a well-formed v2 response (data.web[]) into SearchResult[], hits /v2/search', async () => {
     const fetchMock = vi.fn(async () =>
-      jsonResponse({
-        success: true,
-        data: [
-          { url: 'https://telekom.de/disney', title: 'Disney+ Telekom', description: 'inkl.' },
-          { url: 'https://o2.de/disney', title: 'Disney+ O2', description: 'Bundle' },
-        ],
-      }),
+      jsonResponse(
+        v2([
+          {
+            url: 'https://telekom.de/disney',
+            title: 'Disney+ Telekom',
+            description: 'inkl.',
+            position: 1,
+          },
+          { url: 'https://o2.de/disney', title: 'Disney+ O2', description: 'Bundle', position: 2 },
+        ]),
+      ),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -56,26 +65,68 @@ describe('FirecrawlSearchProvider', () => {
     const results = await provider.search('Disney+ im Bundle', opts);
 
     expect(results).toEqual([
-      { url: 'https://telekom.de/disney', title: 'Disney+ Telekom', snippet: 'inkl.' },
-      { url: 'https://o2.de/disney', title: 'Disney+ O2', snippet: 'Bundle' },
+      { url: 'https://telekom.de/disney', title: 'Disney+ Telekom', snippet: 'inkl.', position: 1 },
+      { url: 'https://o2.de/disney', title: 'Disney+ O2', snippet: 'Bundle', position: 2 },
     ]);
     const [calledUrl, init] = fetchMock.mock.calls[0]!;
-    expect(String(calledUrl)).toContain('/v1/search');
+    expect(String(calledUrl)).toContain('/v2/search');
     const body = JSON.parse((init as RequestInit).body as string);
-    expect(body).toMatchObject({ query: 'Disney+ im Bundle', limit: 10, country: 'de' });
+    expect(body).toMatchObject({ query: 'Disney+ im Bundle', limit: 10, location: 'de' });
+    // results-only by default → no scrapeOptions sent.
+    expect(body.scrapeOptions).toBeUndefined();
     expect((init as RequestInit).headers).toMatchObject({ Authorization: 'Bearer key' });
+  });
+
+  it('requests scrapeOptions and carries inline content when opts.scrape is set', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(
+        v2([
+          {
+            url: 'https://telekom.de/disney',
+            title: 'Disney+ Telekom',
+            description: 'inkl.',
+            position: 1,
+            markdown: '# Disney+ bei Telekom\n6 Monate gratis',
+            html: '<h1>Disney+</h1>',
+            screenshot: 'https://cdn.firecrawl/shot.png',
+          },
+        ]),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new FirecrawlSearchProvider('key');
+    const results = await provider.search('Disney+ im Bundle', { ...opts, scrape: true });
+
+    expect(results[0]!.content).toEqual({
+      text: '# Disney+ bei Telekom\n6 Monate gratis',
+      html: '<h1>Disney+</h1>',
+      screenshotRef: 'https://cdn.firecrawl/shot.png',
+    });
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.scrapeOptions).toMatchObject({ formats: ['markdown', 'html', 'screenshot'] });
+  });
+
+  it('omits content when scrape requested but the result did not scrape (no markdown)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(v2([{ url: 'https://e.de', title: 't', description: 'd' }]))),
+    );
+    const provider = new FirecrawlSearchProvider('key');
+    const results = await provider.search('q', { ...opts, scrape: true });
+    expect(results[0]!.content).toBeUndefined();
   });
 
   it('drops malformed entries and honours the limit', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
-        jsonResponse({
-          data: [
+        jsonResponse(
+          v2([
             { title: 'no url' },
             ...Array.from({ length: 5 }, (_, i) => ({ url: `https://e${i}.de`, title: `t${i}` })),
-          ],
-        }),
+          ]),
+        ),
       ),
     );
     const provider = new FirecrawlSearchProvider('key');
@@ -88,6 +139,15 @@ describe('FirecrawlSearchProvider', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => jsonResponse({ success: true })),
+    );
+    const provider = new FirecrawlSearchProvider('key');
+    expect(await provider.search('q', opts)).toEqual([]);
+  });
+
+  it('returns [] for an empty data.web', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(v2([]))),
     );
     const provider = new FirecrawlSearchProvider('key');
     expect(await provider.search('q', opts)).toEqual([]);
@@ -106,7 +166,7 @@ describe('FirecrawlSearchProvider', () => {
     const fetchMock = vi.fn(async () => {
       call++;
       if (call === 1) return jsonResponse({}, false, 503);
-      return jsonResponse({ data: [{ url: 'https://ok.de', title: 't' }] });
+      return jsonResponse(v2([{ url: 'https://ok.de', title: 't' }]));
     });
     vi.stubGlobal('fetch', fetchMock);
     const provider = new FirecrawlSearchProvider('key');
@@ -118,7 +178,7 @@ describe('FirecrawlSearchProvider', () => {
   it('throws SearchProviderError on an unparseable response shape', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse({ data: 'nope' })),
+      vi.fn(async () => jsonResponse({ data: { web: 'nope' } })),
     );
     const provider = new FirecrawlSearchProvider('key');
     await expect(provider.search('q', opts)).rejects.toBeInstanceOf(SearchProviderError);
