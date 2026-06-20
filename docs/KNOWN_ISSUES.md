@@ -31,6 +31,23 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### Firecrawl adapters target `/v1`; the official guideline documents `/v2` (different shape)
+- **Severity**: low (v1 works today; a forward-compat note)
+- **Area**: search / fetcher
+- **Location**: `src/adapters/search/firecrawl-search-provider.ts` (`/v1/search`),
+  `src/adapters/fetcher/firecrawl-fetcher.ts` (`/v1/scrape`).
+- **What**: the official Firecrawl onboarding guideline (saved at
+  `docs/Firecrawl_Integration_Reference.md`) documents base URL `https://api.firecrawl.dev/v2`.
+  Our adapters call `/v1/*`. Verified live 2026-06-20: `/v1/search` returns HTTP 200 with
+  `data: [ … ]` (a flat array — what our zod schema expects), while `/v2/search` returns HTTP 200
+  with `data: { web: [ … ] }` (nested) — a DIFFERENT response shape. So v1 works correctly now,
+  but a switch to v2 would silently parse to zero results without a schema change.
+- **Why deferred**: v1 is still served and our schema matches it; the Tier-4 run worked end-to-end
+  on v1. No functional issue today.
+- **Fix-when**: if Firecrawl deprecates v1, or we want v2 features — update both adapters' base URL
+  to `/v2` AND change the response schemas (`data.web[]` for search) + re-run the live Tier-4 smoke.
+- **Logged**: 2026-06-20
+
 ### JS-heavy provider pages yield no deals from the homepage URL (seed-URL + render-fetcher)
 - **Severity**: medium (coverage gap — these sources produce nothing until addressed)
 - **Area**: discovery / fetcher
