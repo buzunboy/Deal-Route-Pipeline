@@ -1,10 +1,22 @@
 # DealRoute — Post-P3 audit & next-steps handoff
 
-_Self-contained next-steps brief for a FRESH Claude Code session, written after a
-full layer-by-layer + trust-invariant audit on **2026-06-20**. Everything through
-**P3 (the public `/v1/` read API)** is built, tested, merged, and pushed —
-`master` is at **`a8491f3`**. This supersedes `docs/DealRoute_PostC_Handoff.md`
-(its Step 1 is now done) and `docs/NEXT_SESSION_HANDOFF.md` (pre-Phase-C, stale)._
+_Self-contained next-steps brief for a FRESH Claude Code session. Originally written
+after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
+**`4f4f077`**. **Post-C Steps 1 (P3 public API) AND 2 (GDPR/affiliate disclosure) are
+DONE + merged; the next step is Step 3 (reliability ranking).** This supersedes
+`docs/DealRoute_PostC_Handoff.md` and `docs/NEXT_SESSION_HANDOFF.md` (both pre-this-track, stale)._
+
+> **What shipped since the original audit** (all merged to `master`, in order):
+> B1 RSS-boundary fix · the live-dry-run hardening batch (raised `LLM_MAX_OUTPUT_TOKENS`
+> default + a `.min` floor; a bounded LLM re-ask on parse/schema failure; **prepaid**
+> billing + `prepaid_months` amortisation, schema v2) · an extraction input-size cap
+> (giant pages trimmed, not crashed) · **Firecrawl v2** refactor + opt-in Tier-4
+> **inline scrape** (gated by `PoliteFetcher.checkAccess`, `AGENT_INLINE_SCRAPE`) ·
+> the **live-test template** `docs/testing/LIVE_TEST_TEMPLATE.md` (+ a recorded run in
+> `docs/testing/results/`) · the Firecrawl reference `docs/Firecrawl_Integration_Reference.md`
+> · **Step 2** (`affiliate_disclosure` default-true + `published_at`, set at approve,
+> in the public DTO; schema **v3**, migration **0010**). Deal-record `schema_version`
+> is now **3**; latest migration is **`drizzle/0010`**.
 
 > Binding rules still govern: `CLAUDE.md` + `.claude/rules/`
 > (`architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`).
@@ -18,7 +30,7 @@ full layer-by-layer + trust-invariant audit on **2026-06-20**. Everything throug
 
 1. Read `CLAUDE.md` + the auto-loaded `.claude/rules/` — **binding**.
 2. Green baseline from YOUR OWN worktree: `git rev-parse --abbrev-ref HEAD`, then
-   **`npm install && npm run check && npm run build`**. Expect ~533 unit tests +
+   **`npm install && npm run check && npm run build`**. Expect ~572 unit tests +
    lint + typecheck green. (A fresh worktree has no `node_modules` — `npm install`
    first; `@aws-sdk/client-s3` is a declared dep, its absence means install didn't run.)
    The Postgres integration tier self-skips without `DATABASE_URL_TEST` (CI runs it).
@@ -51,15 +63,19 @@ broad-discovery, monitor, review, public API). **4 of 5 hold; 1 has a contained 
 
 ## 1. Where we are (verified by audit, not assumed)
 
-**Built + merged + pushed (master `a8491f3`):** Phase A (Tiers 1–2 deterministic
+**Built + merged + pushed (master `4f4f077`):** Phase A (Tiers 1–2 deterministic
 crawl → extract → evidence → candidate → review → monitor/diff), Phase B (Tier-3
 community ingestion), Pre-C-1/2/3 (DB pool/retry, atomic evidence, reliability
 back-off, daily €-budget guard, all-lanes run-metrics), Phase C **C-1** (Tier-4
 search-API broad discovery, `AGENT=search`) + **C-2** (render-capable `Fetcher`:
 `BrowserRenderFetcher` `FETCHER=browser` + a hosted-browser scaffold), the
 leftover-hardening batch, CI/CD (GHCR release image + scaffolded deploy), **P1**
-dedupe split-by-source, **P2** S3/R2 EvidenceStore, and **P3** the public `/v1/`
-read API. ~533 unit tests green; lint + typecheck clean.
+dedupe split-by-source, **P2** S3/R2 EvidenceStore, **P3** the public `/v1/`
+read API (= roadmap Step 1), the **post-audit hardening** (B1 RSS boundary, the
+live-dry-run batch: token cap + bounded re-ask + prepaid billing, the extraction
+input-size cap), the **Firecrawl v2 + Tier-4 inline-scrape** refactor, the
+**live-test template**, and **Step 2** (GDPR/affiliate disclosure at publish).
+~572 unit tests green; lint + typecheck clean. Deal-record `schema_version` is **3**.
 
 **Architecture health (audited):** clean layering — zero vendor imports in `domain`,
 strict DIP (no `new Vendor()` outside `src/composition/container.ts`), every adapter
@@ -69,24 +85,22 @@ invariants hold. **The implementation is sound; the foundation is strong.**
 **Defaults keep the agentic lane dark/safe:** `AGENT=noop`, `SEARCH_PROVIDER=stub`,
 `FETCHER=playwright`, `EVIDENCE_STORE=local`. Do not change these defaults.
 
-**Roadmap position:** post-C **Step 1 (public read API) is DONE** (= P3). Remaining:
-Step 2 (GDPR/affiliate disclosure), Step 3 (reliability ranking), Step 4
-(scheduler/ops), Step 5 (observability), Step 6 (multi-country).
+**Roadmap position:** post-C **Step 1 (public read API = P3) and Step 2 (GDPR/affiliate
+disclosure) are DONE + merged.** Remaining: **Step 3 (reliability ranking) ← NEXT**, Step 4
+(scheduler/ops), Step 5 (observability), Step 6 (multi-country). See §4 for each.
 
 ---
 
-## 2. The headline: B1 fixed; the public page is now launch-gated on Step 2
+## 2. The headline: the launch-critical gates are CLOSED; remaining steps are refinements
 
-The audit found one broken invariant (**B1 — the RSS feed boundary didn't zod-validate**);
-it has been **fixed** (2026-06-20, §3). With that closed, the single thing between this
-codebase and a launch-ready public surface is:
+The original audit's two launch-critical items are both **done + merged**: B1 (the RSS
+boundary, §3) and **Step 2** (GDPR/affiliate disclosure, §4). So the public `/v1/` API +
+the disclosure fields the landing page legally needs are in place. What remains (Steps 3–6)
+is real but **not launch-blocking** — each is a small, mostly decision-gated refinement.
 
-- **Step 2 — GDPR/affiliate-disclosure fields aren't built** (a *legal* launch gate for the
-  public landing page; owner+legal decision; longest lead time). **This is the recommended
-  next step.**
-
-Everything else (reliability ranking, scheduler, observability, multi-country) is
-real but secondary, and each is a small, decision-gated, *un-built-by-design* feature.
+**Recommended next step: Step 3 (reliability-blended ranking)** — a pure feature step with
+no external dependency (see §4). Then Step 4 (scheduler/ops, + its two prerequisites),
+Step 5 (observability), Step 6 (multi-country, gated on a PSL adapter).
 
 ---
 
@@ -127,11 +141,17 @@ audit found; it was fixed in the same session and is in `KNOWN_ISSUES.md` → Re
 ## 4. The remaining roadmap steps (post-C Steps 2–6) — sequence + prerequisites
 
 Each lists **what**, **why-now**, **the decision it needs first (if any)**, the
-**code surface**, and **tests required**. Recommended order: **Step 2 → Step 3 →
-Step 4 (+ its two prerequisites) → Step 5 → Step 6.** Steps 3–5 are independent and
-can reorder; Step 6 is furthest out.
+**code surface**, and **tests required**. **Step 2 is DONE (below, kept for the record).**
+Remaining order: **Step 3 (NEXT) → Step 4 (+ its two prerequisites) → Step 5 → Step 6.**
+Steps 3–5 are independent and can reorder; Step 6 is furthest out.
 
-### Step 2 — GDPR + affiliate disclosure at publish (LEGAL LAUNCH GATE; schema change)
+### Step 2 — GDPR + affiliate disclosure at publish — ✅ DONE (merged `4f4f077`, 2026-06-20)
+_Shipped as designed: `affiliate_disclosure` (bool, default **true** = over-disclose) +
+`published_at` on the deal record (schema **v3**, migration **0010**), set by the reviewer
+at the approve path (CLI `--no-affiliate-disclosure` / `/api` approve body; defaults true +
+warns when omitted), exposed in the public `/v1/` DTO. Legal-confirmed. Trust-verified
+(nothing auto-publishes; every published deal carries a disclosure; DTO leaks nothing new).
+Original plan below, retained for context:_
 - **What:** add the legally-required disclosure fields to a published deal and surface
   them in the public DTO. EU-Omnibus affiliate disclosure; confirm no-PII /
   own-screenshot-not-republished-T&C posture at the publish boundary.
@@ -298,7 +318,7 @@ interactive multi-step BrowserAgent ("Option B").
   rejected if origin advanced mid-flight — `git fetch`, `git rebase origin/master`, re-run
   `npm run check`, then push. The main worktree's local `master` then needs a `git pull`.
 - **Migrations:** edit `schema.ts` → `npm run db:generate` → commit the generated
-  `drizzle/*.sql` + `drizzle/meta/*` (in `.prettierignore` — don't reformat). Latest is `0008`.
+  `drizzle/*.sql` + `drizzle/meta/*` (in `.prettierignore` — don't reformat). Latest is `0010`.
 - **No `Co-Authored-By` trailer** on commits (global user rule). Husky pre-commit runs
   prettier + eslint + typecheck on staged files.
 - **ultracode pattern:** drive each trust-critical change as a Workflow (implement →
@@ -307,15 +327,17 @@ interactive multi-step BrowserAgent ("Option B").
 
 ## 9. First moves for the fresh session
 1. Confirm orientation reads + green baseline (`npm install && npm run check && npm run build`).
-   (B1 is already fixed — §3 — so the boundary invariant holds; no foundation repair pending.)
-2. Put the **Step-2 decision (which disclosure fields, set by whom) + the CDN-exposure-scope
-   decision** to the owner via `AskUserQuestion` — they gate the public-page launch and have
-   the longest lead time.
-3. With those answered, build Step 2 (disclosure fields, folded into the schema/DTO/approve
-   path). Then Step 3 (reliability ranking) → Step 4 (scheduler + its two prerequisites:
-   monitor-finalUrl + Postgres-contract-isolation) → Step 5 (observability) → Step 6
-   (multi-country, gated on the PSL adapter).
+   Steps 1 + 2 are DONE — no foundation repair pending; you're starting Step 3.
+2. **Build Step 3 — reliability-blended ranking** (§4). The one decision it needs first
+   (put to the owner via `AskUserQuestion`): the ranking formula + whether reliability may
+   *silently* influence public order — the raw `reliability_score` must **never** be exposed
+   (the public DTO's `trust` badge is freshness-only by design). Recommend read-time sort
+   (no new column), freshness-primary with reliability as a hidden down-weight. NB the
+   deal→source join is now well-defined (P1 split-by-source gives each deal a clean `source_url`).
+3. Then Step 4 (scheduler + its two prerequisites: monitor-finalUrl + Postgres-contract-isolation)
+   → Step 5 (observability) → Step 6 (multi-country, gated on the PSL adapter).
 4. Every change: unit + integration tests (live for new external edges); `code-reviewer` +
    an adversarial-verify pass on anything trust/publish/schema; docs updated (CLAUDE.md
-   Commands + Repo layout, README, ARCHITECTURE, roadmap §5). Nothing auto-publishes; the
-   public feed serves only `published` deals via the deliberate DTO; defaults unchanged.
+   Commands + Repo layout, README, ARCHITECTURE, roadmap §5; **and `docs/testing/LIVE_TEST_TEMPLATE.md`
+   when a feature adds a recordable field**). Nothing auto-publishes; the public feed serves only
+   `published` deals via the deliberate DTO; defaults unchanged.

@@ -1,5 +1,10 @@
 # DealRoute — Post-Phase-C handoff & next-steps plan
 
+> **⚠️ SUPERSEDED (2026-06-20) — for `next steps`, read `docs/DealRoute_PostP3_Handoff.md`.**
+> This doc's Step 1 (the public read API = P3) and Step 2 (GDPR/affiliate disclosure) are
+> both DONE + merged. The current next step is **Step 3 (reliability ranking)**. Kept for the
+> historical post-C audit context; do NOT treat its "next steps" as current.
+
 _Authoritative next-steps brief for a fresh session, written after a full audit on
 2026-06-20. Supersedes `docs/NEXT_SESSION_HANDOFF.md` (which predates Phase C).
 Everything through **Phase C (C-1 + C-2) + the leftover-hardening batch + CI/CD** is

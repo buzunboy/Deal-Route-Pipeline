@@ -5,7 +5,7 @@ The crawl / LLM-extraction / verification / monitoring service for **DealRoute**
 > Full design: `docs/DealRoute_Crawl_Pipeline_Plan.md` · Seed sources: `docs/DealRoute_Seed_List_DE.md` (read on demand).
 > Phase C plan + roadmap + remaining audit gaps + recommended build sequence: `docs/DealRoute_Phase_C_and_Roadmap.md` (read before Phase C / unattended-run work).
 > Phase C **build plan (C-1, search-API-first)** — standalone fresh-session prompt: `docs/DealRoute_Phase_C_Plan.md` (resolved decisions + slice-by-slice build order + guardrail checklist).
-> **Next-steps brief for a fresh session (post-P3 — START HERE for what's next):** `docs/DealRoute_PostP3_Handoff.md` (full audit + the remaining roadmap Steps 2–6 with prerequisites + env/workflow gotchas). Supersedes `docs/DealRoute_PostC_Handoff.md` (its Step 1 = P3, done) and the stale pre-Phase-C `docs/NEXT_SESSION_HANDOFF.md`.
+> **Next-steps brief for a fresh session (START HERE for what's next):** `docs/DealRoute_PostP3_Handoff.md` — kept current; `master` @ `4f4f077`. Post-C **Steps 1 (P3 public API) + 2 (GDPR/affiliate disclosure) are DONE**; next is **Step 3 (reliability ranking)**. Remaining Steps 3–6 with prerequisites + env/workflow gotchas are in it. Supersedes `docs/DealRoute_PostC_Handoff.md` + the pre-Phase-C `docs/NEXT_SESSION_HANDOFF.md` (both banner-marked superseded).
 > Firecrawl (search + scrape vendor, behind ports; Tier-4 search backend) — official integration reference: `docs/Firecrawl_Integration_Reference.md`.
 > Detailed standards auto-load from `.claude/rules/` — `architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`.
 
