@@ -53,6 +53,8 @@ export function dealToRow(d: DealRecord): DealRow {
     status: d.status,
     verifiedBy: d.verified_by,
     verifiedAt: d.verified_at,
+    affiliateDisclosure: d.affiliate_disclosure,
+    publishedAt: d.published_at,
   };
 }
 
@@ -123,6 +125,9 @@ export function rowToDeal(r: DealSelect): DealRecord {
     status: r.status,
     verified_by: r.verifiedBy,
     verified_at: isoTimestampOrNull(r.verifiedAt),
+    affiliate_disclosure: r.affiliateDisclosure,
+    // timestamptz → canonical ISO-Z (same normalisation as verified_at).
+    published_at: isoTimestampOrNull(r.publishedAt),
   };
   return DealRecordSchema.parse(candidate);
 }

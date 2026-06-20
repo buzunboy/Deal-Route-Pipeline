@@ -9,7 +9,7 @@ import type { Config } from '../../../config/index.js';
  */
 export type ReviewArgs =
   | { action: 'list' }
-  | { action: 'approve'; dealId: string; approver: string }
+  | { action: 'approve'; dealId: string; approver: string; affiliateDisclosure?: boolean }
   | { action: 'reject'; dealId: string; approver: string }
   | { action: 'proposals' }
   | { action: 'manual' }
@@ -32,8 +32,12 @@ export async function review(config: Config, args: ReviewArgs): Promise<void> {
         break;
       }
       case 'approve': {
-        const updated = await container.review.approve(args.dealId, args.approver);
-        console.log(`Approved → published: ${updated.id} (${updated.service})`);
+        const updated = await container.review.approve(args.dealId, args.approver, {
+          affiliateDisclosure: args.affiliateDisclosure,
+        });
+        console.log(
+          `Approved → published: ${updated.id} (${updated.service})  affiliate_disclosure=${updated.affiliate_disclosure}`,
+        );
         break;
       }
       case 'reject': {

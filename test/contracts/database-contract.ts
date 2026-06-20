@@ -43,6 +43,8 @@ function dealRecord(overrides: Partial<DealRecord> = {}): DealRecord {
     status: DealStatus.enum.candidate,
     verified_by: null,
     verified_at: null,
+    affiliate_disclosure: true,
+    published_at: null,
     ...overrides,
   };
 }
@@ -110,6 +112,28 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       const readMonthly = (await db.deals.getById(monthly.id))!;
       expect(readMonthly.price.billing).toBe('monthly');
       expect(readMonthly.price.prepaid_months).toBeUndefined();
+    });
+
+    it('deals: disclosure fields round-trip (affiliate_disclosure + published_at, schema v3)', async () => {
+      // Step-2 columns must survive write→read in both adapters (LSP), incl. the
+      // published_at timestamptz→ISO-Z normalisation and the boolean.
+      const db = await makeDb();
+      const published = dealRecord({
+        status: DealStatus.enum.published,
+        affiliate_disclosure: false,
+        published_at: '2026-06-19T12:00:00.000Z',
+      });
+      const candidate = dealRecord({ status: DealStatus.enum.candidate }); // defaults
+      await db.deals.insert(published);
+      await db.deals.insert(candidate);
+
+      const readPub = (await db.deals.getById(published.id))!;
+      expect(readPub.affiliate_disclosure).toBe(false);
+      expect(readPub.published_at).toBe('2026-06-19T12:00:00.000Z');
+
+      const readCand = (await db.deals.getById(candidate.id))!;
+      expect(readCand.affiliate_disclosure).toBe(true); // schema default
+      expect(readCand.published_at).toBeNull();
     });
 
     it('deals: findByDedupeKey ignores rejected and matches the canonical key', async () => {

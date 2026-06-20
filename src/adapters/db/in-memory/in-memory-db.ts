@@ -4,6 +4,7 @@ import {
   toEurMicros,
   eurFromMicros,
   SOURCELESS_RUN_BUCKET,
+  DealRecordSchema,
   type Source,
   type DealRecord,
   type CrawlRun,
@@ -85,7 +86,11 @@ class InMemoryDealRepo implements DealRepository {
   private store = new Map<string, DealRecord>();
   constructor(private readonly evidence: InMemoryEvidenceRepo) {}
   async insert(d: DealRecord): Promise<void> {
-    this.store.set(d.id, { ...d });
+    // Parse on write so schema defaults (e.g. affiliate_disclosure=true) are applied
+    // exactly as the Postgres adapter applies them on read — substitutability (LSP):
+    // the fake must not be more permissive than prod (a deal can't be stored with a
+    // defaulted field left undefined here but defaulted there).
+    this.store.set(d.id, DealRecordSchema.parse(d));
   }
   async getById(id: string): Promise<DealRecord | null> {
     const d = this.store.get(id);
@@ -163,7 +168,8 @@ class InMemoryDealRepo implements DealRepository {
     return n;
   }
   async update(d: DealRecord): Promise<void> {
-    this.store.set(d.id, { ...d });
+    // Parse on write too (see insert) — defaults applied identically to Postgres.
+    this.store.set(d.id, DealRecordSchema.parse(d));
   }
 }
 

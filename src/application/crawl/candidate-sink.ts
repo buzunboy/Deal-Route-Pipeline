@@ -107,6 +107,10 @@ export class CandidateSink {
       status,
       verified_by: null,
       verified_at: null,
+      // Disclosure fields are only meaningful once PUBLISHED; a candidate carries the
+      // safe default (true) + no published_at. The reviewer confirms/sets them at approve.
+      affiliate_disclosure: true,
+      published_at: null,
     };
   }
 }

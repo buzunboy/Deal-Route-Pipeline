@@ -99,6 +99,10 @@ export const deals = pgTable(
     status: text('status').notNull(),
     verifiedBy: text('verified_by'),
     verifiedAt: timestamp('verified_at', { withTimezone: true, mode: 'string' }),
+    // EU-Omnibus disclosure at publish (Step 2). `affiliate_disclosure` defaults true
+    // (over-disclose); `published_at` is the publish instant, distinct from verified_at.
+    affiliateDisclosure: boolean('affiliate_disclosure').notNull().default(true),
+    publishedAt: timestamp('published_at', { withTimezone: true, mode: 'string' }),
   },
   (t) => ({
     statusIdx: index('deals_status_idx').on(t.status),

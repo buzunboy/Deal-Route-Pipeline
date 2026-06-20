@@ -59,6 +59,33 @@ describe('ReviewUseCase', () => {
     expect(stored!.status).toBe('published');
   });
 
+  it('approve sets published_at (distinct from verified_at) + persists it', async () => {
+    const deal = await makeCandidate(db, randomUUID());
+    const updated = await uc.approve(deal.id, 'reviewer@dealroute');
+    expect(updated.published_at).not.toBeNull();
+    expect(updated.published_at).toBe(updated.verified_at); // both = the approve instant
+    const stored = await db.deals.getById(deal.id);
+    expect(stored!.published_at).not.toBeNull();
+  });
+
+  it('approve sets affiliate_disclosure from the reviewer when supplied', async () => {
+    const deal = await makeCandidate(db, randomUUID());
+    const updated = await uc.approve(deal.id, 'reviewer@dealroute', { affiliateDisclosure: false });
+    expect(updated.affiliate_disclosure).toBe(false);
+    expect((await db.deals.getById(deal.id))!.affiliate_disclosure).toBe(false);
+  });
+
+  it('DEFAULTS affiliate_disclosure=true (over-disclose) + warns when the reviewer omits it', async () => {
+    const logger = new FakeLogger();
+    const ucWarn = new ReviewUseCase(db, new FixedClock(), logger);
+    const deal = await makeCandidate(db, randomUUID());
+    const updated = await ucWarn.approve(deal.id, 'reviewer@dealroute'); // no disclosure supplied
+    expect(updated.affiliate_disclosure).toBe(true); // safe default — never under-disclose
+    expect(
+      logger.entries.some((e) => e.level === 'warn' && /affiliate_disclosure/i.test(e.msg)),
+    ).toBe(true);
+  });
+
   it('reject → rejected/archived', async () => {
     const deal = await makeCandidate(db, randomUUID());
     const updated = await uc.reject(deal.id, 'reviewer@dealroute', 'not a real bundle');

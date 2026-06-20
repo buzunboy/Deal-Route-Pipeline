@@ -31,6 +31,37 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### `DealRecord` type doesn't force the defaulted fields to be present (runtime-guarded instead)
+- **Severity**: low
+- **Area**: domain / typing
+- **Location**: `src/domain/deal-record/deal-record.ts` (`affiliate_disclosure`/`published_at` via `.default()`).
+- **What**: zod `.default()` fields infer as effectively-optional in `z.infer<DealRecordSchema>`, so the
+  TS compiler won't flag a hand-built `DealRecord` (e.g. a published one) that omits the disclosure
+  fields. "published ⇒ disclosure present" is therefore enforced at RUNTIME (both DB adapters now
+  `DealRecordSchema.parse()` on write, applying the defaults — LSP-consistent), not by the type.
+- **Why deferred**: the runtime guard closes the actual gap (a stored/served deal always has the
+  defaults), and the production approve path sets both fields explicitly. A branded
+  `PublishedDealRecord` type would make it compile-time-load-bearing but is a larger refactor for
+  marginal gain now.
+- **Fix-when**: if a compile-time guarantee becomes worth it (e.g. more publish-only invariants) —
+  introduce a refined `PublishedDealRecord`.
+- **Logged**: 2026-06-20
+
+### A defaulted (vs reviewer-explicit) affiliate_disclosure isn't durably queryable
+- **Severity**: low
+- **Area**: review / compliance
+- **Location**: `src/application/review/review.ts` (approve — the omitted-disclosure warn).
+- **What**: when a reviewer publishes without supplying `affiliate_disclosure`, the use-case
+  defaults it to `true` (over-disclose, trust-safe) and emits a `logger.warn`. But the
+  defaulted-vs-explicitly-decided distinction lives only in the log line, not as a durable
+  record/audit attribute — so there's no query to answer "which published deals defaulted their
+  disclosure vs had it explicitly set?".
+- **Why deferred**: the stored value is correct and safe (always discloses when unsure) and the
+  publish is visible in logs; for v1 that's sufficient. It's an auditability nice-to-have.
+- **Fix-when**: if legal/compliance wants to audit disclosure provenance — record the
+  defaulted/explicit signal on the `reviews` audit row (or a deal attribute) at approve-time.
+- **Logged**: 2026-06-20
+
 ### Tier-4 can surface a non-DE source that passes the confidence gate
 - **Severity**: low (curation/scoping; not a trust breach — nothing auto-publishes)
 - **Area**: discovery / extraction

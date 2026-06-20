@@ -186,4 +186,29 @@ suite('Phase A pipeline (Container + Postgres)', () => {
     expect(run).toBeDefined();
     expect(run!.cost_eur).toBeCloseTo(PER_CALL * 2, 10);
   });
+
+  it('approve sets + persists the EU-Omnibus disclosure fields (published_at + affiliate_disclosure)', async () => {
+    // Step 2 end-to-end through real Postgres: a candidate has no published_at and
+    // the default disclosure; after approve, both round-trip back from the DB.
+    const source = makeSource({ url: 'https://www.telekom.de/magenta-disclosure' });
+    container = makeContainer({
+      fetcher: new ScriptedFetcher({ [source.url]: { text: PAGE, html: '<html></html>' } }),
+      llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [makeLlmDeal()] }) }),
+    });
+    await container.db.sources.upsert(source);
+    await container.crawlSource.execute({ sourceId: source.id });
+    const candidate = (await container.db.deals.listByStatus('candidate', 10))[0]!;
+    expect(candidate.published_at).toBeNull(); // not published yet
+    expect(candidate.affiliate_disclosure).toBe(true); // safe default on the candidate
+
+    // Reviewer publishes, explicitly setting disclosure=false (non-affiliate deal).
+    await container.review.approve(candidate.id, 'reviewer@dealroute', {
+      affiliateDisclosure: false,
+    });
+
+    const published = (await container.db.deals.getById(candidate.id))!;
+    expect(published.status).toBe('published');
+    expect(published.published_at).not.toBeNull(); // stamped at publish
+    expect(published.affiliate_disclosure).toBe(false); // reviewer's value persisted (timestamptz + bool round-trip)
+  });
 });

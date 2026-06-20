@@ -93,7 +93,21 @@ describe('ReviewApi (HTTP integration)', () => {
       body: JSON.stringify({ approver: 'reviewer@dealroute' }),
     });
     expect(res.status).toBe(200);
-    expect((await db.deals.getById(deal.id))!.status).toBe('published');
+    const stored = (await db.deals.getById(deal.id))!;
+    expect(stored.status).toBe('published');
+    expect(stored.published_at).not.toBeNull();
+    expect(stored.affiliate_disclosure).toBe(true); // defaulted when omitted
+  });
+
+  it('POST approve passes the reviewer-supplied affiliate_disclosure through', async () => {
+    const deal = await seedCandidate();
+    const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'reviewer@dealroute', affiliate_disclosure: false }),
+    });
+    expect(res.status).toBe(200);
+    expect((await db.deals.getById(deal.id))!.affiliate_disclosure).toBe(false);
   });
 
   it('POST approve without an approver is a 400 (no anonymous publish)', async () => {

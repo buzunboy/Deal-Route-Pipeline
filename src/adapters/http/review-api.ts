@@ -36,7 +36,7 @@ export interface ReviewApiOptions {
  *
  *   GET  /api/health
  *   GET  /api/candidates                 → [{ deal, evidence }]
- *   POST /api/candidates/:id/approve      { approver }            → { deal }
+ *   POST /api/candidates/:id/approve      { approver, affiliate_disclosure? } → { deal }
  *   POST /api/candidates/:id/reject       { approver, reason? }   → { deal }
  *   GET  /api/candidates/:id/reviews      → [ReviewRecord]   (audit history)
  *   GET  /api/field-proposals            → [FieldProposalRecord]
@@ -115,12 +115,17 @@ export class ReviewApi {
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
-      const parsed = ApproveBody.safeParse(body);
+      const parsed = ApproveCandidateBody.safeParse(body);
       if (!parsed.success) return sendError(res, 400, 'approver is required');
       return this.mapErrors(res, async () => {
+        // The reviewer may set the EU-Omnibus affiliate disclosure at approve-time;
+        // omitted ⇒ the use-case defaults it to true (over-disclose) + flags it.
         const deal = await this.review.approve(
           decodeURIComponent(approve[1]!),
           parsed.data.approver,
+          {
+            affiliateDisclosure: parsed.data.affiliate_disclosure,
+          },
         );
         sendJson(res, 200, { deal });
       });
@@ -232,6 +237,11 @@ export class ReviewApi {
 }
 
 const ApproveBody = z.object({ approver: z.string().min(1) });
+/** Candidate approve also accepts the reviewer's EU-Omnibus affiliate disclosure (optional). */
+const ApproveCandidateBody = z.object({
+  approver: z.string().min(1),
+  affiliate_disclosure: z.boolean().optional(),
+});
 const RejectBody = z.object({ approver: z.string().min(1), reason: z.string().optional() });
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {

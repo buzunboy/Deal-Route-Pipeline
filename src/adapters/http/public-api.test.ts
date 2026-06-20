@@ -100,13 +100,25 @@ describe('PublicApi (/v1 HTTP integration)', () => {
     const res = await fetch(`${base}/v1/deals/${deal.id}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      deal: { id: string; trust: string; evidence_screenshot_url: string };
+      deal: {
+        id: string;
+        trust: string;
+        evidence_screenshot_url: string;
+        affiliate_disclosure: unknown;
+        published_at: unknown;
+      };
     };
     expect(body.deal.id).toBe(deal.id);
     expect(body.deal.trust).toBe('recent'); // verified 1 day before NOW
     expect(body.deal.evidence_screenshot_url).toBe(
       `https://cdn.example.com/${deal.evidence_id}/screenshot.png`,
     );
+    // EU-Omnibus disclosure must always be a real boolean on a published deal (never
+    // undefined) — the in-memory adapter applies the schema default on write, so even
+    // a fixture that omits it serves the safe `true`.
+    expect(typeof body.deal.affiliate_disclosure).toBe('boolean');
+    expect(body.deal.affiliate_disclosure).toBe(true);
+    expect(body.deal).toHaveProperty('published_at'); // present (may be null on a hand-built fixture)
   });
 
   it('GET /v1/deals/:id 404s a non-published deal (never leaks it)', async () => {

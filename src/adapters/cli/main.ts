@@ -27,6 +27,7 @@ Commands:
   monitor --due                       Monitor every due source
   review list                         List candidates awaiting review (+ evidence)
   review approve <id> <approver>      Approve a candidate → published
+          [--no-affiliate-disclosure]   mark a non-affiliate deal (default: discloses)
   review reject <id> <approver>       Reject a candidate → archived
   review proposals                    List open field proposals
   review manual                       List open manual-capture tasks
@@ -169,12 +170,20 @@ async function runReview(config: Parameters<typeof review>[0], rest: string[]): 
       return review(config, { action: 'proposals' });
     case 'manual':
       return review(config, { action: 'manual' });
-    case 'approve':
     case 'reject': {
       const dealId = rest[1];
       const approver = rest[2];
       if (!dealId || !approver) return fail(`review ${action} requires <id> <approver>.`);
       return review(config, { action, dealId, approver });
+    }
+    case 'approve': {
+      const dealId = rest[1];
+      const approver = rest[2];
+      if (!dealId || !approver) return fail(`review ${action} requires <id> <approver>.`);
+      // EU-Omnibus disclosure: `--no-affiliate-disclosure` marks a genuinely
+      // non-affiliate deal; omitted ⇒ the use-case defaults to true (over-disclose).
+      const affiliateDisclosure = rest.includes('--no-affiliate-disclosure') ? false : undefined;
+      return review(config, { action, dealId, approver, affiliateDisclosure });
     }
     case 'sources':
       return review(config, { action: 'sources' });

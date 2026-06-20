@@ -137,6 +137,7 @@ describe('toPublicDeal — the no-leak trust contract', () => {
     const dto = toPublicDeal(fullyPopulatedDeal(), { now: new Date('2026-06-20T00:00:00.000Z') });
     expect(Object.keys(dto).sort()).toEqual(
       [
+        'affiliate_disclosure',
         'country',
         'eligibility',
         'evidence_screenshot_url',
@@ -145,6 +146,7 @@ describe('toPublicDeal — the no-leak trust contract', () => {
         'included_items',
         'price',
         'provider',
+        'published_at',
         'route_type',
         'service',
         'source_url',
@@ -154,6 +156,16 @@ describe('toPublicDeal — the no-leak trust contract', () => {
         'verified_at',
       ].sort(),
     );
+  });
+
+  it('exposes the EU-Omnibus disclosure fields (affiliate_disclosure + published_at)', () => {
+    const deal = fullyPopulatedDeal({
+      affiliate_disclosure: true,
+      published_at: '2026-06-19T12:00:00.000Z',
+    });
+    const dto = toPublicDeal(deal, { now: new Date('2026-06-20T00:00:00.000Z') });
+    expect(dto.affiliate_disclosure).toBe(true);
+    expect(dto.published_at).toBe('2026-06-19T12:00:00.000Z');
   });
 
   it('projects conditions to { key, label, value }, drops source_quote, strips reserved value keys', () => {

@@ -272,10 +272,13 @@ scripted fake → candidates + proposed sources persisted) + a gated live smoke
   `source_url` (split-by-source dedupe, P1). No internal/audit field leaks
   (contract-tested); published-only; unauthenticated read, no writes.
   See `docs/DealRoute_P3_PublicAPI_Handoff.md`. (`/v1/` is the version prefix.)
-- **GDPR + affiliate disclosure at publish** (plan "Guardrails / Later"): no
-  personal data stored; add EU-Omnibus affiliate disclosure to published records;
-  store our own screenshot + a source link rather than republishing copyrighted
-  T&C (already the evidence model — verify at publish).
+- **GDPR + affiliate disclosure at publish — DONE (Step 2, 2026-06-20).** Added
+  `affiliate_disclosure` (bool, default true = over-disclose) + `published_at` to the
+  deal record (schema v3, migration 0010), set by the reviewer at approve-time (CLI
+  `--no-affiliate-disclosure` / `/api` approve body; defaults true + warns when omitted),
+  exposed in the public `/v1/` DTO. No PII stored; own-screenshot evidence (not republished
+  T&C) confirmed. Legal-confirmed field set. Trust-verified (nothing auto-publishes; every
+  published deal carries a disclosure decision; DTO leaks nothing new).
 - **Reliability-driven trust** maturation: feed `reliability_score` into ranking
   and cadence; surface `last_verified` prominently (the product's trust signal).
 - **Multi-country** (plan "Later"): the `Country`/`Currency` enums and

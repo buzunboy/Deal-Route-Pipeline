@@ -5,9 +5,11 @@ import { EligibilitySchema } from './eligibility.js';
 import { ValiditySchema } from './validity.js';
 import { GroundingSchema, FieldProposalSchema } from './grounding.js';
 
-// v2 (2026-06-20): added `price.prepaid_months` for prepaid-term amortisation
-// (additive/optional; v1 rows parse unchanged — the field is nullish).
-export const CURRENT_SCHEMA_VERSION = 2 as const;
+// v2 (2026-06-20): added `price.prepaid_months` for prepaid-term amortisation.
+// v3 (2026-06-20): added `affiliate_disclosure` (default true) + `published_at`
+// for the EU-Omnibus disclosure at publish (Step 2). All additive/defaulted, so
+// v1/v2 rows parse unchanged.
+export const CURRENT_SCHEMA_VERSION = 3 as const;
 
 /**
  * The fields the LLM is allowed to PROPOSE for a single deal record.
@@ -78,5 +80,18 @@ export const DealRecordSchema = LlmExtractedDealSchema.extend({
   verified_by: z.string().nullable().default(null),
   /** ISO-8601 timestamp of human verification, or null. */
   verified_at: z.string().nullable().default(null),
+  /**
+   * EU-Omnibus/UWG affiliate-placement disclosure for the PUBLIC feed: true when a
+   * published deal may be a paid/affiliate placement. **Defaults true** — the safe
+   * side is to over-disclose; a reviewer may set it false at approve-time for a
+   * non-affiliate deal. Set by the human at publish, never LLM-proposed. Exposed in
+   * the public DTO so the landing page can render the legally-required disclosure.
+   */
+  affiliate_disclosure: z.boolean().default(true),
+  /**
+   * ISO-8601 timestamp of when a human PUBLISHED this deal — distinct from
+   * `verified_at` (last verification). Null until published. Set on the approve path.
+   */
+  published_at: z.string().nullable().default(null),
 });
 export type DealRecord = z.infer<typeof DealRecordSchema>;

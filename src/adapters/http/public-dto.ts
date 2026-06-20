@@ -42,6 +42,13 @@ export interface PublicDeal {
   included_items: string[];
   source_url: string;
   verified_at: string | null;
+  /** ISO timestamp this deal was published (distinct from verified_at), or null. */
+  published_at: string | null;
+  /**
+   * EU-Omnibus/UWG disclosure: true when this published deal may be a paid/affiliate
+   * placement. The landing page MUST render the disclosure when true. Defaults true.
+   */
+  affiliate_disclosure: boolean;
   /** Coarse freshness band (never the raw reliability/confidence score). */
   trust: TrustBadge;
   /**
@@ -164,6 +171,8 @@ export function toPublicDeal(deal: DealRecord, opts: PublicDealOptions): PublicD
     included_items: deal.included_items,
     source_url: deal.source_url,
     verified_at: deal.verified_at,
+    published_at: deal.published_at,
+    affiliate_disclosure: deal.affiliate_disclosure,
     trust: trustBadge(deal.verified_at, opts.now),
     evidence_screenshot_url: resolveScreenshotUrl(deal.evidence_id, opts.cdnBaseUrl),
   };

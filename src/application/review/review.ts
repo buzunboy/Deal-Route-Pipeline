@@ -53,19 +53,52 @@ export class ReviewUseCase {
     );
   }
 
-  /** Approve a candidate → published. Requires an approver (no anonymous publish). */
-  async approve(dealId: string, approver: string): Promise<DealRecord> {
+  /**
+   * Approve a candidate → published. Requires an approver (no anonymous publish).
+   *
+   * At publish we set the EU-Omnibus disclosure fields (Step 2): `published_at` (the
+   * approve instant, distinct from `verified_at`) and `affiliate_disclosure`. The
+   * reviewer supplies the disclosure; when omitted it **defaults to `true`** (the
+   * safe, over-disclosing side) and we LOG a flag so a defaulted publish is visible,
+   * never silent. The fields are set here by the human — never LLM-proposed.
+   */
+  async approve(
+    dealId: string,
+    approver: string,
+    opts: { affiliateDisclosure?: boolean } = {},
+  ): Promise<DealRecord> {
     this.assertApprover(approver, 'approve');
     const deal = await this.requireDeal(dealId);
     this.assertReviewable(deal);
 
     const at = this.clock.nowIso();
+    const affiliateDisclosure = opts.affiliateDisclosure ?? true;
+    if (opts.affiliateDisclosure === undefined) {
+      this.logger.warn(
+        'deal published with DEFAULTED affiliate_disclosure=true (reviewer omitted)',
+        {
+          dealId,
+          approver,
+        },
+      );
+    }
+
     // Log-before-act: append the audit row FIRST, so the worst case on a mid-call
     // failure is an orphan review row — never a published deal with no audit trail.
     await this.recordReview(dealId, 'approve', approver, null, at);
-    await this.db.deals.updateStatus(dealId, DealStatus.enum.published, approver, at);
-    this.logger.info('deal approved → published', { dealId, approver });
-    return { ...deal, status: DealStatus.enum.published, verified_by: approver, verified_at: at };
+    // Persist the full updated record (update() is the all-fields writer; updateStatus
+    // only touches status/verified_*, so it can't carry the disclosure + published_at).
+    const published: DealRecord = {
+      ...deal,
+      status: DealStatus.enum.published,
+      verified_by: approver,
+      verified_at: at,
+      published_at: at,
+      affiliate_disclosure: affiliateDisclosure,
+    };
+    await this.db.deals.update(published);
+    this.logger.info('deal approved → published', { dealId, approver, affiliateDisclosure });
+    return published;
   }
 
   /**
