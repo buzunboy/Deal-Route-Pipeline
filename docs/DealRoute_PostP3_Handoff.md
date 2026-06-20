@@ -2,7 +2,7 @@
 
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`<set-on-merge>`** (Step 5). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
+**`79bada3`** (Step 5). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
 disclosure), 3 (reliability-blended ranking), 4 (scheduler / unattended-run harness) AND
 5 (observability: alerting) are DONE + merged; the next step is Step 6 (multi-country) —
 the last post-C step, gated on a real Public Suffix List adapter.** This supersedes
@@ -292,7 +292,7 @@ workstreams: **(A) Prereq A trust fix** + **(B) scheduler templates**._
 - **Tests:** templates → review + dry-run; pg-boss → unit + integration for the worker.
 - **Workflow-shaped?** No — config/ops + one decision.
 
-### Step 5 — Observability: alerting + metrics push — ✅ DONE (merged `<set-on-merge>`, 2026-06-21)
+### Step 5 — Observability: alerting + metrics push — ✅ DONE (merged `79bada3`, 2026-06-21)
 _Shipped the alerting spine as an owner-decided **generic webhook + Slack** first cut (OCP — more
 backends slot in later). A new `Alerting` port (`alert(event): Promise<void>`, **best-effort: never
 throws, so it can't crash a lane** — pinned by a shared contract suite); a pure vendor-neutral
