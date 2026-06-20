@@ -31,6 +31,44 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### `withAbortableTimeout` can emit an unhandledRejection when the inner promise loses the race
+- **Severity**: low (noise, not a control-flow bug)
+- **Area**: shared / resilience
+- **Location**: `src/adapters/shared/retry.ts` (`withAbortableTimeout`, the `Promise.race` loser).
+- **What**: on a timeout, `withAbortableTimeout` rejects via the timer, but the inner `run` promise
+  (the actual fetch) can still settle as a rejection LATER with no handler attached — surfacing as a
+  process-level `unhandledRejection`. It does NOT crash or stall the awaited caller (the race already
+  rejected and the caller caught it — e.g. `WebhookAlerter.alert` swallows it), so behaviour is
+  correct; it's log/handler noise. Surfaced by the Step-5 alerting verify (the webhook path now
+  exercises the timeout branch under load).
+- **Why deferred**: no functional impact — the awaited control flow is correct everywhere this helper
+  is used (search adapters, webhook alerter); it's a cosmetic unhandled-rejection event a hung remote
+  could emit under load.
+- **Fix-when**: if `unhandledRejection` noise becomes material — attach a no-op `.catch()` to the
+  losing `run` promise inside `withAbortableTimeout`, or abort the inner work on timeout so it settles
+  via the abort signal. One small change in the shared helper; benefits every caller.
+- **Logged**: 2026-06-21
+
+### Datadog / CloudWatch metrics-push alerting adapters not built (webhook is the v1 answer)
+- **Severity**: low (capability gap, not a defect)
+- **Area**: observability / alerting
+- **Location**: `src/adapters/alerting/` (would be a new `Alerting` adapter); design recorded in
+  `docs/DealRoute_Observability.md`.
+- **What**: Step 5 shipped the `Alerting` port + Noop/Webhook adapters wired at the two
+  silent-warn points (source reliability-low, daily-budget reached). A native Datadog/CloudWatch
+  metrics-push adapter (for dashboards/aggregation, not just human notification) was deferred — a
+  full metrics-backend adapter is materially heavier than a webhook (vendor SDK + creds + a
+  metric/dashboard model) and the generic `WebhookAlerter` already covers the v1 "tell a human"
+  need (and can front a collector/proxy that calls Datadog/CloudWatch in the meantime).
+- **Why deferred**: owner-decided — build the native adapter only when a metrics backend is
+  actually chosen for the deployment AND aggregation/dashboards are needed. The port is the OCP
+  seam, so adding it later touches no use-case.
+- **Fix-when**: a metrics backend is chosen + dashboards/aggregation are required — build a
+  `DatadogAlerter`/`CloudWatchAlerter` per the recipe in `docs/DealRoute_Observability.md`
+  (extend `alerting.kind`, map `AlertEvent` → events/metrics, keep the best-effort contract +
+  run the shared `alertingContract`).
+- **Logged**: 2026-06-21
+
 ### `listPublished` reads ALL active sources per public request (reliability index rebuilt each call)
 - **Severity**: low (scaling ceiling, not a defect)
 - **Area**: api / db

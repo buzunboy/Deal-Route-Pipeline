@@ -10,6 +10,7 @@ import {
   FakeEvidenceStore,
   FixedClock,
   FakeLogger,
+  FakeAlerter,
 } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
 import { makeSource } from '../../../test/factories/source.js';
@@ -24,6 +25,7 @@ function build(opts: { fetcher?: FakeFetcher; llmJson?: string } = {}) {
   const clock = new FixedClock();
   const logger = new FakeLogger();
   const extract = new ExtractUseCase(llm, logger);
+  const alerter = new FakeAlerter();
   const uc = new CrawlSourceUseCase(
     fetcher,
     evidence,
@@ -34,8 +36,9 @@ function build(opts: { fetcher?: FakeFetcher; llmJson?: string } = {}) {
     SEED_VOCABULARY,
     'TestAgent/0.1',
     30000,
+    alerter,
   );
-  return { uc, db, evidence, fetcher };
+  return { uc, db, evidence, fetcher, alerter };
 }
 
 describe('CrawlSourceUseCase', () => {
@@ -286,6 +289,32 @@ describe('CrawlSourceUseCase', () => {
     await env.uc.execute({ sourceId: source.id });
 
     expect((await env.db.sources.getById(source.id))!.resolved_url).toBe('https://prior.de/r');
+  });
+
+  // Step 5: a failing crawl that drops reliability below the flag threshold emits a
+  // source_reliability_low alert alongside the warn (best-effort, never crashes).
+  it('emits a source_reliability_low alert when reliability falls below threshold', async () => {
+    env = build({ fetcher: new FakeFetcher({ outcome: 'error', error: 'boom', text: '' }) });
+    // 0.4 → fail → 0.2 (< 0.3 threshold) → reliabilityLow fires.
+    const source = makeSource({ reliability_score: 0.4, url: 'https://flaky.de/x' });
+    await env.db.sources.upsert(source);
+
+    await env.uc.execute({ sourceId: source.id });
+
+    expect(env.alerter.events).toHaveLength(1);
+    expect(env.alerter.events[0]!.kind).toBe('source_reliability_low');
+    expect(env.alerter.events[0]!.dedupe_key).toBe(`source_reliability_low:${source.id}`);
+  });
+
+  it('does NOT alert when reliability stays at/above threshold', async () => {
+    // 0.9 → fail → 0.7 (>= 0.3) → no alert.
+    const flaky = build({
+      fetcher: new FakeFetcher({ outcome: 'error', error: 'boom', text: '' }),
+    });
+    const source = makeSource({ reliability_score: 0.9 });
+    await flaky.db.sources.upsert(source);
+    await flaky.uc.execute({ sourceId: source.id });
+    expect(flaky.alerter.events).toHaveLength(0);
   });
 
   it('reliability decides cadence: a flaky source is scheduled further out than a healthy one', async () => {

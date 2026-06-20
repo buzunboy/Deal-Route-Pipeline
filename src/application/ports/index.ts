@@ -8,3 +8,4 @@ export * from './browser-agent.js';
 export * from './search-provider.js';
 export * from './feed-reader.js';
 export * from './logger.js';
+export * from './alerting.js';

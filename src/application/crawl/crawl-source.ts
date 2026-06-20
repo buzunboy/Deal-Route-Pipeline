@@ -12,8 +12,10 @@ import type {
   Database,
   Clock,
   Logger,
+  Alerting,
   FetchResult,
 } from '../ports/index.js';
+import { sourceReliabilityLowAlert } from '../../domain/index.js';
 import { ExtractUseCase, type ExtractedCandidate } from '../extract/extract.js';
 import { newId } from '../shared/id.js';
 import { applyCrawlOutcome } from './source-policy.js';
@@ -58,6 +60,7 @@ export class CrawlSourceUseCase {
     private readonly vocabulary: Vocabulary,
     private readonly fetchUserAgent: string,
     private readonly fetchTimeoutMs: number,
+    private readonly alerting: Alerting,
   ) {
     this.sink = new CandidateSink(db, clock, logger);
   }
@@ -281,6 +284,17 @@ export class CrawlSourceUseCase {
         reliability: updated.reliability_score,
         nextDue: updated.next_due,
       });
+      // Proactive alert (Step 5) — best-effort, never throws (the port contract), so
+      // it can't crash the crawl batch even if delivery fails.
+      await this.alerting.alert(
+        sourceReliabilityLowAlert({
+          sourceId: source.id,
+          url: source.url,
+          reliability: updated.reliability_score,
+          nextDue: updated.next_due,
+          at: this.clock.nowIso(),
+        }),
+      );
     }
     await this.db.sources.update(updated);
   }

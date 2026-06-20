@@ -307,9 +307,12 @@ scripted fake → candidates + proposed sources persisted) + a gated live smoke
   pass so monitor matches expiry/baseline on `resolved_url ?? url` → a redirecting source's
   published deals now auto-expire (migration 0011; see `docs/KNOWN_ISSUES.md` → Resolved).
   Safe-by-default: Tier-4 off, agentic lanes dark, S3 evidence required under cron.
-- **Ops dashboards / alerting** (Step 5, NEXT): run metrics, cost, queue depth,
-  source-reliability flags, failed-source alerts — a new `Alerting` port + a webhook/Slack
-  adapter, thresholds in config, hooking the existing reliability-low + daily-budget warn points.
+- **Ops alerting — DONE (Step 5, 2026-06-21).** A new `Alerting` port + `NoopAlerter`
+  (default off) + `WebhookAlerter` (generic webhook + Slack), wired at the source-reliability-low
+  (crawl + monitor) and daily-budget-reached warn points. Best-effort (never crashes a lane),
+  dark by default, no schema/trust impact. Datadog/CloudWatch metrics-push adapters are deferred
+  (the recipe to build them via the same port is in `docs/DealRoute_Observability.md`). Pull-only
+  `stats` over `crawl_runs` still complements it; dashboards/queue-depth come with a metrics backend.
 
 ---
 

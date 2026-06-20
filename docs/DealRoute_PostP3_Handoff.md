@@ -2,10 +2,10 @@
 
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`6822a45`** (Step 4). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
-disclosure), 3 (reliability-blended ranking) AND 4 (scheduler / unattended-run harness)
-are DONE + merged; the next step is Step 5 (observability: alerting + metrics push).**
-This supersedes
+**`<set-on-merge>`** (Step 5). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
+disclosure), 3 (reliability-blended ranking), 4 (scheduler / unattended-run harness) AND
+5 (observability: alerting) are DONE + merged; the next step is Step 6 (multi-country) —
+the last post-C step, gated on a real Public Suffix List adapter.** This supersedes
 `docs/DealRoute_PostC_Handoff.md` (kept, banner-marked). (`NEXT_SESSION_HANDOFF.md` was deleted.)_
 
 > **What shipped since the original audit** (all merged to `master`, in order):
@@ -26,8 +26,11 @@ This supersedes
 > Action + `deploy/README.md` — pg-boss stays unwired; **Prereq A**: a nullable Source
 > `resolved_url` set on first successful crawl/monitor pass so monitor matches expiry/
 > baseline on `resolved_url ?? url` → a **redirecting source's published deals now
-> auto-expire**, migration **0011**). Deal-record `schema_version` is still **3**; latest
-> migration is now **`drizzle/0011`** (the Source `resolved_url` column).
+> auto-expire**, migration **0011**) · **Step 5** (observability: a new `Alerting` port +
+> `NoopAlerter`/`WebhookAlerter` — webhook+Slack — wired at the source-reliability-low + daily-
+> budget-reached warn points; best-effort, dark by default `ALERT_KIND=noop`; Datadog/CloudWatch
+> deferred per `docs/DealRoute_Observability.md`; NO schema change). Deal-record `schema_version`
+> is still **3**; latest migration is still **`drizzle/0011`**.
 
 > Binding rules still govern: `CLAUDE.md` + `.claude/rules/`
 > (`architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`).
@@ -97,8 +100,9 @@ invariants hold. **The implementation is sound; the foundation is strong.**
 `FETCHER=playwright`, `EVIDENCE_STORE=local`. Do not change these defaults.
 
 **Roadmap position:** post-C **Steps 1 (public read API = P3), 2 (GDPR/affiliate
-disclosure), 3 (reliability-blended ranking) AND 4 (scheduler/ops) are DONE + merged.**
-Remaining: **Step 5 (observability) ← NEXT**, Step 6 (multi-country). See §4 for each.
+disclosure), 3 (reliability-blended ranking), 4 (scheduler/ops) AND 5 (observability) are
+DONE + merged.** Remaining: **Step 6 (multi-country) ← NEXT (and last)** — gated on a real
+PSL adapter. See §4.
 
 ---
 
@@ -109,11 +113,12 @@ boundary, §3) and **Step 2** (GDPR/affiliate disclosure, §4). So the public `/
 the disclosure fields the landing page legally needs are in place. What remains (Steps 3–6)
 is real but **not launch-blocking** — each is a small, mostly decision-gated refinement.
 
-**Recommended next step: Step 5 (observability: alerting + metrics push)** — the
-lowest-risk remaining step: a new `Alerting` port + a webhook/Slack adapter, thresholds
-in config, hooking the existing warn points (reliability-low, daily-budget). No
-schema/trust impact (§4). Step 4 (scheduler/ops) is DONE (§4). Then Step 6 (multi-country,
-gated on a PSL adapter).
+**Recommended next step: Step 6 (multi-country)** — the last post-C step, and the
+furthest-out: it's gated on a real **Public Suffix List adapter** (dedupe correctness +
+the reliability/expiry registrable-domain joins depend on it; the current eTLD+1
+approximation breaks on multi-label TLDs like `.co.uk`), then de-hardcoding the
+`Country`/`Currency` enums + per-country vocab/deny-list/queries (§4). Only do it when
+actually expanding past DE. Steps 1–5 are DONE.
 
 ---
 
@@ -154,9 +159,8 @@ audit found; it was fixed in the same session and is in `KNOWN_ISSUES.md` → Re
 ## 4. The remaining roadmap steps (post-C Steps 2–6) — sequence + prerequisites
 
 Each lists **what**, **why-now**, **the decision it needs first (if any)**, the
-**code surface**, and **tests required**. **Steps 2, 3 AND 4 are DONE (below, kept for the
-record).** Remaining order: **Step 5 (NEXT) → Step 6.** Step 6 (multi-country) is furthest
-out (gated on a PSL adapter).
+**code surface**, and **tests required**. **Steps 2, 3, 4 AND 5 are DONE (below, kept for the
+record).** Remaining: **Step 6 (multi-country) — the last post-C step, gated on a PSL adapter.**
 
 ### Step 2 — GDPR + affiliate disclosure at publish — ✅ DONE (merged `4f4f077`, 2026-06-20)
 _Shipped as designed: `affiliate_disclosure` (bool, default **true** = over-disclose) +
@@ -288,7 +292,20 @@ workstreams: **(A) Prereq A trust fix** + **(B) scheduler templates**._
 - **Tests:** templates → review + dry-run; pg-boss → unit + integration for the worker.
 - **Workflow-shaped?** No — config/ops + one decision.
 
-### Step 5 — Observability: alerting + metrics push (OPS)
+### Step 5 — Observability: alerting + metrics push — ✅ DONE (merged `<set-on-merge>`, 2026-06-21)
+_Shipped the alerting spine as an owner-decided **generic webhook + Slack** first cut (OCP — more
+backends slot in later). A new `Alerting` port (`alert(event): Promise<void>`, **best-effort: never
+throws, so it can't crash a lane** — pinned by a shared contract suite); a pure vendor-neutral
+`AlertEvent` + builders (`src/domain/alerting/`); a `NoopAlerter` (DEFAULT off-switch — logs at
+debug, delivers nowhere) + a `WebhookAlerter` (POSTs JSON; Slack-renders the top-level `text`, plus
+the structured event for a generic collector; timeout-bounded, failures swallowed). Config-selected
+(`ALERT_KIND` `noop|webhook`, `ALERT_WEBHOOK_URL`, `ALERT_TIMEOUT_MS`; dark by default), injected
+from the one composition root into the two wired warn points: **source reliability-low** (crawl +
+monitor) and **daily-budget reached** (the guard). No schema/trust impact. The **Datadog/CloudWatch
+metrics-push adapters are DEFERRED** (owner: too heavy for v1; the recipe to build them via the
+same port is in `docs/DealRoute_Observability.md` + KNOWN_ISSUES). 630 unit tests + a config + an
+integration test (stub alerter fires through the real Container). code-reviewer + verify clean.
+Original plan below, retained for context:_
 - **What:** move from pull-only `stats` to proactive signals — alert on failed sources,
   reliability-low flags, cost-spike / daily-budget breaches, (if pg-boss) queue depth.
 - **Audit finding:** metrics are pull-only (`stats` CLI over `crawl_runs`); reliability-low
@@ -361,9 +378,9 @@ interactive multi-step BrowserAgent ("Option B").
    a guarded scheduled Action + docs); pg-boss stays unwired (its pool-bound + advisory-lock
    prereqs stay deferred in KNOWN_ISSUES against the day it's wired). Prereq A (monitor
    resolved_url) fixed.
-5. **Observability backend (Step 5 — NEXT):** Datadog/CloudWatch/Grafana/Slack-webhook?
-   *Rec: a small `Alerting` port + a webhook/Slack adapter; thresholds in config; hook the
-   existing reliability-low + daily-budget warn points.*
+5. **Observability backend (Step 5):** ✅ DECIDED + DONE. Generic webhook + Slack
+   (`WebhookAlerter`) behind a new `Alerting` port; reliability-low + daily-budget wired;
+   Datadog/CloudWatch deferred (recipe in `docs/DealRoute_Observability.md`).
 
 ## 8. Workflow / environment facts (these bit earlier sessions — don't rediscover)
 - You're in a git **worktree** on your own branch. The runtime `.env` (real keys) lives only
@@ -389,16 +406,15 @@ interactive multi-step BrowserAgent ("Option B").
 
 ## 9. First moves for the fresh session
 1. Confirm orientation reads + green baseline (`npm install && npm run check && npm run build`).
-   Steps 1 + 2 + 3 + 4 are DONE — no foundation repair pending; you're starting Step 5.
-2. **Build Step 5 — observability: alerting + metrics push** (§4). The decision it needs first
-   (put to the owner via `AskUserQuestion`): the ops backend (Datadog/CloudWatch/Grafana/
-   Slack-webhook), which drives the adapter. Recommend a small `Alerting` port + a webhook/
-   Slack adapter, thresholds in config, hooking the existing warn points — crawl-source
-   reliability-low (`source-policy.isReliabilityLow`) and the daily-budget guard. It's the
-   lowest-risk step: pure adapter work behind a new port (OCP), no schema/trust impact.
-   Tests: port contract suite + unit; thresholds are pure logic → table-driven.
-3. Then Step 6 (multi-country, gated on a real PSL adapter — `registrableDomain` eTLD+1
-   breaks on multi-label TLDs like `.co.uk`; de-hardcode the `Country`/`Currency` enums).
+   Steps 1–5 are DONE — no foundation repair pending; the only remaining post-C step is Step 6.
+2. **Build Step 6 — multi-country generalization** (§4) — the LAST post-C step, and only when
+   actually expanding past DE. **Hard prerequisite first: a real Public Suffix List adapter**
+   behind a small port — `registrableDomain` (`src/domain/discovery/links.ts`) is an eTLD+1
+   approximation (last two labels) that breaks on multi-label TLDs (`www.bbc.co.uk` → `co.uk`),
+   and dedupe correctness + the Step-3 reliability join + the Step-4 monitor expiry all depend on
+   it. Then de-hardcode the `Country`/`Currency` enums (`src/domain/deal-record/enums.ts`) +
+   per-country vocab/deny-list/queries (data, already parameterizable). Ask the owner before
+   touching the enums (trust/schema). Otherwise the pipeline is post-C feature-complete for DE v1.
 4. Every change: unit + integration tests (live for new external edges); `code-reviewer` +
    an adversarial-verify pass on anything trust/publish/schema; docs updated (CLAUDE.md
    Commands + Repo layout, README, ARCHITECTURE, roadmap §5; **and `docs/testing/LIVE_TEST_TEMPLATE.md`

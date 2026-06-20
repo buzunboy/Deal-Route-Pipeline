@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto';
 import {
   DealStatus,
   ManualCaptureReason,
+  sourceReliabilityLowAlert,
   type Source,
   type Change,
   type ChangeKind,
 } from '../../domain/index.js';
-import type { Fetcher, Database, Clock, Logger, FetchResult } from '../ports/index.js';
+import type { Fetcher, Database, Clock, Logger, Alerting, FetchResult } from '../ports/index.js';
 import { CrawlSourceUseCase } from '../crawl/crawl-source.js';
 import { nextDueWithBackoffIso, applyCrawlOutcome } from '../crawl/source-policy.js';
 import { newId } from '../shared/id.js';
@@ -69,6 +70,7 @@ export class MonitorSourceUseCase {
     private readonly logger: Logger,
     private readonly fetchUserAgent: string,
     private readonly fetchTimeoutMs: number,
+    private readonly alerting: Alerting,
   ) {}
 
   async execute(input: MonitorSourceInput): Promise<MonitorSourceResult> {
@@ -188,6 +190,17 @@ export class MonitorSourceUseCase {
             reliability: updated.reliability_score,
             nextDue: updated.next_due,
           });
+          // Proactive alert (Step 5) — best-effort, never throws (the port contract),
+          // so it can't crash a `monitor --due` batch even if delivery fails.
+          await this.alerting.alert(
+            sourceReliabilityLowAlert({
+              sourceId: source.id,
+              url: source.url,
+              reliability: updated.reliability_score,
+              nextDue: updated.next_due,
+              at: this.clock.nowIso(),
+            }),
+          );
         }
       }
       await this.db.sources.update(updated);

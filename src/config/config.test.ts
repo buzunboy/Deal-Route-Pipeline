@@ -139,3 +139,29 @@ describe('loadConfig — S3 evidence store block', () => {
     expect(cfg.evidence.s3?.cdnBaseUrl).toBe('https://cdn.dealroute.example');
   });
 });
+
+describe('loadConfig — alerting backend selection (Step 5)', () => {
+  it('defaults to the noop off-switch when no ALERT_WEBHOOK_URL is set', () => {
+    const cfg = loadConfig(env());
+    expect(cfg.alerting.kind).toBe('noop');
+    expect(cfg.alerting.webhookUrl).toBeUndefined();
+    expect(cfg.alerting.timeoutMs).toBe(5000);
+  });
+
+  it('defaults to webhook when ALERT_WEBHOOK_URL is configured', () => {
+    const cfg = loadConfig(env({ ALERT_WEBHOOK_URL: 'https://hooks.slack.com/services/x' }));
+    expect(cfg.alerting.kind).toBe('webhook');
+    expect(cfg.alerting.webhookUrl).toBe('https://hooks.slack.com/services/x');
+  });
+
+  it('honours an explicit ALERT_KIND override + a custom timeout', () => {
+    const cfg = loadConfig(env({ ALERT_KIND: 'noop', ALERT_TIMEOUT_MS: '2000' }));
+    expect(cfg.alerting.kind).toBe('noop');
+    expect(cfg.alerting.timeoutMs).toBe(2000);
+  });
+
+  it('rejects an unknown ALERT_KIND and a non-URL webhook', () => {
+    expect(() => loadConfig(env({ ALERT_KIND: 'pagerduty' }))).toThrow();
+    expect(() => loadConfig(env({ ALERT_WEBHOOK_URL: 'not-a-url' }))).toThrow();
+  });
+});

@@ -131,6 +131,17 @@ const ConfigSchema = z.object({
     // cost. `0` disables the guard (explicit off-switch).
     dailyBudgetEur: z.coerce.number().nonnegative(),
   }),
+  // Observability alerting (Step 5). `noop` is the DEFAULT off-switch (alerts are
+  // logged at debug, delivered nowhere); `webhook` POSTs to `ALERT_WEBHOOK_URL`
+  // (a Slack incoming webhook or any JSON collector). Future backends (Datadog/
+  // CloudWatch — see docs/DealRoute_Observability.md) are new values behind the
+  // Alerting port. The composition root fails loudly if `webhook` is selected
+  // without a URL. Alerting is best-effort: a delivery failure never crashes a lane.
+  alerting: z.object({
+    kind: z.enum(['noop', 'webhook']),
+    webhookUrl: z.string().url().optional(),
+    timeoutMs: z.coerce.number().int().positive(),
+  }),
   reviewApi: z.object({
     port: z.coerce.number().int().positive(),
     /** Bearer token gating approve/reject. Unset ⇒ open (bind to a trusted network). */
@@ -232,6 +243,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       // €10/day: comfortable v1 headroom for the agentic lane while still a hard
       // stop well short of real money. Raise as Phase C proves out; 0 disables.
       dailyBudgetEur: env.DAILY_BUDGET_EUR ?? '10.00',
+    },
+    alerting: {
+      // Default to webhook when a URL is configured, else the noop off-switch — so
+      // alerting stays dark until an endpoint is explicitly provided.
+      kind: env.ALERT_KIND ?? (emptyToUndefined(env.ALERT_WEBHOOK_URL) ? 'webhook' : 'noop'),
+      webhookUrl: emptyToUndefined(env.ALERT_WEBHOOK_URL),
+      timeoutMs: env.ALERT_TIMEOUT_MS ?? '5000',
     },
     reviewApi: {
       port: env.REVIEW_API_PORT ?? '3000',

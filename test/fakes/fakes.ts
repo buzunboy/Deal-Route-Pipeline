@@ -12,9 +12,10 @@ import type {
   EvidenceStore,
   Clock,
   Logger,
+  Alerting,
 } from '../../src/application/ports/index.js';
 import { assertCaptureComplete } from '../../src/domain/index.js';
-import type { Evidence, EvidenceCapture } from '../../src/domain/index.js';
+import type { Evidence, EvidenceCapture, AlertEvent } from '../../src/domain/index.js';
 
 /** Fetcher fake: returns a scripted result. Default is a clean OK page. */
 export class FakeFetcher implements Fetcher {
@@ -195,6 +196,14 @@ export class FakeLogger implements Logger {
   }
   error(msg: string): void {
     this.entries.push({ level: 'error', msg });
+  }
+}
+
+/** Records the alert events it received, for asserting the warn points fire (Step 5). */
+export class FakeAlerter implements Alerting {
+  public events: AlertEvent[] = [];
+  async alert(event: AlertEvent): Promise<void> {
+    this.events.push(event);
   }
 }
 

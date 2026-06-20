@@ -10,6 +10,7 @@ import {
   FakeEvidenceStore,
   FixedClock,
   FakeLogger,
+  FakeAlerter,
   sha256,
 } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
@@ -25,6 +26,7 @@ function build(fetcher: FakeFetcher) {
   const clock = new FixedClock();
   const logger = new FakeLogger();
   const extract = new ExtractUseCase(llm, logger);
+  const alerter = new FakeAlerter();
   const crawl = new CrawlSourceUseCase(
     fetcher,
     evidenceStore,
@@ -35,6 +37,7 @@ function build(fetcher: FakeFetcher) {
     SEED_VOCABULARY,
     'TestAgent/0.1',
     30000,
+    alerter,
   );
   const monitor = new MonitorSourceUseCase(
     fetcher,
@@ -44,8 +47,9 @@ function build(fetcher: FakeFetcher) {
     logger,
     'TestAgent/0.1',
     30000,
+    alerter,
   );
-  return { db, monitor, evidenceStore, clock };
+  return { db, monitor, evidenceStore, clock, alerter };
 }
 
 async function seedPublishedDeal(
@@ -292,6 +296,13 @@ describe('MonitorSourceUseCase', () => {
     const updated = await env.db.sources.getById(source.id);
     expect(updated!.reliability_score).toBeCloseTo(0.1, 10);
     expect(updated!.reliability_score).toBeLessThan(0.3); // below the flag threshold
+
+    // Step 5: each sub-threshold pass also emits a source_reliability_low alert
+    // (best-effort, never crashes the monitor batch). The 2nd pass (0.3 → 0.1) is
+    // below threshold; the 1st (0.5 → 0.3) is not (0.3 is NOT < 0.3) → exactly 1 alert.
+    expect(env.alerter.events).toHaveLength(1);
+    expect(env.alerter.events[0]!.kind).toBe('source_reliability_low');
+    expect(env.alerter.events[0]!.dedupe_key).toBe(`source_reliability_low:${source.id}`);
   });
 
   it('does not clobber the re-crawl back-off next_due on a content-changed pass', async () => {

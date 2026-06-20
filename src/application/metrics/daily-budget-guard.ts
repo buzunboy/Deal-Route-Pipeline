@@ -4,8 +4,9 @@ import {
   effectiveRunCostCap,
   remainingDailyBudget,
   utcDayStart,
+  dailyBudgetReachedAlert,
 } from '../../domain/index.js';
-import type { Database, Clock, Logger } from '../ports/index.js';
+import type { Database, Clock, Logger, Alerting } from '../ports/index.js';
 
 /** A budget check for the run about to start. */
 export interface BudgetCheck {
@@ -40,6 +41,7 @@ export class DailyBudgetGuard {
     private readonly clock: Clock,
     private readonly logger: Logger,
     private readonly ceilingEur: number,
+    private readonly alerting: Alerting,
   ) {}
 
   get enabled(): boolean {
@@ -59,6 +61,15 @@ export class DailyBudgetGuard {
         ceilingEur: this.ceilingEur,
         spentTodayEur,
       });
+      // Proactive alert (Step 5) — best-effort, never throws (the port contract), so
+      // it can't disrupt the batch's own stop logic even if delivery fails.
+      await this.alerting.alert(
+        dailyBudgetReachedAlert({
+          ceilingEur: this.ceilingEur,
+          spentTodayEur,
+          at: this.clock.nowIso(),
+        }),
+      );
     }
     return { ok, remainingEur, spentTodayEur };
   }

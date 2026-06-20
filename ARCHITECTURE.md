@@ -227,6 +227,21 @@ CLI renders both (`--runs`). Beyond the per-run `AgentBudget` cap, a `DailyBudge
 from the run ledger and stops before a run would push past the ceiling, clamping the
 per-run cap to the remaining headroom so one run can't overshoot either.
 
+## Alerting (Step 5 — observability)
+
+The two silent failure signals — a source's reliability falling below the flag threshold,
+and the daily €-budget guard reaching its ceiling — emit a proactive alert in addition to
+the `logger.warn`. An `Alerting` port (`application/ports/alerting.ts`) consumes a pure,
+vendor-neutral `AlertEvent` (`domain/alerting/`); adapters map it to a wire format. The
+DEFAULT is `NoopAlerter` (dark — logs at debug, delivers nowhere); `WebhookAlerter` POSTs JSON
+to `ALERT_WEBHOOK_URL` (a Slack incoming webhook renders the top-level `text`; a generic
+collector gets the structured event). The contract is **best-effort**: `alert()` resolves even
+on delivery failure (timeout/non-2xx/network error are caught + logged), so alerting can never
+crash or stall the lane it observes — the warn points `await` it with no try/catch. Config-
+selected (`ALERT_KIND`), built at the one composition root, injected into the crawl/monitor
+use-cases + the budget guard. No schema/trust impact (OCP — a new backend is a new adapter).
+Native Datadog/CloudWatch metrics-push adapters are deferred (recipe: `docs/DealRoute_Observability.md`).
+
 ## Scheduling / unattended running (Step 4 — external cron)
 
 The pipeline is a **CLI, not a self-running daemon**. The `Queue` (pg-boss) port exists but is

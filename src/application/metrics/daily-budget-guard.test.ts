@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { DailyBudgetGuard } from './daily-budget-guard.js';
 import { InMemoryDb } from '../../../test/fakes/in-memory-db.js';
-import { FixedClock, FakeLogger } from '../../../test/fakes/fakes.js';
+import { FixedClock, FakeLogger, FakeAlerter } from '../../../test/fakes/fakes.js';
 import type { CrawlRun } from '../../domain/index.js';
 
 const NOW = new Date('2026-06-19T15:00:00.000Z');
@@ -26,9 +26,16 @@ function run(startedAt: string, costEur: number): CrawlRun {
 function makeGuard(
   ceilingEur: number,
   db = new InMemoryDb(),
-): { guard: DailyBudgetGuard; db: InMemoryDb } {
-  const guard = new DailyBudgetGuard(db, new FixedClock(NOW), new FakeLogger(), ceilingEur);
-  return { guard, db };
+): { guard: DailyBudgetGuard; db: InMemoryDb; alerter: FakeAlerter } {
+  const alerter = new FakeAlerter();
+  const guard = new DailyBudgetGuard(
+    db,
+    new FixedClock(NOW),
+    new FakeLogger(),
+    ceilingEur,
+    alerter,
+  );
+  return { guard, db, alerter };
 }
 
 describe('DailyBudgetGuard', () => {
@@ -53,12 +60,23 @@ describe('DailyBudgetGuard', () => {
     expect(check.remainingEur).toBe(6.5);
   });
 
-  it('reports not-ok once today reaches the ceiling', async () => {
-    const { guard, db } = makeGuard(5);
+  it('reports not-ok once today reaches the ceiling, and emits a daily_budget_reached alert', async () => {
+    const { guard, db, alerter } = makeGuard(5);
     await db.crawlRuns.insert(run('2026-06-19T08:00:00.000Z', 5.0));
     const check = await guard.check();
     expect(check.ok).toBe(false);
     expect(check.remainingEur).toBe(0);
+    // Step 5: the budget-reached stop also fires an alert (best-effort, never throws).
+    expect(alerter.events).toHaveLength(1);
+    expect(alerter.events[0]!.kind).toBe('daily_budget_reached');
+    expect(alerter.events[0]!.dedupe_key).toBe('daily_budget_reached:2026-06-19');
+  });
+
+  it('does NOT alert while there is headroom (only on the stop)', async () => {
+    const { guard, db, alerter } = makeGuard(10);
+    await db.crawlRuns.insert(run('2026-06-19T08:00:00.000Z', 2.0));
+    await guard.check();
+    expect(alerter.events).toHaveLength(0);
   });
 
   describe('effectiveCostCap', () => {

@@ -21,6 +21,7 @@ import {
   type Clock,
   type SearchProvider,
   type BrowserAgent,
+  type Alerting,
 } from '../application/index.js';
 import { SEED_VOCABULARY, DomainDenylist, type Vocabulary } from '../domain/index.js';
 import { S3Client } from '@aws-sdk/client-s3';
@@ -42,6 +43,8 @@ import { SearchBrowserAgent } from '../adapters/agent/search-browser-agent.js';
 import { RssFeedReader } from '../adapters/feed/rss-feed-reader.js';
 import { InMemoryDb } from '../adapters/db/in-memory/in-memory-db.js';
 import { PostgresDb } from '../adapters/db/postgres/postgres-db.js';
+import { NoopAlerter } from '../adapters/alerting/noop-alerter.js';
+import { WebhookAlerter } from '../adapters/alerting/webhook-alerter.js';
 
 /**
  * The ONE composition root. It reads typed config and constructs concrete
@@ -68,6 +71,7 @@ export interface ContainerOptions {
     clock?: Clock;
     searchProvider?: SearchProvider;
     browserAgent?: BrowserAgent;
+    alerting?: Alerting;
   };
 }
 
@@ -83,6 +87,7 @@ export class Container {
   readonly vocabulary: Vocabulary;
   readonly searchProvider: SearchProvider;
   readonly browserAgent: BrowserAgent;
+  readonly alerting: Alerting;
 
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
@@ -113,6 +118,7 @@ export class Container {
     this.db = this.buildDatabase(config, usePersistence);
     this.searchProvider = overrides.searchProvider ?? this.buildSearchProvider(config);
     this.browserAgent = overrides.browserAgent ?? this.buildBrowserAgent(config);
+    this.alerting = overrides.alerting ?? this.buildAlerter(config);
     // NB: there is intentionally no job queue wired here. v1 runs as external
     // cron invoking the CLI (`crawl --due`, `monitor --due`, `ingest
     // --community-due`) — see README "Deployment". The `Queue` port + pg-boss/
@@ -130,6 +136,7 @@ export class Container {
       this.vocabulary,
       config.fetcher.userAgent,
       config.fetcher.timeoutMs,
+      this.alerting,
     );
     this.discoverSite = new DiscoverSiteUseCase(
       this.fetcher,
@@ -175,6 +182,7 @@ export class Container {
       this.logger,
       config.fetcher.userAgent,
       config.fetcher.timeoutMs,
+      this.alerting,
     );
     this.metrics = new MetricsUseCase(this.db, this.logger);
     this.dailyBudgetGuard = new DailyBudgetGuard(
@@ -182,6 +190,7 @@ export class Container {
       this.clock,
       this.logger,
       config.agent.dailyBudgetEur,
+      this.alerting,
     );
   }
 
@@ -250,6 +259,20 @@ export class Container {
       throw new Error('SEARCH_PROVIDER=api requires SEARCH_API_KEY.');
     }
     return new BraveSearchProvider(config.search.apiKey);
+  }
+
+  private buildAlerter(config: Config): Alerting {
+    // `noop` is the DEFAULT off-switch — alerts are logged at debug, delivered
+    // nowhere, until ALERT_KIND=webhook + ALERT_WEBHOOK_URL are set. A missing URL
+    // fails loudly here rather than silently dropping alerts at runtime.
+    if (config.alerting.kind === 'noop') return new NoopAlerter(this.logger);
+    if (!config.alerting.webhookUrl) {
+      throw new Error('ALERT_KIND=webhook requires ALERT_WEBHOOK_URL.');
+    }
+    return new WebhookAlerter(
+      { url: config.alerting.webhookUrl, timeoutMs: config.alerting.timeoutMs },
+      this.logger,
+    );
   }
 
   private buildBrowserAgent(config: Config): BrowserAgent {
