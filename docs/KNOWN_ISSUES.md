@@ -31,6 +31,26 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### JS-heavy provider pages yield no deals from the homepage URL (seed-URL + render-fetcher)
+- **Severity**: medium (coverage gap — these sources produce nothing until addressed)
+- **Area**: discovery / fetcher
+- **Location**: seed list (`docs/DealRoute_Seed_List_DE.md`) + per-source fetch config; the
+  render fetcher is `src/adapters/fetcher/browser-render-fetcher.ts` (`FETCHER=browser`).
+- **What**: a 2026-06-20 live test found NordVPN, Surfshark, and Vodafone GigaTV **homepages**
+  extracted 0 deals on the default `playwright` (domcontentloaded) fetcher — the prices live behind
+  JS rendering / a plan selector / a deeper `/pricing` page. The render fetcher (`FETCHER=browser`,
+  networkidle+scroll) didn't rescue the NordVPN homepage either, and Surfshark's pricing page
+  **hung the headless browser** (never reached networkidle — likely anti-bot or a never-idle SPA).
+- **Why deferred**: not a code defect — it's (a) seed-URL quality (seeds should point at the actual
+  pricing page, not the homepage) and (b) per-source fetcher selection. The pipeline behaves
+  correctly (0 deals, no hallucination). Deeper investigation was also blocked mid-test by an
+  exhausted Anthropic credit balance (couldn't compare extraction output across fetchers).
+- **Fix-when**: when curating the real seed list — set each source's URL to its pricing page and
+  mark JS-heavy ones to use `FETCHER=browser`; for sites that hang/anti-bot the headless browser,
+  route to the hosted-browser fetcher or the manual-capture queue. Re-test extraction per source
+  once a funded LLM key is available.
+- **Logged**: 2026-06-20
+
 ### No golden fixture for a prepaid offer
 - **Severity**: low (coverage gap, not a defect)
 - **Area**: extraction / testing
