@@ -129,8 +129,12 @@ it safe and actually useful, and some are trust-critical regardless of Phase C.
    behind the same port) is the next stage.** See §4.
 5. **Post-C — product-completeness toward the goal.** See §5.
 
-**Pre-C-1/2/3 and Phase C C-1 are now done.** The next gate is Phase C C-2 (a
-hosted-browser `BrowserAgent`) once C-1 proves the loop against the open web.
+**Pre-C-1/2/3 and Phase C C-1 are now done** (merged to `master` at `3ad51bc`).
+Next: a **leftover-hardening batch** closes the still-open medium/low audit gaps
+below so the agentic lane can run unattended safely (monitor daily-budget guard,
+LLM-truncation detection, Firecrawl size caps, robots-fetch hardening, charset
+guard) — see `docs/DealRoute_Hardening_Plan.md`. Phase C **C-2** (a hosted-browser
+`BrowserAgent`) is the stage after that.
 
 ---
 
