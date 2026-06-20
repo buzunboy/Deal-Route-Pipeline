@@ -1,5 +1,11 @@
 # DealRoute — leftover-hardening plan (post Phase C C-1)
 
+> **✅ DELIVERED + merged (2026-06-20).** This was a build plan; the batch it
+> describes (monitor daily-budget guard, LLM-truncation flag, Firecrawl size caps,
+> robots hardening) is **done and on `master`** — its slices are marked ✅ DONE
+> inline below. Kept as the historical build/design record. **NOT pending work.**
+> For current next-steps read `docs/DealRoute_PostP3_Handoff.md`.
+
 _Standalone build plan for a fresh session. Phase A, B, Pre-C-1/2/3, the
 monitor-reliability fix, **and Phase C C-1** (search-API-first Tier-4 broad
 discovery) are all built, tested, and merged to `master` (at `3ad51bc`, pushed to

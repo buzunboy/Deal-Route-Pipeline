@@ -1,10 +1,12 @@
 # DealRoute — Phase C plan & roadmap to the product goal
 
-_Status as of the Phase A+B live-audit (master @ `3e8aecb`). This is the planning
-doc to consult before/while building Phase C and the remaining road to the
-"verified search engine for subscription bundles" goal. It is intentionally
-opinionated about **sequencing** — what to build before Phase C, what Phase C is,
-and what comes after._
+> **📍 SOURCE OF TRUTH: the product roadmap (LIVING — keep §5 current).** The
+> sequencing here is the long-range plan to the "verified search engine for
+> subscription bundles" goal. **§5 (post-C steps) is the authoritative step list** —
+> update it whenever a step ships. Phase C itself (C-1 + C-2) is DONE; for the
+> immediate next-steps brief read `docs/DealRoute_PostP3_Handoff.md`. (The older body
+> below — written at the Phase A+B audit — is kept for its sequencing rationale; trust
+> §5 + the active handoff for current status, not any inline "master @ …" snapshot.)_
 
 > **The goal (recap).** A trust-first pipeline that turns web sources into
 > evidence-backed _candidate_ deal records a human approves before publish.

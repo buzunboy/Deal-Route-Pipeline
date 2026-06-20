@@ -1,5 +1,12 @@
 # Phase C — Agentic broad discovery (Tier 4): build plan
 
+> **✅ DELIVERED + merged (2026-06-20).** This was a build plan; Phase C **C-1**
+> (search-API-first Tier-4 broad discovery, `discover --broad`, `AGENT=search`) is
+> **built and on `master`**, and **C-2** (the render-capable fetcher) shipped too.
+> The Firecrawl search backend has since been refactored to **v2** (see
+> `docs/Firecrawl_Integration_Reference.md`). Kept as the historical build/design
+> record. **NOT pending work.** For current next-steps read `docs/DealRoute_PostP3_Handoff.md`.
+
 _Standalone build prompt for a fresh Claude Code session. Phase A (Tiers 1–2),
 Phase B (Tier 3), Pre-C-1/2/3, and the post-audit monitor-reliability fix are all
 built, tested, and merged on the working branch. This plan covers **Phase C, stage

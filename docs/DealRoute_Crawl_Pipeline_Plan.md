@@ -1,4 +1,11 @@
 # DealRoute — LLM Crawling & Extraction Pipeline (Design Plan)
+
+> **📍 SOURCE OF TRUTH: the founding design (EVERGREEN).** The principles, the
+> four-tier source model, the two-lane architecture, the deal-record shape, and the
+> trust invariants here still govern and are reflected in the code. This is the
+> "why it's built this way" reference — not a build queue. For what's built vs. next,
+> see `docs/DealRoute_PostP3_Handoff.md` (current) + `docs/DealRoute_Phase_C_and_Roadmap.md` §5.
+
 *Plan only — no code. This feeds a later Claude Code prompt. Scope: Germany v1, ~top 25 subscriptions. Output = the structured "deal record." The LLM proposes; a human approves (review stays a separate manual step).*
 
 ## 1. Principles

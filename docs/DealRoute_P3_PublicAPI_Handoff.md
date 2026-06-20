@@ -1,5 +1,10 @@
 # DealRoute — P3 build handoff: the public `/v1/` read API
 
+> **✅ DELIVERED + merged (2026-06-20).** This was the build prompt for P3 (the public
+> `/v1/` read API = roadmap Step 1); it is **built and on `master`** (commit `a8491f3`).
+> Step 2 (disclosure) has also since shipped. Kept as the historical build/design record.
+> **NOT pending work.** For current next-steps read `docs/DealRoute_PostP3_Handoff.md`.
+
 _Standalone build prompt for a FRESH Claude Code session. Everything below is
 verified against the code on `master` (at `b5e00ce`) on 2026-06-20. Read this start
 to finish before writing code; it is self-contained, but the binding rules in

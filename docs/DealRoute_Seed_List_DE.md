@@ -1,4 +1,9 @@
 # DealRoute — Seed List (Germany v1)
+
+> **📍 Reference data (EVERGREEN / LIVING).** The DE seed sources the deterministic lane
+> crawls; the discovery lane proposes additions a human approves. Update as sources are
+> added/pruned. (Imported via `seed-import` / the `add-source` skill.)
+
 *Starter sources for the crawl pipeline. **Draft to verify** — the deterministic lane crawls these; the agentic discovery lane expands & maintains the list over time. Default re-crawl cadence: **every 3 days + on-demand**. Public pages only in v1 (login-gated perks → manual capture). Verify exact pricing-page paths at build time; respect each site's robots.txt/ToS.*
 
 ---

@@ -4,7 +4,7 @@ _Self-contained next-steps brief for a FRESH Claude Code session. Originally wri
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
 **`4f4f077`**. **Post-C Steps 1 (P3 public API) AND 2 (GDPR/affiliate disclosure) are
 DONE + merged; the next step is Step 3 (reliability ranking).** This supersedes
-`docs/DealRoute_PostC_Handoff.md` and `docs/NEXT_SESSION_HANDOFF.md` (both pre-this-track, stale)._
+`docs/DealRoute_PostC_Handoff.md` (kept, banner-marked). (`NEXT_SESSION_HANDOFF.md` was deleted.)_
 
 > **What shipped since the original audit** (all merged to `master`, in order):
 > B1 RSS-boundary fix · the live-dry-run hardening batch (raised `LLM_MAX_OUTPUT_TOKENS`
@@ -284,13 +284,12 @@ height-detection fallback, JSON-recovery heuristic, charset guard, robots cross-
 redirect, monitor re-crawl headroom clamp, two EvidenceStore error-class names, the
 interactive multi-step BrowserAgent ("Option B").
 
-## 6. Doc / hygiene to clean up (cheap, do opportunistically)
-- **Delete `docs/NEXT_SESSION_HANDOFF.md`** — pre-Phase-C, superseded. It is still
-  referenced from `CLAUDE.md:8` — remove/repoint that line to this doc.
-- **`docs/DealRoute_PostC_Handoff.md`** — its Step 1 is done (P3); add a one-line banner that
-  this doc supersedes it for the post-P3 track (or fold it in).
-- "CI jobs not dependency-ordered" is **fixed** (`.github/workflows/ci.yml:37` has
-  `needs: check`) — confirm it's not lingering as an open KNOWN_ISSUES entry.
+## 6. Doc / hygiene — ✅ DONE (2026-06-20 doc audit)
+- `docs/NEXT_SESSION_HANDOFF.md` — **deleted** (fully redundant; its env facts live in §8 here).
+- `docs/DealRoute_PostC_Handoff.md` + the delivered build plans (P3 handoff, Phase_C_Plan,
+  Hardening) — **banner-marked** (SUPERSEDED / ✅ DELIVERED). "CI jobs not dependency-ordered"
+  confirmed fixed + not lingering. CLAUDE.md carries a full **Docs map** (purpose + status +
+  source-of-truth + the doc-hygiene rule) — keep it accurate when adding/retiring a doc.
 
 ## 7. Open decisions needing the OWNER (gate the next steps — not defaultable)
 1. **GDPR/affiliate disclosure (Step 2 — blocks the public page):** which fields are
