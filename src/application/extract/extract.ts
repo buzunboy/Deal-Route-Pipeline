@@ -44,6 +44,28 @@ export interface ExtractResult {
 }
 
 /**
+ * Thrown when extraction fails AFTER the (paid) LLM call — e.g. the boundary
+ * rejects malformed/injected output. Carries the cost ALREADY INCURRED so the
+ * caller can still charge it against the run/daily budget; otherwise a stream of
+ * failed extractions on attacker-influenceable open-web pages would spend real
+ * money the budget never sees (Tier-4 broad discovery especially). The `cause`
+ * is the original boundary/processing error.
+ */
+export class ExtractionFailedError extends Error {
+  constructor(
+    readonly costEur: number,
+    options?: { cause?: unknown },
+  ) {
+    const causeMsg =
+      options?.cause instanceof Error ? options.cause.message : String(options?.cause ?? 'unknown');
+    super(`Extraction failed after the LLM call (cost €${costEur} still incurred): ${causeMsg}`, {
+      cause: options?.cause,
+    });
+    this.name = 'ExtractionFailedError';
+  }
+}
+
+/**
  * The LLM extraction core (Lane A): page text → validated candidate deal records.
  *
  * Pure orchestration over the `Llm` port + domain rules. It NEVER trusts raw LLM
@@ -67,22 +89,28 @@ export class ExtractUseCase {
     });
 
     const response = await this.llm.complete({ role: 'extraction', system, user, jsonMode: true });
+    // Cost is incurred the moment the LLM call returns — capture it NOW so a later
+    // boundary/processing throw still surfaces it to the caller (budget accounting).
+    const costEur = response.usage.costEur;
 
-    // Boundary: raw model text → typed deals (throws BoundaryValidationError on bad shape).
-    const rawDeals = parseLlmDeals(response.text);
-
-    const candidates = rawDeals.map((deal) =>
-      this.processDeal(deal, input.pageText, input.vocabulary),
-    );
+    let candidates: ExtractedCandidate[];
+    try {
+      // Boundary: raw model text → typed deals (throws BoundaryValidationError on bad shape).
+      const rawDeals = parseLlmDeals(response.text);
+      candidates = rawDeals.map((deal) => this.processDeal(deal, input.pageText, input.vocabulary));
+    } catch (err) {
+      // Re-throw carrying the already-spent cost so the run/daily budget still sees it.
+      throw new ExtractionFailedError(costEur, { cause: err });
+    }
 
     this.logger.info('extraction complete', {
       sourceUrl: input.sourceUrl,
       deals: candidates.length,
       mustReview: candidates.filter((c) => c.mustReview).length,
-      costEur: response.usage.costEur,
+      costEur,
     });
 
-    return { candidates, costEur: response.usage.costEur };
+    return { candidates, costEur };
   }
 
   private processDeal(

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { BraveSearchProvider } from './brave-search-provider.js';
 import { SearchProviderError } from './search-provider-error.js';
+import {
+  searchProviderContract,
+  sampleResults,
+} from '../../../test/contracts/search-provider-contract.js';
 
 const opts = { limit: 10, country: 'DE', timeoutMs: 2000 };
 
@@ -14,6 +18,30 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+// The real adapter must pass the SAME SearchProvider contract as the stub (LSP).
+// We stub `fetch` to answer the contract's rich query with results and its empty
+// query with none, keyed off the `q=` param so one provider serves both.
+const RICH = 'Disney+ im Bundle';
+const EMPTY = 'no such query';
+searchProviderContract('BraveSearchProvider', () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      const q = new URL(url).searchParams.get('q') ?? '';
+      const results = q.includes('Disney')
+        ? sampleResults(5).map((r) => ({ url: r.url, title: r.title, description: r.snippet }))
+        : [];
+      return jsonResponse({ web: { results } });
+    }),
+  );
+  return {
+    provider: new BraveSearchProvider('key'),
+    richQuery: RICH,
+    emptyQuery: EMPTY,
+    seededCount: 5,
+  };
 });
 
 describe('BraveSearchProvider', () => {
@@ -91,13 +119,26 @@ describe('BraveSearchProvider', () => {
     expect(await provider.search('q', opts)).toEqual([]);
   });
 
-  it('throws SearchProviderError on a non-ok HTTP status', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => jsonResponse({}, false, 429)),
-    );
+  it('throws SearchProviderError on a non-retryable HTTP status (no retry)', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({}, false, 400));
+    vi.stubGlobal('fetch', fetchMock);
     const provider = new BraveSearchProvider('key');
     await expect(provider.search('q', opts)).rejects.toBeInstanceOf(SearchProviderError);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 400 is not retried
+  });
+
+  it('retries a 429 then succeeds (rate-limit backoff)', async () => {
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      call++;
+      if (call === 1) return jsonResponse({}, false, 429);
+      return jsonResponse({ web: { results: [{ url: 'https://ok.de', title: 't' }] } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new BraveSearchProvider('key');
+    const results = await provider.search('q', { ...opts, timeoutMs: 5000 });
+    expect(results).toEqual([{ url: 'https://ok.de', title: 't', snippet: '' }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // retried once after the 429
   });
 
   it('throws SearchProviderError on an unparseable response shape', async () => {

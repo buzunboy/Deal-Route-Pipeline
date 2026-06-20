@@ -63,13 +63,17 @@ class FakeAgent implements BrowserAgent {
   }
 }
 
-function build(agent: BrowserAgent, denylist = new DomainDenylist([])) {
+function build(
+  agent: BrowserAgent,
+  denylist = new DomainDenylist([]),
+  llmJson = JSON.stringify({ deals: [makeLlmDeal({ service: 'Disney+' })] }),
+) {
   const db = new InMemoryDb();
   const evidence = new FakeEvidenceStore();
   const clock = new FixedClock();
   const logger = new FakeLogger();
   // Distinct service per deal so each page yields a distinct dedupe key.
-  const llm = new FakeLlm(JSON.stringify({ deals: [makeLlmDeal({ service: 'Disney+' })] }));
+  const llm = new FakeLlm(llmJson);
   const extract = new ExtractUseCase(llm, logger);
   const uc = new DiscoverBroadUseCase(
     agent,
@@ -193,6 +197,69 @@ describe('DiscoverBroadUseCase', () => {
     expect(pending.some((s) => s.url.includes('facebook.com'))).toBe(false);
   });
 
+  it('excludes an already-known domain from the RETURNED proposals (matches what persists)', async () => {
+    const agent = new FakeAgent(
+      {},
+      {
+        pages: [],
+        proposedSources: [
+          { url: 'https://telekom.de/disney', rationale: 'already registered' },
+          { url: 'https://newsite.de/x', rationale: 'genuinely novel' },
+        ],
+      },
+    );
+    const { uc, db } = build(agent);
+    await seedCatalog(db);
+    // telekom.de is already an active source — it must NOT be re-proposed.
+    await db.sources.upsert(makeSource({ url: 'https://www.telekom.de/x', status: 'active' }));
+
+    const result = await uc.execute({ query: 'q', maxQueries: 1, budget: BUDGET });
+    const urls = result.proposedSources.map((p) => p.url);
+    expect(urls.some((u) => u.includes('newsite.de'))).toBe(true);
+    expect(urls.some((u) => u.includes('telekom.de'))).toBe(false);
+    // The returned count matches what landed pending_approval.
+    const pending = await db.sources.listByStatus('pending_approval');
+    expect(pending.map((s) => s.url).some((u) => u.includes('telekom.de'))).toBe(false);
+    expect(pending.map((s) => s.url).some((u) => u.includes('newsite.de'))).toBe(true);
+  });
+
+  it('counts the cost of a FAILED extraction toward the run budget (no silent cost leak)', async () => {
+    // Malformed LLM output → the boundary rejects it AFTER the (paid) call. The
+    // run must still see that cost, or open-web pages could burn budget unseen.
+    const agent = new FakeAgent(
+      {},
+      { pages: [okPage('https://a.de/1'), okPage('https://b.de/2')], stepsUsed: 2 },
+    );
+    const { uc, db } = build(agent, new DomainDenylist([]), 'not json at all');
+    await seedCatalog(db);
+
+    const result = await uc.execute({ query: 'q', maxQueries: 1, budget: BUDGET });
+
+    // Both pages failed to extract, but each still cost money — it's accounted.
+    expect(result.candidatesFound).toBe(0);
+    expect(result.failedPages).toBe(2);
+    expect(result.costEur).toBeGreaterThan(0);
+    // The run-row cost reflects the failed-extraction spend (feeds the daily guard).
+    const runs = await db.crawlRuns.recentRuns({ limit: 10 });
+    expect(runs.find((r) => r.run_kind === 'discover_broad')!.cost_eur).toBeGreaterThan(0);
+  });
+
+  it('a failed-extraction cost can trip the per-run cost cap (stops the run)', async () => {
+    // Many pages, each a paid-then-failed extraction (0.001 ea); a tiny cap stops it.
+    const pages = Array.from({ length: 10 }, (_, i) => okPage(`https://e${i}.de/x`));
+    const agent = new FakeAgent({}, { pages, stepsUsed: 10 });
+    const { uc } = build(agent, new DomainDenylist([]), 'not json at all');
+    // maxCostEur small enough that a few failed extractions exhaust it.
+    const result = await uc.execute({
+      query: 'q',
+      maxQueries: 1,
+      budget: { maxSteps: 100, maxSeconds: 300, maxCostEur: 0.0025 },
+    });
+    expect(result.stoppedReason).toBe('cost_cap');
+    // It stopped before extracting all 10 (the cap bit on failed-extraction cost).
+    expect(result.failedPages).toBeLessThan(10);
+  });
+
   it('dry-run writes nothing (no deals, no sources, no run row, no evidence)', async () => {
     const agent = new FakeAgent(
       {},
@@ -228,7 +295,7 @@ describe('DiscoverBroadUseCase', () => {
     expect(result.stoppedReason).toBe('step_cap');
   });
 
-  it('records daily_budget_cap when a cost-cap stop was daily-clamped', async () => {
+  it('records daily_budget_cap (result AND ledger) when a cost-cap stop was daily-clamped', async () => {
     const agent = new FakeAgent({}, { pages: [], costEur: 2, stoppedReason: 'cost_cap' });
     const { uc, db } = build(agent);
     await seedCatalog(db);
@@ -238,10 +305,25 @@ describe('DiscoverBroadUseCase', () => {
       budget: { ...BUDGET, maxCostEur: 1 },
       dailyClamped: true,
     });
-    expect(result.stoppedReason).toBe('cost_cap'); // the in-memory result still says cost_cap
+    // The returned result and the ledger AGREE — the CLI prints the returned reason.
+    expect(result.stoppedReason).toBe('daily_budget_cap');
     const runs = await db.crawlRuns.recentRuns({ limit: 10 });
     const broad = runs.find((r) => r.run_kind === 'discover_broad');
-    expect(broad!.stopped_reason).toBe('daily_budget_cap'); // ledger distinguishes it
+    expect(broad!.stopped_reason).toBe('daily_budget_cap');
+  });
+
+  it('a cost-cap stop WITHOUT a daily clamp stays cost_cap (not daily_budget_cap)', async () => {
+    const agent = new FakeAgent({}, { pages: [], costEur: 2, stoppedReason: 'cost_cap' });
+    const { uc, db } = build(agent);
+    await seedCatalog(db);
+    const result = await uc.execute({
+      query: 'q',
+      maxQueries: 10,
+      budget: { ...BUDGET, maxCostEur: 1 },
+    });
+    expect(result.stoppedReason).toBe('cost_cap');
+    const runs = await db.crawlRuns.recentRuns({ limit: 10 });
+    expect(runs.find((r) => r.run_kind === 'discover_broad')!.stopped_reason).toBe('cost_cap');
   });
 
   it('builds provider-token queries from active provider/bundler sources', async () => {

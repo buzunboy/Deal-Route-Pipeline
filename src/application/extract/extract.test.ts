@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ExtractUseCase } from './extract.js';
+import { ExtractUseCase, ExtractionFailedError } from './extract.js';
 import { SEED_VOCABULARY } from '../../domain/index.js';
 import { FakeLlm, FakeLogger } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
@@ -71,6 +71,19 @@ describe('ExtractUseCase', () => {
 
   it('rejects malformed LLM output at the boundary', async () => {
     await expect(runExtract('not json at all')).rejects.toThrow();
+  });
+
+  it('throws ExtractionFailedError carrying the already-spent cost on a boundary failure', async () => {
+    // The LLM call ran (and was billed) before the boundary rejected its output.
+    // The thrown error must surface that cost so the caller can charge the budget.
+    try {
+      await runExtract('not json at all');
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ExtractionFailedError);
+      // FakeLlm bills 0.001 per call regardless of the (malformed) text.
+      expect((err as ExtractionFailedError).costEur).toBeCloseTo(0.001);
+    }
   });
 
   // Tier-4 ingests arbitrary open-web pages. An injected page that tries to

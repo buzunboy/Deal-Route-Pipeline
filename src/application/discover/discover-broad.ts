@@ -3,6 +3,7 @@ import {
   providerTokenFromUrl,
   DomainDenylist,
   registrableDomain,
+  InvariantViolation,
   type Vocabulary,
 } from '../../domain/index.js';
 import type {
@@ -15,7 +16,7 @@ import type {
   ProposedSource,
   FetchedPage,
 } from '../ports/index.js';
-import { ExtractUseCase } from '../extract/extract.js';
+import { ExtractUseCase, ExtractionFailedError } from '../extract/extract.js';
 import { CandidateSink } from '../crawl/candidate-sink.js';
 import { RunRecorder } from '../crawl/run-recorder.js';
 import { LaneBSupport, type ProposedDomain } from './lane-b-support.js';
@@ -96,6 +97,10 @@ export class DiscoverBroadUseCase {
       const queries = await this.buildQueries(input);
       const deadlineMs = this.clock.now().getTime() + input.budget.maxSeconds * 1000;
       const proposed = new Map<string, ProposedDomain>(); // keyed by registrable domain
+      // Domains already in the registry (any status) — excluded from proposals so
+      // the returned/logged set matches what persistProposedSources actually keeps
+      // (it dedups against the same registry). Loaded once up front.
+      const known = await this.support.knownDomains();
       let stepsUsed = 0;
 
       for (const query of queries) {
@@ -127,9 +132,9 @@ export class DiscoverBroadUseCase {
         stepsUsed += result.stepsUsed;
         costEur += result.costEur;
 
-        // Collect novel-domain proposals (deny-listed ones dropped here).
+        // Collect novel-domain proposals (deny-listed + already-known dropped here).
         for (const ps of result.proposedSources) {
-          this.recordProposal(proposed, ps);
+          this.recordProposal(proposed, ps, known);
         }
 
         // Dispatch each fetched page on its outcome (the thin agent did no DB I/O).
@@ -174,14 +179,19 @@ export class DiscoverBroadUseCase {
       proposedCount = proposedSources.length;
       if (!dryRun) await this.support.persistProposedSources(proposedSources);
 
+      // A cost_cap stop on a daily-clamped budget IS the daily ceiling biting (the
+      // clamp only lowers maxCostEur). Map it once so the LEDGER and the RETURNED
+      // result agree — the CLI prints the returned reason.
+      const effectiveStop: DiscoverBroadResult['stoppedReason'] =
+        stoppedReason === 'cost_cap' && input.dailyClamped ? 'daily_budget_cap' : stoppedReason;
+
       await this.runs.finish(
         run,
         {
           candidatesProduced: candidatesFound,
           proposalsProduced: proposedCount,
           costEur,
-          stoppedReason:
-            stoppedReason === 'cost_cap' && input.dailyClamped ? 'daily_budget_cap' : stoppedReason,
+          stoppedReason: effectiveStop,
         },
         dryRun,
       );
@@ -192,7 +202,7 @@ export class DiscoverBroadUseCase {
         candidatesFound,
         proposedSources: proposedCount,
         costEur,
-        stoppedReason,
+        stoppedReason: effectiveStop,
       });
 
       return {
@@ -203,7 +213,7 @@ export class DiscoverBroadUseCase {
         routedToManualCapture,
         failedPages,
         costEur,
-        stoppedReason,
+        stoppedReason: effectiveStop,
       };
     } catch (err) {
       await this.runs.fail(
@@ -322,16 +332,29 @@ export class DiscoverBroadUseCase {
         extraCostEur: extraction.costEur,
       };
     } catch (err) {
-      this.logger.error('broad discovery: extraction failed, skipping page', {
-        url: page.sourceUrl,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      // A failed extraction may STILL have cost money (the LLM call ran before the
+      // boundary rejected its output). ExtractionFailedError carries that spend so
+      // the run/daily budget accounts for it — otherwise a stream of malformed
+      // open-web pages would burn budget the guard never sees. Distinguish it, and
+      // an incomplete-evidence skip, from a generic failure in the logs.
+      const extraCostEur = err instanceof ExtractionFailedError ? err.costEur : 0;
+      const isEvidenceGap = err instanceof InvariantViolation;
+      this.logger.error(
+        isEvidenceGap
+          ? 'broad discovery: incomplete evidence, dropping page (evidence required)'
+          : 'broad discovery: extraction failed, skipping page',
+        {
+          url: page.sourceUrl,
+          costEur: extraCostEur,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      );
       return {
         pageCounted: true,
         candidates: 0,
         routedToManual: false,
         failed: true,
-        extraCostEur: 0,
+        extraCostEur,
       };
     }
   }
@@ -360,11 +383,19 @@ export class DiscoverBroadUseCase {
     return buildBroadQueries({ services, providerTokens, maxQueries: cap });
   }
 
-  /** Record a novel-domain proposal, dropping deny-listed/duplicate domains. */
-  private recordProposal(proposed: Map<string, ProposedDomain>, ps: ProposedSource): void {
+  /**
+   * Record a novel-domain proposal, dropping deny-listed, already-known, and
+   * within-run-duplicate domains — so the returned/logged set matches what
+   * `persistProposedSources` will actually keep.
+   */
+  private recordProposal(
+    proposed: Map<string, ProposedDomain>,
+    ps: ProposedSource,
+    known: Set<string>,
+  ): void {
     if (this.denylist.isDenied(ps.url)) return;
     const domain = registrableDomain(ps.url);
-    if (domain === null || proposed.has(domain)) return;
+    if (domain === null || known.has(domain) || proposed.has(domain)) return;
     proposed.set(domain, { url: ps.url, rationale: ps.rationale });
   }
 }

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { SearchProvider, SearchOptions, SearchResult } from '../../application/ports/index.js';
-import { withRetry, withAbortableTimeout, TimeoutError } from '../shared/retry.js';
-import { SearchProviderError } from './search-provider-error.js';
+import { withRetry, withAbortableTimeout } from '../shared/retry.js';
+import { SearchProviderError, isRetryableSearchError } from './search-provider-error.js';
 
 /**
  * Firecrawl `/v1/search` adapter — an alternative real SearchProvider that
@@ -23,8 +23,8 @@ export class FirecrawlSearchProvider implements SearchProvider {
     if (query.trim() === '') return [];
 
     const res = await withRetry(
-      () =>
-        withAbortableTimeout(
+      async () => {
+        const r = await withAbortableTimeout(
           (signal) =>
             fetch(`${this.baseUrl}/v1/search`, {
               method: 'POST',
@@ -40,13 +40,15 @@ export class FirecrawlSearchProvider implements SearchProvider {
               signal,
             }),
           opts.timeoutMs,
-        ),
-      { retries: 2, baseDelayMs: 500, isRetryable: isTransientFetchError },
+        );
+        // Check status INSIDE the retried unit so 429/5xx back off (architecture.md).
+        if (!r.ok) {
+          throw new SearchProviderError(`Firecrawl Search HTTP ${r.status}`, { status: r.status });
+        }
+        return r;
+      },
+      { retries: 2, baseDelayMs: 500, isRetryable: isRetryableSearchError },
     );
-
-    if (!res.ok) {
-      throw new SearchProviderError(`Firecrawl Search HTTP ${res.status}`);
-    }
 
     const parsed = FirecrawlSearchResponseSchema.safeParse(await res.json());
     if (!parsed.success) {
@@ -78,13 +80,3 @@ const FirecrawlSearchResponseSchema = z.object({
     )
     .optional(),
 });
-
-function isTransientFetchError(err: unknown): boolean {
-  if (err instanceof TimeoutError) return true;
-  if (err instanceof Error) {
-    if (err.name === 'AbortError') return true;
-    const code = (err as NodeJS.ErrnoException).code;
-    return code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'EAI_AGAIN';
-  }
-  return false;
-}

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { FirecrawlSearchProvider } from './firecrawl-search-provider.js';
 import { SearchProviderError } from './search-provider-error.js';
+import {
+  searchProviderContract,
+  sampleResults,
+} from '../../../test/contracts/search-provider-contract.js';
 
 const opts = { limit: 10, country: 'DE', timeoutMs: 2000 };
 
@@ -10,6 +14,29 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+// The real adapter must pass the SAME SearchProvider contract as the stub (LSP).
+// The query is in the POST body, so the stub keys off that.
+const RICH = 'Disney+ im Bundle';
+const EMPTY = 'no such query';
+searchProviderContract('FirecrawlSearchProvider', () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init: RequestInit) => {
+      const q = JSON.parse(init.body as string).query as string;
+      const data = q.includes('Disney')
+        ? sampleResults(5).map((r) => ({ url: r.url, title: r.title, description: r.snippet }))
+        : [];
+      return jsonResponse({ data });
+    }),
+  );
+  return {
+    provider: new FirecrawlSearchProvider('key'),
+    richQuery: RICH,
+    emptyQuery: EMPTY,
+    seededCount: 5,
+  };
 });
 
 describe('FirecrawlSearchProvider', () => {
@@ -66,13 +93,26 @@ describe('FirecrawlSearchProvider', () => {
     expect(await provider.search('q', opts)).toEqual([]);
   });
 
-  it('throws SearchProviderError on a non-ok HTTP status', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => jsonResponse({}, false, 500)),
-    );
+  it('throws SearchProviderError on a non-retryable HTTP status (no retry)', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({}, false, 400));
+    vi.stubGlobal('fetch', fetchMock);
     const provider = new FirecrawlSearchProvider('key');
     await expect(provider.search('q', opts)).rejects.toBeInstanceOf(SearchProviderError);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 400 is not retried
+  });
+
+  it('retries a 503 then succeeds (transient server-error backoff)', async () => {
+    let call = 0;
+    const fetchMock = vi.fn(async () => {
+      call++;
+      if (call === 1) return jsonResponse({}, false, 503);
+      return jsonResponse({ data: [{ url: 'https://ok.de', title: 't' }] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new FirecrawlSearchProvider('key');
+    const results = await provider.search('q', { ...opts, timeoutMs: 5000 });
+    expect(results).toEqual([{ url: 'https://ok.de', title: 't', snippet: '' }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('throws SearchProviderError on an unparseable response shape', async () => {

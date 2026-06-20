@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { SearchProvider, SearchOptions, SearchResult } from '../../application/ports/index.js';
-import { withRetry, withAbortableTimeout, TimeoutError } from '../shared/retry.js';
-import { SearchProviderError } from './search-provider-error.js';
+import { withRetry, withAbortableTimeout } from '../shared/retry.js';
+import { SearchProviderError, isRetryableSearchError } from './search-provider-error.js';
 
 /**
  * Brave Search API adapter — the recommended real SearchProvider for Tier-4
@@ -27,8 +27,8 @@ export class BraveSearchProvider implements SearchProvider {
       country: opts.country,
     });
     const res = await withRetry(
-      () =>
-        withAbortableTimeout(
+      async () => {
+        const r = await withAbortableTimeout(
           (signal) =>
             fetch(`${this.baseUrl}/res/v1/web/search?${params.toString()}`, {
               method: 'GET',
@@ -40,13 +40,15 @@ export class BraveSearchProvider implements SearchProvider {
               signal,
             }),
           opts.timeoutMs,
-        ),
-      { retries: 2, baseDelayMs: 500, isRetryable: isTransientFetchError },
+        );
+        // Check status INSIDE the retried unit so 429/5xx back off (architecture.md).
+        if (!r.ok) {
+          throw new SearchProviderError(`Brave Search HTTP ${r.status}`, { status: r.status });
+        }
+        return r;
+      },
+      { retries: 2, baseDelayMs: 500, isRetryable: isRetryableSearchError },
     );
-
-    if (!res.ok) {
-      throw new SearchProviderError(`Brave Search HTTP ${res.status}`);
-    }
 
     const parsed = BraveResponseSchema.safeParse(await res.json());
     if (!parsed.success) {
@@ -83,13 +85,3 @@ const BraveResponseSchema = z.object({
     })
     .optional(),
 });
-
-function isTransientFetchError(err: unknown): boolean {
-  if (err instanceof TimeoutError) return true;
-  if (err instanceof Error) {
-    if (err.name === 'AbortError') return true;
-    const code = (err as NodeJS.ErrnoException).code;
-    return code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'EAI_AGAIN';
-  }
-  return false;
-}

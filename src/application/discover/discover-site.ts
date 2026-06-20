@@ -16,7 +16,7 @@ import type {
   AgentBudget,
   ProposedSource,
 } from '../ports/index.js';
-import { ExtractUseCase } from '../extract/extract.js';
+import { ExtractUseCase, ExtractionFailedError } from '../extract/extract.js';
 import { CandidateSink } from '../crawl/candidate-sink.js';
 import { RunRecorder } from '../crawl/run-recorder.js';
 import { LaneBSupport, type ProposedDomain } from './lane-b-support.js';
@@ -232,8 +232,14 @@ export class DiscoverSiteUseCase {
           }
         } catch (err) {
           failedPages++;
+          // A failed extraction may still have cost money (the LLM call ran before
+          // the boundary rejected its output). Credit that spend so the run's €-cap
+          // and the daily guard account for it (otherwise malformed pages spend
+          // budget the guard never sees).
+          if (err instanceof ExtractionFailedError) costEur += err.costEur;
           this.logger.error('discovery: extraction failed, skipping page', {
             url,
+            costEur: err instanceof ExtractionFailedError ? err.costEur : 0,
             error: err instanceof Error ? err.message : String(err),
           });
         }
