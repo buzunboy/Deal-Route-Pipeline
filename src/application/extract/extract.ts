@@ -7,6 +7,9 @@ import {
   trueCostMonthly,
   dedupeKey,
   CURRENT_SCHEMA_VERSION,
+  boundExtractionInput,
+  MAX_EXTRACTION_INPUT_CHARS,
+  type BoundedExtractionInput,
   type LlmExtractedDeal,
   type Vocabulary,
   type RuleFailure,
@@ -94,8 +97,21 @@ export class ExtractUseCase {
   ) {}
 
   async execute(input: ExtractInput): Promise<ExtractResult> {
+    // Bound the page text BEFORE it becomes the prompt: a page can be huge (the
+    // fetcher only caps bytes), and an over-long prompt exceeds the model context
+    // and hard-fails the call (seen live on a giant aggregator page). A trimmed
+    // page is extracted but flagged lower-trust (forces must-review) — never
+    // silently trusted, since the real price/conditions might be past the cut.
+    const bounded = boundExtractionInput(input.pageText);
+    if (bounded.truncated) {
+      this.logger.warn('extraction input exceeded the size cap; page text trimmed', {
+        sourceUrl: input.sourceUrl,
+        originalChars: input.pageText.length,
+        cappedChars: MAX_EXTRACTION_INPUT_CHARS,
+      });
+    }
     const { system, user } = buildExtractionPrompt({
-      pageText: input.pageText,
+      pageText: bounded.text,
       sourceUrl: input.sourceUrl,
       targetService: input.targetService,
       vocabulary: input.vocabulary,
@@ -118,7 +134,7 @@ export class ExtractUseCase {
 
     const firstParse = this.tryParse(first.text);
     if (firstParse.ok) {
-      return this.finish(firstParse.deals, input, costEur);
+      return this.finish(firstParse.deals, input, bounded, costEur);
     }
 
     // The first reply was unparseable/wrong-shape (truncation past recovery, or a
@@ -145,7 +161,7 @@ export class ExtractUseCase {
       throw new ExtractionFailedError(costEur, { cause: retryParse.error });
     }
     this.logger.info('extraction recovered on re-ask', { sourceUrl: input.sourceUrl });
-    return this.finish(retryParse.deals, input, costEur);
+    return this.finish(retryParse.deals, input, bounded, costEur);
   }
 
   /** Parse raw model text through the trust boundary; never throws (returns a result). */
@@ -163,10 +179,13 @@ export class ExtractUseCase {
   private finish(
     rawDeals: LlmExtractedDeal[],
     input: ExtractInput,
+    bounded: BoundedExtractionInput,
     costEur: number,
   ): ExtractResult {
     const candidates = rawDeals.map((deal) =>
-      this.processDeal(deal, input.pageText, input.vocabulary, input.sourceUrl),
+      // Validate grounding against the SAME (bounded) text the LLM saw — a quote
+      // from a trimmed tail must not falsely fail; the truncation itself is flagged.
+      this.processDeal(deal, bounded, input.vocabulary, input.sourceUrl),
     );
     this.logger.info('extraction complete', {
       sourceUrl: input.sourceUrl,
@@ -179,7 +198,7 @@ export class ExtractUseCase {
 
   private processDeal(
     rawDeal: LlmExtractedDeal,
-    pageText: string,
+    bounded: BoundedExtractionInput,
     vocabulary: Vocabulary,
     sourceUrl: string,
   ): ExtractedCandidate {
@@ -204,10 +223,24 @@ export class ExtractUseCase {
       field_proposals: mergedProposals,
     };
 
-    // Sanity + grounding validation against the actual page text (hallucination guard).
-    const validation = validateRecord(deal, pageText);
-    const adjusted = adjustConfidence(deal, validation.failures.length);
-    const review = mustReview(adjusted, validation.failures.length);
+    // Sanity + grounding validation against the (bounded) text the LLM actually saw.
+    const validation = validateRecord(deal, bounded.text);
+    // A trimmed page is lower-trust: add a rule failure so it flows through the
+    // SAME confidence-downgrade + must-review machinery (the price/conditions past
+    // the cut may be missing). Never silently trust a record from a partial page.
+    const failures = bounded.truncated
+      ? [
+          ...validation.failures,
+          {
+            rule: 'extraction_input_truncated',
+            message:
+              'Page text exceeded the extraction input cap and was trimmed; the offer may be incomplete. ' +
+              'A human must confirm against the full page before this deal can rank or publish.',
+          },
+        ]
+      : validation.failures;
+    const adjusted = adjustConfidence(deal, failures.length);
+    const review = mustReview(adjusted, failures.length);
 
     return {
       deal: { ...deal, confidence: adjusted },
@@ -220,7 +253,7 @@ export class ExtractUseCase {
       schemaVersion: CURRENT_SCHEMA_VERSION,
       adjustedConfidence: adjusted,
       mustReview: review,
-      failures: validation.failures,
+      failures,
       fieldProposals: mergedProposals,
     };
   }

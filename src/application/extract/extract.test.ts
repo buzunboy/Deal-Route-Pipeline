@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { ExtractUseCase, ExtractionFailedError } from './extract.js';
-import { SEED_VOCABULARY, CURRENT_SCHEMA_VERSION } from '../../domain/index.js';
+import {
+  SEED_VOCABULARY,
+  CURRENT_SCHEMA_VERSION,
+  MAX_EXTRACTION_INPUT_CHARS,
+} from '../../domain/index.js';
 import { FakeLlm, FakeLogger, SequencedFakeLlm } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
 
@@ -32,6 +36,32 @@ describe('ExtractUseCase', () => {
   it('returns no candidates for an empty page (a page may hold no offers)', async () => {
     const result = await runExtract(JSON.stringify({ deals: [] }));
     expect(result.candidates).toHaveLength(0);
+  });
+
+  it('an oversized page is bounded (no crash) and the candidate is forced must-review', async () => {
+    // Regression for the live JustWatch crash: a huge page must NOT be sent whole to
+    // the LLM (which would exceed the model context). It's trimmed, extraction still
+    // runs, and the candidate is flagged lower-trust (extraction_input_truncated).
+    // The grounded quote sits in the kept HEAD so grounding still validates.
+    const hugePage = `${PAGE_TEXT}\n${'padding '.repeat(MAX_EXTRACTION_INPUT_CHARS)}`;
+    const llm = new FakeLlm(JSON.stringify({ deals: [makeLlmDeal()] }));
+    const logger = new FakeLogger();
+    const uc = new ExtractUseCase(llm, logger);
+    const result = await uc.execute({
+      pageText: hugePage,
+      sourceUrl: 'https://www.telekom.de/magenta-tv',
+      targetService: 'Disney+',
+      vocabulary: SEED_VOCABULARY,
+    });
+    expect(result.candidates).toHaveLength(1);
+    const c = result.candidates[0]!;
+    expect(c.mustReview).toBe(true);
+    expect(c.failures.some((f) => f.rule === 'extraction_input_truncated')).toBe(true);
+    expect(logger.entries.some((e) => e.level === 'warn' && /size cap|trimmed/i.test(e.msg))).toBe(
+      true,
+    );
+    // The prompt the LLM received was bounded, not the full multi-MB page.
+    expect(llm.lastRequest!.user.length).toBeLessThan(MAX_EXTRACTION_INPUT_CHARS + 5000);
   });
 
   it('forces must-review when a grounding quote is hallucinated', async () => {
