@@ -2,7 +2,10 @@
 # Uses Playwright's image so the default fetcher's Chromium + system deps are present.
 FROM mcr.microsoft.com/playwright:v1.49.1-jammy AS base
 WORKDIR /app
-ENV NODE_ENV=production
+# NOTE: NODE_ENV is intentionally NOT set to production here. This `base` stage
+# feeds `deps`/`build`, which need devDependencies (TypeScript) — with
+# NODE_ENV=production, `npm ci` omits devDeps and `npm run build` fails with
+# `tsc: not found`. NODE_ENV=production is set on the `runtime` stage only.
 # Git hooks (husky) are a dev-only concern; disable them in the image so the
 # `prepare` lifecycle script never tries to install hooks during `npm ci`
 # (no .git here, and husky isn't present in the prod-only `--omit=dev` install).
@@ -22,6 +25,7 @@ RUN npm run build
 
 # ── runtime ──────────────────────────────────────────────────────────────────
 FROM base AS runtime
+ENV NODE_ENV=production
 # Production deps only.
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
