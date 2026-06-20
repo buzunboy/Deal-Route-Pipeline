@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { CrawlSourceUseCase } from './crawl-source.js';
 import { ExtractUseCase } from '../extract/extract.js';
-import { SEED_VOCABULARY } from '../../domain/index.js';
+import { SEED_VOCABULARY, dedupeKey } from '../../domain/index.js';
+import { dealToRow } from '../../adapters/db/postgres/mappers.js';
 import { InMemoryDb } from '../../../test/fakes/in-memory-db.js';
 import {
   FakeFetcher,
@@ -101,6 +102,47 @@ describe('CrawlSourceUseCase', () => {
     await env.uc.execute({ sourceId });
     await env.uc.execute({ sourceId });
     expect(await env.db.deals.listByStatus('candidate', 10)).toHaveLength(1);
+  });
+
+  it('cross-domain redirect: one provenance URL across extract+evidence+persist — dedupes on re-crawl', async () => {
+    // The configured source URL redirects to a DIFFERENT registrable domain (the
+    // page actually lives elsewhere). Extraction, the evidence bundle, and the
+    // persisted record must all agree on ONE provenance URL — `fetched.finalUrl`,
+    // the post-redirect location — exactly as the discover/ingest lanes do. If
+    // extract derived its dedupe key from `source.url` while the persisted key is
+    // recomputed from the (finalUrl-pinned) `source_url`, the now domain-folding
+    // dedupe key would diverge and a re-crawl would fail to collapse. Pinning one
+    // URL keeps extract-time and persist-time keys identical.
+    const SOURCE_URL = 'https://www.telekom.de/magenta-disney';
+    const FINAL_URL = 'https://offers.magenta-redirect.example/disney'; // different registrable domain
+    const fetcher = new FakeFetcher({ text: PAGE_TEXT, finalUrl: FINAL_URL });
+    env = build({ fetcher });
+    const source = makeSource({ url: SOURCE_URL });
+    await env.db.sources.upsert(source);
+
+    // (a) Two crawls of identical content collapse to a single record.
+    await env.uc.execute({ sourceId: source.id });
+    await env.uc.execute({ sourceId: source.id });
+    const candidates = await env.db.deals.listByStatus('candidate', 10);
+    expect(candidates).toHaveLength(1);
+
+    const persisted = candidates[0]!;
+    // Provenance is pinned to the post-redirect URL, not the configured source URL,
+    // and matches the evidence bundle (one chain).
+    expect(persisted.source_url).toBe(FINAL_URL);
+    const ev = await env.db.evidence.getById(persisted.evidence_id);
+    expect(ev!.source_url).toBe(FINAL_URL);
+
+    // (b) The persisted dedupe key (the one the postgres mapper writes from the
+    // stored record) equals the key recomputed from the deal's own `source_url`,
+    // so extract-time and persist-time keys agree. Because the split-by-source key
+    // folds the registrable domain, it folds the POST-REDIRECT domain (finalUrl),
+    // NOT the configured source.url's — which is exactly why aligning extract to
+    // finalUrl matters: deriving the key from source.url would have produced a
+    // DIFFERENT key that never matched its own persisted row.
+    expect(dealToRow(persisted).dedupeKey).toBe(dedupeKey(persisted, persisted.source_url));
+    expect(dealToRow(persisted).dedupeKey).toBe(dedupeKey(persisted, FINAL_URL));
+    expect(dedupeKey(persisted, SOURCE_URL)).not.toBe(dedupeKey(persisted, FINAL_URL));
   });
 
   it('changed content on the same route → fresh in_review candidate, original untouched', async () => {
