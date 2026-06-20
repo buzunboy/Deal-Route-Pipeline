@@ -2,7 +2,7 @@
 
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`<set-on-merge>`** (Step 4). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
+**`6822a45`** (Step 4). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
 disclosure), 3 (reliability-blended ranking) AND 4 (scheduler / unattended-run harness)
 are DONE + merged; the next step is Step 5 (observability: alerting + metrics push).**
 This supersedes
@@ -236,7 +236,7 @@ retained for context:_
   reliability index from a full active-source scan per public request — fine at DE-v1 scale,
   cache/fold-into-SQL when source count or `/v1/` traffic grows.
 
-### Step 4 — Scheduler / unattended-run harness — ✅ DONE (merged `<set-on-merge>`, 2026-06-20)
+### Step 4 — Scheduler / unattended-run harness — ✅ DONE (merged `6822a45`, 2026-06-20)
 _Shipped as the owner-decided **external-cron** model (pg-boss stays unwired). Two
 workstreams: **(A) Prereq A trust fix** + **(B) scheduler templates**._
 - **(A) Prereq A — resolved-URL tracking (the trust-critical part).** A nullable
