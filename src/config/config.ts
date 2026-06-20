@@ -59,9 +59,15 @@ const ConfigSchema = z.object({
         endpoint: z.string().optional(),
         accessKeyId: z.string().min(1),
         secretAccessKey: z.string().min(1),
-        // Optional public CDN/base URL for resolving an evidence ref into a public
-        // URL (the public read API turns `screenshot_ref` into `${cdnBaseUrl}/${ref}`).
-        // Unset ⇒ no public evidence URL is exposed (admin-only access via get()).
+        // Optional public CDN/base URL the public read API uses to build a deal's
+        // screenshot URL: `${cdnBaseUrl}/<evidence_id>/screenshot.png`. Unset ⇒ no
+        // public evidence URL is exposed (admin-only access via get()).
+        // DEPLOYMENT CONTRACT: an evidence bundle stores screenshot.png + page.html
+        // + terms.txt + evidence.json under the SAME `<id>/` prefix. Only
+        // `*/screenshot.png` may be publicly reachable — the HTML snapshot and the
+        // verbatim (copyrighted) terms text must NOT be. Scope the CDN/bucket policy
+        // to `screenshot.png` objects (or serve screenshots from a separate public
+        // prefix). See ARCHITECTURE.md "Public read surface" + docs/KNOWN_ISSUES.md.
         cdnBaseUrl: z.string().url().optional(),
       })
       .optional(),
@@ -116,6 +122,14 @@ const ConfigSchema = z.object({
     port: z.coerce.number().int().positive(),
     /** Bearer token gating approve/reject. Unset ⇒ open (bind to a trusted network). */
     authToken: z.string().min(1).optional(),
+  }),
+  publicApi: z.object({
+    /**
+     * `Access-Control-Allow-Origin` for the public `/v1/` read API. The feed is
+     * fully public + unauthenticated (no cookies/credentials), so `*` is the safe
+     * default; set `PUBLIC_CORS_ORIGIN` to the landing-page origin to tighten it.
+     */
+    corsAllowOrigin: z.string().min(1),
   }),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']),
   country: z.string().min(1),
@@ -207,6 +221,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     reviewApi: {
       port: env.REVIEW_API_PORT ?? '3000',
       authToken: emptyToUndefined(env.REVIEW_API_TOKEN),
+    },
+    publicApi: {
+      corsAllowOrigin: env.PUBLIC_CORS_ORIGIN ?? '*',
     },
     logLevel: env.LOG_LEVEL ?? 'info',
     country: env.COUNTRY ?? 'DE',

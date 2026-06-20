@@ -101,6 +101,10 @@ export const deals = pgTable(
     statusIdx: index('deals_status_idx').on(t.status),
     dedupeIdx: index('deals_dedupe_idx').on(t.dedupeKey),
     sourceUrlIdx: index('deals_source_url_idx').on(t.sourceUrl, t.status),
+    // Serves the public read feed (GET /v1/deals): status='published' is always
+    // the leading predicate, then country/service are the common filters. Keeps
+    // the filtered+sorted published query off a full table scan as deals grow.
+    publishedIdx: index('deals_published_idx').on(t.status, t.country, t.service),
     // One candidate per (route, evidence bundle): blocks the read-then-write race
     // where two concurrent crawls of the same offer both insert. A content change
     // produces a NEW evidence id, so the legitimate candidate+in_review pair for a

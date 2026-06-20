@@ -38,6 +38,8 @@ import type {
   ReviewRecord,
   SourceReviewRecord,
   SubscriptionCatalogEntry,
+  PublishedQuery,
+  PublishedFilters,
 } from '../../../domain/index.js';
 import type { Logger } from '../../../application/ports/index.js';
 import * as schema from './schema.js';
@@ -306,6 +308,57 @@ class PgDealRepo extends PgRepo implements DealRepository {
       this.db.update(schema.deals).set(dealToRow(d)).where(eq(schema.deals.id, d.id)),
     );
   }
+  async listPublished(query: PublishedQuery): Promise<DealRecord[]> {
+    const { sort, limit, offset } = query;
+    // status='published' is the FIRST predicate (the trust boundary), then the
+    // optional filters AND in — same conditional-predicate idiom as listBySourceUrl.
+    const where = and(
+      eq(schema.deals.status, 'published'),
+      ...publishedFilterPredicates(query.filters),
+    );
+    // Stable order: the requested key, then id ASC as a deterministic tiebreaker so
+    // offset pagination never skips/repeats. Mirrors the in-memory comparator (LSP).
+    const orderBy =
+      sort === 'verified_desc'
+        ? [sql`${schema.deals.verifiedAt} desc nulls last`, asc(schema.deals.id)]
+        : [asc(schema.deals.trueCostMonthly), asc(schema.deals.id)];
+    const rows = await this.run('deals.listPublished', () =>
+      this.db
+        .select()
+        .from(schema.deals)
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(limit)
+        .offset(offset),
+    );
+    return rows.map(rowToDeal);
+  }
+  async countPublished(filters: PublishedFilters): Promise<number> {
+    const where = and(eq(schema.deals.status, 'published'), ...publishedFilterPredicates(filters));
+    const rows = await this.run('deals.countPublished', () =>
+      this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.deals)
+        .where(where),
+    );
+    return rows[0]?.n ?? 0;
+  }
+}
+
+/**
+ * Build the optional published-feed filter predicates (AND-ed by the caller after
+ * the always-on `status='published'`). Absent filter ⇒ no predicate. Mirrors the
+ * in-memory `matchesPublishedFilters` exactly so both adapters return the same set.
+ */
+function publishedFilterPredicates(filters: PublishedFilters): SQL[] {
+  const predicates: SQL[] = [];
+  if (filters.service !== undefined) predicates.push(eq(schema.deals.service, filters.service));
+  if (filters.country !== undefined) predicates.push(eq(schema.deals.country, filters.country));
+  if (filters.routeType !== undefined)
+    predicates.push(eq(schema.deals.routeType, filters.routeType));
+  if (filters.priceMax !== undefined)
+    predicates.push(lte(schema.deals.trueCostMonthly, filters.priceMax));
+  return predicates;
 }
 
 class PgCrawlRunRepo extends PgRepo implements CrawlRunRepository {

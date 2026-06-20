@@ -1,0 +1,1 @@
+CREATE INDEX "deals_published_idx" ON "deals" USING btree ("status","country","service");

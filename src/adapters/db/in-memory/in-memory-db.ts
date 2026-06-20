@@ -16,6 +16,9 @@ import {
   type ReviewRecord,
   type SourceReviewRecord,
   type SubscriptionCatalogEntry,
+  type PublishedQuery,
+  type PublishedFilters,
+  type PublishedSort,
 } from '../../../domain/index.js';
 import type {
   Database,
@@ -105,6 +108,21 @@ class InMemoryDealRepo implements DealRepository {
       .slice(0, limit)
       .map((d) => ({ ...d }));
   }
+  async listPublished(query: PublishedQuery): Promise<DealRecord[]> {
+    const { filters, sort, limit, offset } = query;
+    const matches = [...this.store.values()].filter(
+      (d) => d.status === 'published' && matchesPublishedFilters(d, filters),
+    );
+    matches.sort(comparePublished(sort));
+    return matches.slice(offset, offset + limit).map((d) => ({ ...d }));
+  }
+  async countPublished(filters: PublishedFilters): Promise<number> {
+    let n = 0;
+    for (const d of this.store.values()) {
+      if (d.status === 'published' && matchesPublishedFilters(d, filters)) n++;
+    }
+    return n;
+  }
   async findByDedupeKey(key: string): Promise<DealRecord | null> {
     // Return the highest-confidence non-rejected match, matching PgDealRepo's
     // `orderBy(desc(confidence))` so the canonical-deal choice is identical
@@ -147,6 +165,46 @@ class InMemoryDealRepo implements DealRepository {
   async update(d: DealRecord): Promise<void> {
     this.store.set(d.id, { ...d });
   }
+}
+
+/**
+ * True when a deal satisfies every supplied published filter (absent filter ⇒ no
+ * constraint). Mirrors the Postgres adapter's AND-ed predicates exactly so the two
+ * return the same set (LSP). `priceMax` is inclusive on `true_cost_monthly`.
+ */
+function matchesPublishedFilters(d: DealRecord, f: PublishedFilters): boolean {
+  if (f.service !== undefined && d.service !== f.service) return false;
+  if (f.country !== undefined && d.country !== f.country) return false;
+  if (f.routeType !== undefined && d.route_type !== f.routeType) return false;
+  if (f.priceMax !== undefined && d.true_cost_monthly > f.priceMax) return false;
+  return true;
+}
+
+/**
+ * Comparator matching the Postgres `ORDER BY` byte-for-byte (LSP), including the
+ * `id` ascending tiebreaker that makes `offset` pagination stable:
+ *  - `cost_asc`      → true_cost_monthly ASC, then id ASC
+ *  - `verified_desc` → verified_at DESC NULLS LAST, then id ASC
+ * `verified_at` is canonical ISO-Z in both adapters (the Postgres mapper normalises
+ * timestamptz → ISO-Z), so `localeCompare` on the strings is chronological. A null
+ * `verified_at` sorts LAST (least fresh), matching `NULLS LAST` in Postgres.
+ */
+function comparePublished(sort: PublishedSort): (a: DealRecord, b: DealRecord) => number {
+  if (sort === 'verified_desc') {
+    return (a, b) => {
+      const av = a.verified_at;
+      const bv = b.verified_at;
+      if (av !== bv) {
+        if (av === null) return 1; // nulls last
+        if (bv === null) return -1;
+        const cmp = bv.localeCompare(av); // descending
+        if (cmp !== 0) return cmp;
+      }
+      return a.id.localeCompare(b.id);
+    };
+  }
+  // cost_asc
+  return (a, b) => a.true_cost_monthly - b.true_cost_monthly || a.id.localeCompare(b.id);
 }
 
 class InMemoryCrawlRunRepo implements CrawlRunRepository {

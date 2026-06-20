@@ -4,6 +4,10 @@ import { randomUUID } from 'node:crypto';
 import {
   EvidenceSchema,
   assertCaptureComplete,
+  EVIDENCE_SCREENSHOT_FILE,
+  EVIDENCE_HTML_FILE,
+  EVIDENCE_TERMS_FILE,
+  EVIDENCE_META_FILE,
   type Evidence,
   type EvidenceCapture,
 } from '../../domain/index.js';
@@ -24,11 +28,13 @@ export class EvidenceStoreError extends Error {
 /**
  * Filenames inside a bundle directory. The `*_ref` pointers we store are the
  * relative paths below; the adapter owns the layout, callers treat refs as opaque.
+ * Names come from the domain {@link EVIDENCE_SCREENSHOT_FILE} et al. so the public
+ * read API derives the same screenshot path it's stored under (single source of truth).
  */
-const SCREENSHOT_FILE = 'screenshot.png';
-const HTML_FILE = 'page.html';
-const TERMS_FILE = 'terms.txt';
-const META_FILE = 'evidence.json';
+const SCREENSHOT_FILE = EVIDENCE_SCREENSHOT_FILE;
+const HTML_FILE = EVIDENCE_HTML_FILE;
+const TERMS_FILE = EVIDENCE_TERMS_FILE;
+const META_FILE = EVIDENCE_META_FILE;
 
 /**
  * Local-filesystem EvidenceStore — the dev default behind the {@link EvidenceStore}

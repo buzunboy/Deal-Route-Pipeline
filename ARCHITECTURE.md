@@ -120,15 +120,56 @@ each have one. The Postgres contract runs only when `DATABASE_URL_TEST` is set.
    to manual capture (not expiry); auto-expiry fires only after N **consecutive** unreachable
    checks, so a single transient failure can't expire a published deal.
 
-## Review API trust boundary
+## HTTP surface: two routers, one port
 
-The HTTP review API (`serve`) is the durable contract for the future admin panel. State-changing
+`serve` mounts two independent raw-`node:http` handler classes on one port, dispatched by path
+prefix. Dispatch is **total**: a `/v1/*` request is always handled by `PublicApi` (which 404s its
+own unknown paths), so a public path can never fall through to an admin/state-changing route.
+
+### Review API trust boundary (`/api/*` — gated admin)
+
+The HTTP review API (`ReviewApi`) is the durable contract for the future admin panel. State-changing
 endpoints (approve/reject) are gated by `REVIEW_API_TOKEN` (bearer) when set; the recorded
 `approver` is still client-supplied, so the **production admin panel terminates real
 authentication and supplies the authenticated principal**. With no token set the API is open and
 **must** be bound to a trusted network (localhost/private). Read endpoints are never gated.
 Domain errors map to precise client status codes (404/409/400/413); internal errors return a
 generic 500 with no leaked detail; request bodies are size-bounded.
+
+### Public read surface (`/v1/*` — unauthenticated, read-only)
+
+`PublicApi` is the public counterpart: an unauthenticated, **read-only** feed over `published`
+deals only (`GET /v1/deals`, `GET /v1/deals/:id`, `GET /v1/health`). It is the first public surface,
+so it carries the load-bearing trust contract:
+
+- **Published-only.** `listPublished`/`countPublished` enforce `status='published'` inside the repo
+  method (a caller can never widen it); `GET /v1/deals/:id` 404s a missing OR non-published deal
+  with the same response (never leaks a candidate/in_review/expired/rejected record).
+- **Curated projection, never raw data.** Responses are built by `toPublicDeal` — a deliberate
+  allow-list, NOT a delete-the-bad-keys filter, so a new internal field is excluded by default.
+  No `status`/`confidence`/`grounding`/`attributes`/`raw_conditions_text`/`field_proposals`/
+  `evidence_id`/`verified_by`/condition `source_quote` ever appears (a contract test feeds a
+  fully-populated record and asserts none leak). The only trust signal exposed is a **coarse
+  freshness `trust` badge** derived from `verified_at` — never the raw reliability/confidence score.
+- **Evidence as CDN URLs.** `evidence_screenshot_url` is derived purely from `evidence_id` + the
+  deterministic evidence layout (`${S3_CDN_BASE_URL}/<evidence_id>/screenshot.png`); null when no
+  CDN base is configured (no broken/relative URL). No screenshot-streaming route.
+  **Deployment contract (load-bearing):** a bundle stores `screenshot.png` + `page.html` +
+  `terms.txt` + `evidence.json` under the SAME `<id>/` prefix. The public CDN must expose ONLY
+  `*/screenshot.png` — the raw HTML snapshot and the **verbatim (copyrighted) terms text** must
+  stay private (editing the screenshot URL to `…/terms.txt` must NOT resolve). Scope the
+  CDN/bucket policy to `screenshot.png` objects, or serve screenshots from a separate public
+  prefix. See `docs/KNOWN_ISSUES.md`.
+- **Condition `value` is sanitized.** A condition's `value` is an open object from LLM/source
+  output; `toPublicCondition` strips any reserved/internal key name out of it, so the no-leak
+  contract holds even for nested data the pipeline doesn't control.
+- **Boundary-validated params.** Query filters/sort/pagination are zod-parsed into typed values;
+  malformed → 400 (not a silent default). Page size is hard-capped (`PUBLISHED_MAX_LIMIT`).
+- **CORS.** Every `/v1/` response carries `Access-Control-Allow-Origin` (`PUBLIC_CORS_ORIGIN`,
+  default `*` — the feed is fully public, no credentials) + an `OPTIONS` preflight, since the
+  landing page consuming it lives in a separate repo (cross-origin).
+- **No in-process rate-limit.** Front `/v1/` with a CDN/reverse-proxy at deploy for rate-limiting +
+  caching (the published feed is highly cacheable). See `docs/KNOWN_ISSUES.md`.
 
 ## How to add things (no editing of existing logic)
 

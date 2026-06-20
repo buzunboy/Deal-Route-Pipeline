@@ -170,17 +170,6 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   `databaseContract` and include the file in `vitest.integration.config.ts`.
 - **Logged**: 2026-06-20
 
-### `cdnBaseUrl` config parsed but not yet consumed
-- **Severity**: low
-- **Area**: api / config
-- **Location**: `src/config/config.ts` (`evidence.s3.cdnBaseUrl`, env `S3_CDN_BASE_URL`).
-- **What**: Added in P2 (S3 adapter) for the upcoming public read API to turn an evidence ref
-  into `${cdnBaseUrl}/${ref}`, but nothing reads it yet (no public API exists).
-- **Why deferred**: P3 (public `/v1/` read API) is the consumer — it lands next.
-- **Fix-when**: P3 — the public DTO resolves evidence URLs via `cdnBaseUrl`. If P3 is dropped,
-  remove the field rather than leave it dead.
-- **Logged**: 2026-06-20
-
 ### Two differently-named EvidenceStore error classes
 - **Severity**: low
 - **Area**: evidence-store
@@ -214,9 +203,74 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   resolved URL on the source (set on first successful crawl) and have monitor match on it.
 - **Logged**: 2026-06-20
 
+### Public landing page must NOT launch off `/v1/` without GDPR/affiliate-disclosure fields
+- **Severity**: high (legal/compliance gate — not a code defect, a launch dependency)
+- **Area**: api / schema / legal
+- **Location**: the public deal record / DTO (`src/adapters/http/public-dto.ts`); the schema
+  (`src/domain/deal-record/`). Tracked against post-C Step 2 (`docs/DealRoute_PostC_Handoff.md`).
+- **What**: P3 ships the public `/v1/` READ API but deliberately does NOT add affiliate-disclosure
+  / data-protection (EU-Omnibus / GDPR) fields — that was an explicit owner decision (P3 = API
+  surface only; the fields gate the public PAGE, not the API existing). PostC flags these as
+  "cheap to add WITH Step 1, expensive to retrofit."
+- **Why deferred**: the API can exist and be tested without them; they are a schema-owner call and
+  belong with the page launch (post-C Step 2), not the read surface.
+- **Fix-when**: BEFORE the landing page goes live off this API. Add the disclosure field(s) to the
+  deal record + the public DTO (a schema change → ask the schema owner per CLAUDE.md), and confirm
+  with legal what must be shown on a public DE deal page.
+- **Logged**: 2026-06-20
+
+### No rate-limiting on the public unauthenticated `/v1/` API
+- **Severity**: medium
+- **Area**: api
+- **Location**: `src/adapters/http/public-api.ts`; mounted by `src/adapters/cli/commands/serve.ts`.
+- **What**: `/v1/` is open and reads Postgres directly. A bot looping requests could load the DB
+  and contend with the admin API for the same pool. P3 mitigates the worst case by hard-capping
+  page size AND offset in the domain (`PUBLISHED_MAX_LIMIT = 100`, `PUBLISHED_MAX_OFFSET = 10000`;
+  an over-cap request is a 400, not an unbounded/deep scan), but there is no request-rate limit.
+- **Why deferred**: D-decision was to keep `/v1/` read-only with no in-process rate limiting and
+  put a CDN/proxy in front at deploy (the natural place for rate-limit + caching + TLS). The
+  per-page cap removes the unbounded-result risk; sustained-abuse protection is an edge concern.
+- **Fix-when**: at production deploy — front `/v1/` with a CDN/reverse-proxy enforcing per-IP rate
+  limits + response caching (the published feed is highly cacheable). If a proxy isn't available,
+  add a lightweight in-process limiter before exposing `/v1/` publicly.
+- **Logged**: 2026-06-20
+
+### Public CDN must expose ONLY `screenshot.png`, not the whole evidence bundle
+- **Severity**: high (trust / copyright — a deployment-config gap, not a code defect)
+- **Area**: evidence-store / api / deployment
+- **Location**: `src/adapters/evidence-store/s3-evidence-store.ts` (bundle layout); consumed by
+  `src/adapters/http/public-dto.ts` (`resolveScreenshotUrl`) via `S3_CDN_BASE_URL`.
+- **What**: a bundle stores `screenshot.png` + `page.html` + `terms.txt` + `evidence.json` under one
+  `<id>/` prefix with fixed public-constant names (`src/domain/evidence/evidence-layout.ts`). The
+  public DTO only emits the `screenshot.png` URL, but if `S3_CDN_BASE_URL` fronts that prefix
+  publicly, a consumer can edit the URL to `…/<id>/terms.txt` / `…/page.html` and fetch the raw HTML
+  snapshot + the **verbatim (copyrighted) terms text** the DTO deliberately drops. That re-exposes
+  exactly the data the `source_quote`/`raw_conditions_text` no-leak invariant protects.
+- **Why deferred**: it's a deployment/bucket-policy concern, not a code path — the API exposes only
+  the screenshot URL. Fully separating screenshots into their own public bucket/prefix is an
+  evidence-store change (P2 territory) that would touch the write-once / no-partial-bundle
+  guarantees, so it's documented + enforced at deploy rather than re-architected for P3.
+- **Mitigation in place**: the deployment contract is documented loudly next to `S3_CDN_BASE_URL`
+  (config JSDoc + README + ARCHITECTURE.md "Public read surface").
+- **Fix-when**: BEFORE pointing `S3_CDN_BASE_URL` at a public bucket — scope the CDN/bucket policy
+  to `*/screenshot.png` objects only (deny `page.html`/`terms.txt`/`evidence.json`), or write
+  screenshots to a separate public prefix/bucket from the rest of the bundle. Verify by attempting
+  to fetch `…/<id>/terms.txt` against the public CDN (must be denied).
+- **Logged**: 2026-06-20
+
 ---
 
 ## Resolved
+
+### `cdnBaseUrl` config parsed but not yet consumed — RESOLVED 2026-06-20
+- **Was**: low, api / config, `src/config/config.ts` (`evidence.s3.cdnBaseUrl`, env `S3_CDN_BASE_URL`).
+- **Problem**: the field was added in P2 (S3 adapter) for the upcoming public read API but nothing
+  read it (no public API existed).
+- **Resolution**: P3 consumes it. The public DTO (`src/adapters/http/public-dto.ts`,
+  `resolveScreenshotUrl`) builds `${cdnBaseUrl}/${evidence_id}/screenshot.png` from the
+  deterministic evidence layout (`src/domain/evidence/evidence-layout.ts`, shared by both
+  EvidenceStore adapters), returning null when `cdnBaseUrl` is unset (local-fs evidence). No
+  evidence-store I/O — the screenshot path is derived purely from `evidence_id`.
 
 ### Dedupe-key omits source/origin (provenance) — RESOLVED 2026-06-20
 - **Was**: medium (trust-relevant), domain / schema, `src/domain/rules/dedupe-key.ts`.

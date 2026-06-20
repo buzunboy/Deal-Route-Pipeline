@@ -136,10 +136,15 @@ done + merged.** C-2 shipped as a render-capable `Fetcher` (Option A): a
 the same port — the existing `SearchBrowserAgent` drives it and `PoliteFetcher`
 keeps wrapping it (no guardrail bypass). CI/CD also landed: fixed CI trigger +
 migrate gate, a GHCR release-image workflow, and a scaffolded deploy workflow.
-**Next:** the post-C product-completeness track (§5) — published-deals read API,
-GDPR/affiliate disclosure at publish, reliability-driven ranking, multi-country.
-The interactive multi-step `BrowserAgent` ("Option B") is a recorded future
-extension (`docs/KNOWN_ISSUES.md`), to pick up only when a site needs it.
+**Next:** the post-C product-completeness track (§5). **P3 — the public `/v1/`
+published-deals read API — is DONE** (read-only feed over published deals: a
+curated DTO that leaks no internal field + a coarse freshness trust badge,
+CDN-resolved evidence URLs, CORS, page-cap; nothing auto-publishes, admin stays
+gated). Remaining in §5: GDPR/affiliate disclosure at publish (a launch gate for
+the public PAGE — see `docs/KNOWN_ISSUES.md`), reliability-driven ranking,
+scheduler/ops, observability, multi-country. The interactive multi-step
+`BrowserAgent` ("Option B") is a recorded future extension (`docs/KNOWN_ISSUES.md`),
+to pick up only when a site needs it.
 
 ---
 
@@ -259,11 +264,14 @@ scripted fake → candidates + proposed sources persisted) + a gated live smoke
 
 ## 5. Post-Phase-C — completeness toward the product goal
 
-- **Publish handoff / durable API surface.** The review API is the contract the
-  separate production admin panel + landing page consume. Confirm it exposes
-  everything they need (published deals feed, evidence URLs, source provenance,
-  review history) and version it. Today it's review-centric; a published-deals
-  read API is likely needed.
+- **Publish handoff / durable API surface. — DONE (P3).** The public published-deals
+  read API now exists: `GET /v1/deals` (filter/sort/paginate) + `GET /v1/deals/:id` +
+  `/v1/health`, served read-only alongside the gated admin `/api/*` on one port. It
+  exposes a curated DTO (typed core + mapped conditions + a coarse freshness trust
+  badge), CDN-resolved evidence screenshot URLs, and per-source provenance via
+  `source_url` (split-by-source dedupe, P1). No internal/audit field leaks
+  (contract-tested); published-only; unauthenticated read, no writes.
+  See `docs/DealRoute_P3_PublicAPI_Handoff.md`. (`/v1/` is the version prefix.)
 - **GDPR + affiliate disclosure at publish** (plan "Guardrails / Later"): no
   personal data stored; add EU-Omnibus affiliate disclosure to published records;
   store our own screenshot + a source link rather than republishing copyrighted

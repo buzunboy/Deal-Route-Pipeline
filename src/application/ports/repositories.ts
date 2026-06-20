@@ -11,6 +11,8 @@ import type {
   SourceReviewRecord,
   SubscriptionCatalogEntry,
   CostSummary,
+  PublishedQuery,
+  PublishedFilters,
 } from '../../domain/index.js';
 
 /**
@@ -56,6 +58,17 @@ export interface DealRepository {
   /** Expire every published deal for a source URL in one statement. Returns the count. */
   expirePublishedBySourceUrl(sourceUrl: string, expiredAt: string): Promise<number>;
   update(deal: DealRecord): Promise<void>;
+  /**
+   * The public read feed: `published` deals only, filtered + sorted + paginated.
+   * Backs `GET /v1/deals`. `status = 'published'` is enforced INSIDE this method
+   * (the trust boundary — a caller can never widen it), then the optional
+   * {@link PublishedFilters} are AND-ed in. Sort is stable: the requested order
+   * with `id` as the deterministic tiebreaker, so `offset`-based pagination never
+   * skips or repeats a row. Both adapters MUST order identically (LSP).
+   */
+  listPublished(query: PublishedQuery): Promise<DealRecord[]>;
+  /** Total `published` deals matching the same filters — for the feed's `total`. */
+  countPublished(filters: PublishedFilters): Promise<number>;
 }
 
 export interface CrawlRunRepository {

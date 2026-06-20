@@ -41,9 +41,11 @@ All config + secrets come from the environment; nothing is hard-coded. Key vars 
 | `DISCOVERY_DENY_DOMAINS` | extra deny-list domains for broad discovery (comma/space-separated) on top of the defaults |
 | `DAILY_BUDGET_EUR` | aggregate €/UTC-day ceiling across all agentic runs (default 10.00; 0 disables) |
 | `EVIDENCE_STORE` | `local` (default) \| `s3` |
+| `S3_CDN_BASE_URL` | public CDN/base URL for evidence (only `s3`); the public API turns it into `$S3_CDN_BASE_URL/<evidence_id>/screenshot.png`. Unset ⇒ no public evidence URL exposed. **Expose ONLY `*/screenshot.png` publicly** — `page.html`/`terms.txt` live under the same `<id>/` prefix and must stay private (see ARCHITECTURE.md) |
 | `DATABASE_URL` | Postgres connection string (persisted runs only; dry-run/tests need none) |
 | `DEFAULT_RECRAWL_DAYS` | re-crawl cadence (default 3) |
-| `REVIEW_API_TOKEN` | optional bearer token gating approve/reject; unset ⇒ open (bind to a trusted network) |
+| `REVIEW_API_TOKEN` | optional bearer token gating approve/reject on `/api/`; unset ⇒ open (bind to a trusted network) |
+| `PUBLIC_CORS_ORIGIN` | `Access-Control-Allow-Origin` for the public `/v1/` read API (default `*`; set to the landing-page origin to tighten) |
 
 ## What you must supply
 
@@ -144,6 +146,29 @@ State-changing POSTs require `Authorization: Bearer $REVIEW_API_TOKEN` when that
 (unset ⇒ open; bind to a trusted network). Unknown deal → `404`; an already-decided deal →
 `409`; missing approver / malformed JSON → `400`; oversized body → `413`. Internal errors return
 a generic `500` (no internal detail leaked). Read endpoints are never gated.
+
+## Public read API (`/v1/*` — unauthenticated, read-only)
+
+`serve` also exposes a public, **read-only** feed over `published` deals on the same port. It never
+writes, never changes status, and never exposes a non-published deal or any internal field.
+
+```
+GET  /v1/deals?service=&country=&route_type=&price_max=&sort=&limit=&offset=
+                                        published deals; { deals, total, limit, offset }
+                                        sort = cost_asc (default) | verified_desc
+GET  /v1/deals/:id                      one published deal (404 if missing OR not published)
+GET  /v1/health
+```
+
+Each deal is a **curated projection**: typed core (service/provider/headline/price/true_cost_monthly/
+country/route_type/eligibility/validity/included_items/source_url/verified_at) + condition
+`{ key, label, value }` (the verbatim `source_quote` is dropped) + a coarse freshness `trust` badge
+(`recent`/`verified`/`stale`, from `verified_at` — never a raw confidence/reliability score) +
+`evidence_screenshot_url` (`$S3_CDN_BASE_URL/<evidence_id>/screenshot.png`, or `null` when no CDN
+base is set). Internal/audit fields never appear (a contract test proves it). Query params are
+zod-validated (malformed → `400`); page size is hard-capped. CORS is set on every `/v1/` response
+(`PUBLIC_CORS_ORIGIN`, default `*`) with an `OPTIONS` preflight. Put a CDN/proxy in front in
+production for rate-limiting + caching.
 
 ## Commands
 

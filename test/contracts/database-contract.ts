@@ -235,6 +235,203 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect(new Date(proposals[0]!.last_seen_at).toISOString()).toBe('2026-07-01T00:00:00.000Z');
     });
 
+    // deals.listPublished + countPublished — the public read feed. The shared
+    // Postgres DB persists rows ACROSS cases, so each case tags its deals with a
+    // unique `service` and filters by it, so other cases' rows can't pollute the
+    // result set. This block is the LSP proof: identical filter/sort/paginate in
+    // both adapters.
+    describe('deals.listPublished + countPublished', () => {
+      it('serves ONLY published deals — never candidate/in_review/expired/rejected', async () => {
+        const db = await makeDb();
+        const service = `svc-pub-only-${randomUUID()}`;
+        const pub = dealRecord({ service, status: DealStatus.enum.published });
+        await db.deals.insert(pub);
+        for (const status of [
+          DealStatus.enum.candidate,
+          DealStatus.enum.in_review,
+          DealStatus.enum.expired,
+          DealStatus.enum.rejected,
+        ]) {
+          await db.deals.insert(dealRecord({ ...sameRoute(pub), service, status }));
+        }
+        const out = await db.deals.listPublished({
+          filters: { service },
+          sort: 'cost_asc',
+          limit: 50,
+          offset: 0,
+        });
+        expect(out.map((d) => d.id)).toEqual([pub.id]);
+        expect(out.every((d) => d.status === 'published')).toBe(true);
+        expect(await db.deals.countPublished({ service })).toBe(1);
+      });
+
+      it('filters by country, route_type and priceMax (inclusive), AND-ed', async () => {
+        const db = await makeDb();
+        const service = `svc-filter-${randomUUID()}`;
+        const base = { service, status: DealStatus.enum.published, country: 'DE' as const };
+        const cheapBundle = dealRecord({ ...base, route_type: 'bundle', true_cost_monthly: 5 });
+        const dearBundle = dealRecord({ ...base, route_type: 'bundle', true_cost_monthly: 30 });
+        const promo = dealRecord({ ...base, route_type: 'promo', true_cost_monthly: 5 });
+        await db.deals.insert(cheapBundle);
+        await db.deals.insert(dearBundle);
+        await db.deals.insert(promo);
+
+        // route_type=bundle AND priceMax=10 → only the cheap bundle (10 is inclusive,
+        // dear bundle 30 excluded, promo wrong route).
+        const out = await db.deals.listPublished({
+          filters: { service, routeType: 'bundle', priceMax: 10 },
+          sort: 'cost_asc',
+          limit: 50,
+          offset: 0,
+        });
+        expect(out.map((d) => d.id)).toEqual([cheapBundle.id]);
+        expect(await db.deals.countPublished({ service, routeType: 'bundle', priceMax: 10 })).toBe(
+          1,
+        );
+
+        // priceMax exactly at a deal's cost is inclusive.
+        expect(await db.deals.countPublished({ service, priceMax: 5 })).toBe(2); // cheapBundle + promo
+        expect(await db.deals.countPublished({ service, priceMax: 30 })).toBe(3); // all three
+      });
+
+      it('sorts cost_asc by true_cost_monthly, then id ascending (stable)', async () => {
+        const db = await makeDb();
+        const service = `svc-cost-${randomUUID()}`;
+        const mid = dealRecord({
+          service,
+          status: DealStatus.enum.published,
+          true_cost_monthly: 20,
+        });
+        const cheap = dealRecord({
+          service,
+          status: DealStatus.enum.published,
+          true_cost_monthly: 5,
+        });
+        const dear = dealRecord({
+          service,
+          status: DealStatus.enum.published,
+          true_cost_monthly: 40,
+        });
+        await db.deals.insert(mid);
+        await db.deals.insert(cheap);
+        await db.deals.insert(dear);
+        const out = await db.deals.listPublished({
+          filters: { service },
+          sort: 'cost_asc',
+          limit: 50,
+          offset: 0,
+        });
+        expect(out.map((d) => d.true_cost_monthly)).toEqual([5, 20, 40]);
+      });
+
+      it('sorts verified_desc by verified_at (newest first), nulls last, then id', async () => {
+        const db = await makeDb();
+        const service = `svc-verif-${randomUUID()}`;
+        const old = dealRecord({
+          service,
+          status: DealStatus.enum.published,
+          verified_at: '2026-01-01T00:00:00.000Z',
+        });
+        const recent = dealRecord({
+          service,
+          status: DealStatus.enum.published,
+          verified_at: '2026-06-01T00:00:00.000Z',
+        });
+        const unverified = dealRecord({
+          service,
+          status: DealStatus.enum.published,
+          verified_at: null,
+        });
+        await db.deals.insert(old);
+        await db.deals.insert(recent);
+        await db.deals.insert(unverified);
+        const out = await db.deals.listPublished({
+          filters: { service },
+          sort: 'verified_desc',
+          limit: 50,
+          offset: 0,
+        });
+        // newest verified first, the null-verified deal sorts LAST (least fresh).
+        expect(out.map((d) => d.id)).toEqual([recent.id, old.id, unverified.id]);
+      });
+
+      it('breaks ties by id ascending so equal-cost/equal-verified rows order identically', async () => {
+        // Equal sort keys must fall through to the id tiebreaker IDENTICALLY in both
+        // adapters, else offset pagination would skip/repeat across the two. Use the
+        // SAME cost and the SAME verified_at across rows so only the tiebreaker decides.
+        const db = await makeDb();
+        const service = `svc-tie-${randomUUID()}`;
+        const ids = [
+          '00000000-0000-4000-8000-000000000001',
+          '00000000-0000-4000-8000-000000000002',
+          '00000000-0000-4000-8000-000000000003',
+        ];
+        // Insert out of id order to prove ordering isn't insertion order.
+        for (const id of [ids[2]!, ids[0]!, ids[1]!]) {
+          await db.deals.insert(
+            dealRecord({
+              id,
+              service,
+              status: DealStatus.enum.published,
+              true_cost_monthly: 10,
+              verified_at: '2026-06-01T00:00:00.000Z',
+            }),
+          );
+        }
+        const byCost = await db.deals.listPublished({
+          filters: { service },
+          sort: 'cost_asc',
+          limit: 50,
+          offset: 0,
+        });
+        expect(byCost.map((d) => d.id)).toEqual(ids); // id ascending
+        const byVerified = await db.deals.listPublished({
+          filters: { service },
+          sort: 'verified_desc',
+          limit: 50,
+          offset: 0,
+        });
+        expect(byVerified.map((d) => d.id)).toEqual(ids); // equal verified_at → id ascending
+      });
+
+      it('paginates with limit + offset over the stable order without gaps/repeats', async () => {
+        const db = await makeDb();
+        const service = `svc-page-${randomUUID()}`;
+        // Five published deals with distinct ascending costs.
+        const costs = [1, 2, 3, 4, 5];
+        for (const c of costs) {
+          await db.deals.insert(
+            dealRecord({ service, status: DealStatus.enum.published, true_cost_monthly: c }),
+          );
+        }
+        const page1 = await db.deals.listPublished({
+          filters: { service },
+          sort: 'cost_asc',
+          limit: 2,
+          offset: 0,
+        });
+        const page2 = await db.deals.listPublished({
+          filters: { service },
+          sort: 'cost_asc',
+          limit: 2,
+          offset: 2,
+        });
+        const page3 = await db.deals.listPublished({
+          filters: { service },
+          sort: 'cost_asc',
+          limit: 2,
+          offset: 4,
+        });
+        expect(page1.map((d) => d.true_cost_monthly)).toEqual([1, 2]);
+        expect(page2.map((d) => d.true_cost_monthly)).toEqual([3, 4]);
+        expect(page3.map((d) => d.true_cost_monthly)).toEqual([5]);
+        // No id appears on two pages.
+        const ids = [...page1, ...page2, ...page3].map((d) => d.id);
+        expect(new Set(ids).size).toBe(5);
+        expect(await db.deals.countPublished({ service })).toBe(5);
+      });
+    });
+
     it('deals: findByDedupeKey returns the highest-confidence match (canonical)', async () => {
       const db = await makeDb();
       const { dedupeKey } = await import('../../src/domain/index.js');
