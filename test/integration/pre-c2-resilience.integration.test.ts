@@ -94,8 +94,16 @@ suite('Pre-C-2 DB resilience (Postgres)', () => {
 
   it('a re-crawl of identical content through the retry-wrapped repo stays single-candidate', async () => {
     const url = 'https://www.telekom.de/magenta-idem';
+    // The fetched text must contain the deal's grounding quotes, else the
+    // anti-hallucination rule (grounding_quote_in_source) routes the candidate to
+    // must-review (status in_review) instead of candidate — see makeLlmDeal.
     const container = makeContainer({
-      fetcher: new ScriptedFetcher({ [url]: { text: 'Disney+ inklusive', html: '<html></html>' } }),
+      fetcher: new ScriptedFetcher({
+        [url]: {
+          text: 'Disney+ ist im Tarif MagentaTV SmartStream enthalten.',
+          html: '<html></html>',
+        },
+      }),
       llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [makeLlmDeal()] }) }),
     });
     try {
