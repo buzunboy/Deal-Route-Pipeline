@@ -92,12 +92,19 @@ const FORBIDDEN_VALUE_KEYS = new Set<string>([
   'verified_by',
   'source_quote',
   'dedupe_key',
+  // Step 3: a source's reliability influences public ORDER only — the raw score is
+  // NEVER exposed (the freshness `trust` badge is the sole public trust signal). The
+  // DTO is an allow-list so reliability is excluded by construction, but strip it
+  // from a condition's open `value` too, as defence-in-depth.
+  'reliability_score',
+  'reliability',
 ]);
 
 /**
  * Coarse trust badge — a freshness band derived from `verified_at`, never the raw
- * `reliability_score`/`confidence`. v1 is freshness-only (reliability-blended
- * ranking is a later step). Bands:
+ * `reliability_score`/`confidence`. The PUBLIC trust signal is freshness-only by
+ * design: reliability blends into the feed's ORDER (Step 3) but is never surfaced
+ * as a value here. Bands:
  *  - `recent`   verified within RECENT_DAYS
  *  - `verified` verified within STALE_DAYS
  *  - `stale`    verified longer ago than STALE_DAYS, OR never verified (null)

@@ -478,6 +478,183 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
         expect(new Set(ids).size).toBe(5);
         expect(await db.deals.countPublished({ service })).toBe(5);
       });
+
+      // Step 3 — reliability-blended ranking. A source's reliability_score breaks
+      // ties on the primary key (cost / freshness), resolved by REGISTRABLE-DOMAIN
+      // join of deal.source_url ↔ source.url. These are the LSP proof for the
+      // tiebreaker: identical id order across in-memory ↔ Postgres.
+      //
+      // NB the >PUBLISHED_FETCH_CAP symmetry (both adapters take the same capped
+      // candidate set when the published corpus exceeds the 10,100-row fetch cap) is
+      // NOT seeded here — that many rows is impractical in the integration tier. It's
+      // pinned in the pure unit tier instead (`capByPrimary` in
+      // `src/domain/deal-record/published-ranking.test.ts`), and holds by
+      // construction: both adapters fetch in the SAME primary order then call the
+      // SAME `rankPublished`. These cases cover the tiebreaker semantics + pagination.
+      it('breaks an equal-cost tie by source reliability DESC (registrable-domain join), then id', async () => {
+        const db = await makeDb();
+        const service = `svc-rel-cost-${randomUUID()}`;
+        // Two active sources on distinct registrable domains, different reliability.
+        await db.sources.upsert(makeSource({ url: 'https://high-rel.de', reliability_score: 0.9 }));
+        await db.sources.upsert(makeSource({ url: 'https://low-rel.de', reliability_score: 0.1 }));
+        // Deals scraped at DEEP/subdomain paths of each source — the join must fold
+        // them to the source's registrable domain (finalUrl ≠ canonical url is normal).
+        const hiA = dealRecord({
+          id: '00000000-0000-4000-8000-0000000000a1',
+          service,
+          status: DealStatus.enum.published,
+          true_cost_monthly: 10,
+          source_url: 'https://www.high-rel.de/offer/a',
+        });
+        const hiB = dealRecord({
+          id: '00000000-0000-4000-8000-0000000000a2',
+          service,
+          status: DealStatus.enum.published,
+          true_cost_monthly: 10,
+          source_url: 'https://high-rel.de/offer/b',
+        });
+        const lo = dealRecord({
+          id: '00000000-0000-4000-8000-0000000000b1',
+          service,
+          status: DealStatus.enum.published,
+          true_cost_monthly: 10,
+          source_url: 'https://shop.low-rel.de/x',
+        });
+        // A deal whose registrable domain matches NO active source → neutral 0.5,
+        // so it sorts BETWEEN the high-reliability and low-reliability sources.
+        const neutral = dealRecord({
+          id: '00000000-0000-4000-8000-0000000000c1',
+          service,
+          status: DealStatus.enum.published,
+          true_cost_monthly: 10,
+          source_url: 'https://no-such-source.de/y',
+        });
+        for (const d of [lo, neutral, hiB, hiA]) await db.deals.insert(d); // insert out of order
+        const out = await db.deals.listPublished({
+          filters: { service },
+          sort: 'cost_asc',
+          limit: 50,
+          offset: 0,
+        });
+        // high (id asc within the tie), then neutral 0.5, then low.
+        expect(out.map((d) => d.id)).toEqual([hiA.id, hiB.id, neutral.id, lo.id]);
+        // countPublished is order-invariant — reliability never changes the set.
+        expect(await db.deals.countPublished({ service })).toBe(4);
+      });
+
+      it('breaks an equal-verified_at tie by source reliability DESC, then id', async () => {
+        const db = await makeDb();
+        const service = `svc-rel-verif-${randomUUID()}`;
+        await db.sources.upsert(makeSource({ url: 'https://hi.de', reliability_score: 0.8 }));
+        await db.sources.upsert(makeSource({ url: 'https://lo.de', reliability_score: 0.2 }));
+        const when = '2026-06-01T00:00:00.000Z';
+        const hi = dealRecord({
+          id: '00000000-0000-4000-8000-0000000000d1',
+          service,
+          status: DealStatus.enum.published,
+          verified_at: when,
+          source_url: 'https://hi.de/a',
+        });
+        const lo = dealRecord({
+          id: '00000000-0000-4000-8000-0000000000d2',
+          service,
+          status: DealStatus.enum.published,
+          verified_at: when,
+          source_url: 'https://lo.de/b',
+        });
+        for (const d of [lo, hi]) await db.deals.insert(d);
+        const out = await db.deals.listPublished({
+          filters: { service },
+          sort: 'verified_desc',
+          limit: 50,
+          offset: 0,
+        });
+        expect(out.map((d) => d.id)).toEqual([hi.id, lo.id]);
+      });
+
+      it('preserves a reliability score of 0 (a distrusted source sorts below neutral)', async () => {
+        const db = await makeDb();
+        const service = `svc-rel-zero-${randomUUID()}`;
+        // A deliberately-distrusted source (score 0) must NOT float up to neutral 0.5.
+        await db.sources.upsert(makeSource({ url: 'https://distrusted.de', reliability_score: 0 }));
+        const distrusted = dealRecord({
+          id: '00000000-0000-4000-8000-0000000000e1',
+          service,
+          status: DealStatus.enum.published,
+          true_cost_monthly: 10,
+          source_url: 'https://distrusted.de/x',
+        });
+        // No source row → neutral 0.5.
+        const neutral = dealRecord({
+          id: '00000000-0000-4000-8000-0000000000e2',
+          service,
+          status: DealStatus.enum.published,
+          true_cost_monthly: 10,
+          source_url: 'https://unknown.de/y',
+        });
+        for (const d of [distrusted, neutral]) await db.deals.insert(d);
+        const out = await db.deals.listPublished({
+          filters: { service },
+          sort: 'cost_asc',
+          limit: 50,
+          offset: 0,
+        });
+        // neutral (0.5) before distrusted (0) — proves 0 is NOT coerced to 0.5.
+        expect(out.map((d) => d.id)).toEqual([neutral.id, distrusted.id]);
+      });
+
+      it('reliability tiebreak is stable under limit+offset pagination (no gaps/repeats)', async () => {
+        // Six equal-cost deals across a high- and low-reliability source. The full
+        // order is high(id asc) then low(id asc); paginating it in pages of 2 must
+        // surface every row exactly once, identically across adapters. This guards
+        // the seam the tiebreaker could break (a tie-group straddling a page edge).
+        const db = await makeDb();
+        const service = `svc-rel-page-${randomUUID()}`;
+        await db.sources.upsert(makeSource({ url: 'https://hi.de', reliability_score: 0.9 }));
+        await db.sources.upsert(makeSource({ url: 'https://lo.de', reliability_score: 0.1 }));
+        const ids = [
+          '00000000-0000-4000-8000-000000000f01',
+          '00000000-0000-4000-8000-000000000f02',
+          '00000000-0000-4000-8000-000000000f03',
+          '00000000-0000-4000-8000-000000000f04',
+          '00000000-0000-4000-8000-000000000f05',
+          '00000000-0000-4000-8000-000000000f06',
+        ];
+        // hi gets f01/f03/f05; lo gets f02/f04/f06 — interleaved ids so the order is
+        // decided by reliability first, then id, NOT by id alone or insertion order.
+        const insert = async (id: string, host: string) =>
+          db.deals.insert(
+            dealRecord({
+              id,
+              service,
+              status: DealStatus.enum.published,
+              true_cost_monthly: 10,
+              source_url: `https://${host}/x`,
+            }),
+          );
+        await insert(ids[1]!, 'lo.de');
+        await insert(ids[0]!, 'hi.de');
+        await insert(ids[5]!, 'lo.de');
+        await insert(ids[4]!, 'hi.de');
+        await insert(ids[3]!, 'lo.de');
+        await insert(ids[2]!, 'hi.de');
+        // Expected: hi (f01,f03,f05) then lo (f02,f04,f06).
+        const expected = [ids[0]!, ids[2]!, ids[4]!, ids[1]!, ids[3]!, ids[5]!];
+        const page = async (offset: number) =>
+          (
+            await db.deals.listPublished({
+              filters: { service },
+              sort: 'cost_asc',
+              limit: 2,
+              offset,
+            })
+          ).map((d) => d.id);
+        expect(await page(0)).toEqual(expected.slice(0, 2));
+        expect(await page(2)).toEqual(expected.slice(2, 4));
+        expect(await page(4)).toEqual(expected.slice(4, 6));
+        const all = [...(await page(0)), ...(await page(2)), ...(await page(4))];
+        expect(new Set(all).size).toBe(6); // no gaps, no repeats across pages
+      });
     });
 
     it('deals: findByDedupeKey returns the highest-confidence match (canonical)', async () => {

@@ -5,6 +5,9 @@ import {
   eurFromMicros,
   SOURCELESS_RUN_BUCKET,
   DealRecordSchema,
+  buildReliabilityIndex,
+  capByPrimary,
+  rankPublished,
   type Source,
   type DealRecord,
   type CrawlRun,
@@ -19,7 +22,6 @@ import {
   type SubscriptionCatalogEntry,
   type PublishedQuery,
   type PublishedFilters,
-  type PublishedSort,
 } from '../../../domain/index.js';
 import type {
   Database,
@@ -46,7 +48,10 @@ export class InMemoryDb implements Database {
   // Evidence repo built first so the deal repo can resolve a deal's evidence hash
   // (the content-hash join behind findActiveByDedupeKeyAndHash).
   evidence: InMemoryEvidenceRepo = new InMemoryEvidenceRepo();
-  deals: DealRepository = new InMemoryDealRepo(this.evidence);
+  // The deal repo also reaches the source repo so listPublished can blend a
+  // source's reliability into the public-feed sort (Step 3) — the deal→source
+  // join by registrable domain. Same read both adapters do; LSP-identical.
+  deals: DealRepository = new InMemoryDealRepo(this.evidence, this.sources);
   crawlRuns: CrawlRunRepository = new InMemoryCrawlRunRepo();
   manualCapture: ManualCaptureRepository = new InMemoryManualCaptureRepo();
   fieldProposals: FieldProposalRepository = new InMemoryFieldProposalRepo();
@@ -84,7 +89,10 @@ class InMemorySourceRepo implements SourceRepository {
 
 class InMemoryDealRepo implements DealRepository {
   private store = new Map<string, DealRecord>();
-  constructor(private readonly evidence: InMemoryEvidenceRepo) {}
+  constructor(
+    private readonly evidence: InMemoryEvidenceRepo,
+    private readonly sources: SourceRepository,
+  ) {}
   async insert(d: DealRecord): Promise<void> {
     // Parse on write so schema defaults (e.g. affiliate_disclosure=true) are applied
     // exactly as the Postgres adapter applies them on read — substitutability (LSP):
@@ -114,12 +122,19 @@ class InMemoryDealRepo implements DealRepository {
       .map((d) => ({ ...d }));
   }
   async listPublished(query: PublishedQuery): Promise<DealRecord[]> {
-    const { filters, sort, limit, offset } = query;
+    // Mirror the Postgres adapter step-for-step so the two order identically (LSP):
+    //  1. status='published' (the trust boundary) + the optional filters,
+    //  2. take the top PUBLISHED_FETCH_CAP rows in deterministic PRIMARY-key order
+    //     (the in-memory twin of Postgres's `ORDER BY <primary>, id LIMIT CAP` — so a
+    //     >cap corpus is the same capped candidate set on both sides),
+    //  3. blend each deal's source reliability (registrable-domain join) as the
+    //     TIEBREAKER and slice the requested page — all in the shared pure ranker.
     const matches = [...this.store.values()].filter(
-      (d) => d.status === 'published' && matchesPublishedFilters(d, filters),
+      (d) => d.status === 'published' && matchesPublishedFilters(d, query.filters),
     );
-    matches.sort(comparePublished(sort));
-    return matches.slice(offset, offset + limit).map((d) => ({ ...d }));
+    const capped = capByPrimary(matches, query.sort);
+    const byDomain = buildReliabilityIndex(await this.sources.listByStatus('active'));
+    return rankPublished(capped, byDomain, query);
   }
   async countPublished(filters: PublishedFilters): Promise<number> {
     let n = 0;
@@ -184,33 +199,6 @@ function matchesPublishedFilters(d: DealRecord, f: PublishedFilters): boolean {
   if (f.routeType !== undefined && d.route_type !== f.routeType) return false;
   if (f.priceMax !== undefined && d.true_cost_monthly > f.priceMax) return false;
   return true;
-}
-
-/**
- * Comparator matching the Postgres `ORDER BY` byte-for-byte (LSP), including the
- * `id` ascending tiebreaker that makes `offset` pagination stable:
- *  - `cost_asc`      → true_cost_monthly ASC, then id ASC
- *  - `verified_desc` → verified_at DESC NULLS LAST, then id ASC
- * `verified_at` is canonical ISO-Z in both adapters (the Postgres mapper normalises
- * timestamptz → ISO-Z), so `localeCompare` on the strings is chronological. A null
- * `verified_at` sorts LAST (least fresh), matching `NULLS LAST` in Postgres.
- */
-function comparePublished(sort: PublishedSort): (a: DealRecord, b: DealRecord) => number {
-  if (sort === 'verified_desc') {
-    return (a, b) => {
-      const av = a.verified_at;
-      const bv = b.verified_at;
-      if (av !== bv) {
-        if (av === null) return 1; // nulls last
-        if (bv === null) return -1;
-        const cmp = bv.localeCompare(av); // descending
-        if (cmp !== 0) return cmp;
-      }
-      return a.id.localeCompare(b.id);
-    };
-  }
-  // cost_asc
-  return (a, b) => a.true_cost_monthly - b.true_cost_monthly || a.id.localeCompare(b.id);
 }
 
 class InMemoryCrawlRunRepo implements CrawlRunRepository {

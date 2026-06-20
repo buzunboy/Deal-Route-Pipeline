@@ -101,6 +101,56 @@ suite('P3 public read feed (Container + Postgres)', () => {
     expect(out[0]!.verified_at).toBe('2026-06-01T00:00:00.000Z');
   });
 
+  it('blends source reliability as an equal-cost tiebreaker over real Postgres (Step 3)', async () => {
+    // Two published deals at the SAME cost from sources of differing reliability:
+    // the more reliable source must rank first. Proves the deal→source
+    // registrable-domain join + the shared ranker behave identically on real SQL.
+    container = makeContainer({
+      fetcher: new ScriptedFetcher({}),
+      llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [makeLlmDeal()] }) }),
+    });
+    await container.db.sources.upsert(
+      makeSource({ url: 'https://high-rel.de', reliability_score: 0.9 }),
+    );
+    await container.db.sources.upsert(
+      makeSource({ url: 'https://low-rel.de', reliability_score: 0.1 }),
+    );
+    const service = `svc-${randomUUID()}`;
+    const hi = await insertPublished({
+      id: '00000000-0000-4000-8000-0000000000a1',
+      service,
+      true_cost_monthly: 10,
+      source_url: 'https://www.high-rel.de/offer', // subdomain folds to high-rel.de
+    });
+    const lo = await insertPublished({
+      id: '00000000-0000-4000-8000-0000000000b1',
+      service,
+      true_cost_monthly: 10,
+      source_url: 'https://low-rel.de/offer',
+    });
+    // A deal whose registrable domain matches no active source → neutral 0.5,
+    // sorting between the high- and low-reliability deals.
+    const mid = await insertPublished({
+      id: '00000000-0000-4000-8000-0000000000c1',
+      service,
+      true_cost_monthly: 10,
+      source_url: 'https://unknown-src.de/offer',
+    });
+
+    const out = await container.db.deals.listPublished({
+      filters: { service },
+      sort: 'cost_asc',
+      limit: 50,
+      offset: 0,
+    });
+    expect(out.map((d) => d.id)).toEqual([hi.id, mid.id, lo.id]);
+    // The raw reliability never reaches the projection — order-only.
+    const json = JSON.stringify(out.map((d) => toPublicDeal(d, { now: new Date() })));
+    expect(json).not.toContain('reliability');
+    expect(json).not.toContain('0.9');
+    expect(json).not.toContain('0.1');
+  });
+
   it('a genuinely-crawled, approved deal projects to a leak-free public DTO', async () => {
     const source = makeSource({ url: 'https://www.telekom.de/magenta-disney' });
     container = makeContainer({

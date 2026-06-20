@@ -151,6 +151,18 @@ so it carries the load-bearing trust contract:
   `evidence_id`/`verified_by`/condition `source_quote` ever appears (a contract test feeds a
   fully-populated record and asserts none leak). The only trust signal exposed is a **coarse
   freshness `trust` badge** derived from `verified_at` — never the raw reliability/confidence score.
+- **Reliability-blended ordering, order-only (Step 3).** The feed sort blends a source's
+  `reliability_score` as a **tiebreaker**: the primary key (`cost_asc` true-cost / `verified_desc`
+  freshness) decides order, ties break by reliability DESC then `id`. Reliability is resolved at
+  read time by the P1 **registrable-domain** deal→source join (`deal.source_url` ↔ `source.url`;
+  neutral `0.5` when no active source matches, a real `0` preserved). The raw score **never**
+  reaches the DTO — it lives only inside the comparator (`reliability_score`/`reliability` are also
+  in `FORBIDDEN_VALUE_KEYS` as defence-in-depth). One pure ranker
+  (`domain/deal-record/published-ranking.ts`) + one `registrableDomain` are shared by **both** DB
+  adapters, so the order is LSP-identical by construction: SQL does only `status`+filters+a
+  deterministic primary-ordered bounded fetch (`LIMIT PUBLISHED_FETCH_CAP`), then the shared ranker
+  applies the tiebreak + paginates. `countPublished` is order-invariant (reliability never changes
+  set membership). No schema change / no migration.
 - **Evidence as CDN URLs.** `evidence_screenshot_url` is derived purely from `evidence_id` + the
   deterministic evidence layout (`${S3_CDN_BASE_URL}/<evidence_id>/screenshot.png`); null when no
   CDN base is configured (no broken/relative URL). No screenshot-streaming route.

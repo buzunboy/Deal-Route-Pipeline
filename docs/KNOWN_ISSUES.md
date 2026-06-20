@@ -31,6 +31,24 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### `listPublished` reads ALL active sources per public request (reliability index rebuilt each call)
+- **Severity**: low (scaling ceiling, not a defect)
+- **Area**: api / db
+- **Location**: `src/adapters/db/postgres/postgres-db.ts` (`PgDealRepo.listPublished` → `this.sources.listByStatus('active')`), `src/adapters/db/in-memory/in-memory-db.ts` (same), the index built in `src/domain/deal-record/published-ranking.ts` (`buildReliabilityIndex`).
+- **What**: Step 3 resolves a deal's reliability at read time via a registrable-domain join, so every `GET /v1/deals` rebuilds the `registrableDomain → reliability` index from a full `listByStatus('active')` scan (no `limit`). Combined with the concurrent `listPublished` + `countPublished` the feed already runs, a public request now does ~3 DB reads, one of which grows with the active-source corpus. The read-time rebuild is the owner-decided design (no new column / no denormalised reliability), so this is the cost of that choice, not a bug.
+- **Why deferred**: harmless at DE-v1 scale (tens of active sources); nothing auto-publishes; the per-page cap already bounds the deals read. It's a scaling concern on an unauthenticated endpoint, the same class as the existing "no rate-limiting on `/v1/`" finding (a CDN/proxy in front is the planned mitigation).
+- **Fix-when**: when the active-source count grows materially OR `/v1/` traffic does — cache the registrable-domain → reliability index with a short TTL (it changes only as monitor/crawl nudges reliability), or fold the join into the `listPublished` SQL once a real Public Suffix List adapter exists (the multi-country trigger), so eTLD+1 isn't reimplemented in SQL before then.
+- **Logged**: 2026-06-20
+
+### Deal `id` accepts uppercase UUIDs (value-parity drift across adapters, ordering unaffected)
+- **Severity**: low (pre-existing; not reachable from the write path)
+- **Area**: domain / db
+- **Location**: `src/domain/deal-record/deal-record.ts` (`id: z.string().uuid()`); Postgres `uuid` column (`src/adapters/db/postgres/schema.ts`) read-back via `rowToDeal`.
+- **What**: `z.string().uuid()` accepts UPPERCASE hex with no case transform, while Postgres's `uuid` column normalises to lowercase on read. A deal hypothetically stored with an uppercase id would therefore read back with a DIFFERENT id string from the in-memory adapter (which preserves case) — a value-parity gap. Surfaced (and dismissed as a non-blocker) by the Step-3 LSP adversarial verification. Relative ORDER is unaffected: canonical-UUID lexical order matches Postgres byte order, and the Step-3 fetch-cap relies on that ordering equivalence, not on value equality.
+- **Why deferred**: not reachable from the real write path — every id is minted by `newId()` = `randomUUID()` (always canonical lowercase), and the contract suite only uses `randomUUID()`/explicit-lowercase ids. Pre-existing; Step 3 did not introduce it.
+- **Fix-when**: if an id ever enters from an external/untrusted source (import, API) — lowercase-normalise `id` at the schema boundary (`.toLowerCase()` transform) so both adapters round-trip the same string.
+- **Logged**: 2026-06-20
+
 ### `DealRecord` type doesn't force the defaulted fields to be present (runtime-guarded instead)
 - **Severity**: low
 - **Area**: domain / typing

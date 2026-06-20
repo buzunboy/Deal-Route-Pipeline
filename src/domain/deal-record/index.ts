@@ -6,3 +6,4 @@ export * from './eligibility.js';
 export * from './validity.js';
 export * from './deal-record.js';
 export * from './published-query.js';
+export * from './published-ranking.js';

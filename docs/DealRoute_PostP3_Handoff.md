@@ -2,8 +2,9 @@
 
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`4f4f077`**. **Post-C Steps 1 (P3 public API) AND 2 (GDPR/affiliate disclosure) are
-DONE + merged; the next step is Step 3 (reliability ranking).** This supersedes
+**`<set-on-merge>`** (Step 3). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
+disclosure) AND 3 (reliability-blended ranking) are DONE + merged; the next step is
+Step 4 (scheduler / unattended-run harness).** This supersedes
 `docs/DealRoute_PostC_Handoff.md` (kept, banner-marked). (`NEXT_SESSION_HANDOFF.md` was deleted.)_
 
 > **What shipped since the original audit** (all merged to `master`, in order):
@@ -15,8 +16,12 @@ DONE + merged; the next step is Step 3 (reliability ranking).** This supersedes
 > the **live-test template** `docs/testing/LIVE_TEST_TEMPLATE.md` (+ a recorded run in
 > `docs/testing/results/`) · the Firecrawl reference `docs/Firecrawl_Integration_Reference.md`
 > · **Step 2** (`affiliate_disclosure` default-true + `published_at`, set at approve,
-> in the public DTO; schema **v3**, migration **0010**). Deal-record `schema_version`
-> is now **3**; latest migration is **`drizzle/0010`**.
+> in the public DTO; schema **v3**, migration **0010**) · **Step 3** (reliability-blended
+> ranking: a source's `reliability_score` is a read-time TIEBREAKER in the public feed
+> sort — equal cost/freshness → more-reliable-source first → id; resolved by the P1
+> registrable-domain deal→source join, neutral 0.5 when no source matches; raw score
+> NEVER exposed, order-only; **no schema change / no migration**). Deal-record
+> `schema_version` is still **3**; latest migration is still **`drizzle/0010`**.
 
 > Binding rules still govern: `CLAUDE.md` + `.claude/rules/`
 > (`architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`).
@@ -85,9 +90,9 @@ invariants hold. **The implementation is sound; the foundation is strong.**
 **Defaults keep the agentic lane dark/safe:** `AGENT=noop`, `SEARCH_PROVIDER=stub`,
 `FETCHER=playwright`, `EVIDENCE_STORE=local`. Do not change these defaults.
 
-**Roadmap position:** post-C **Step 1 (public read API = P3) and Step 2 (GDPR/affiliate
-disclosure) are DONE + merged.** Remaining: **Step 3 (reliability ranking) ← NEXT**, Step 4
-(scheduler/ops), Step 5 (observability), Step 6 (multi-country). See §4 for each.
+**Roadmap position:** post-C **Steps 1 (public read API = P3), 2 (GDPR/affiliate
+disclosure) AND 3 (reliability-blended ranking) are DONE + merged.** Remaining: **Step 4
+(scheduler/ops) ← NEXT**, Step 5 (observability), Step 6 (multi-country). See §4 for each.
 
 ---
 
@@ -98,9 +103,10 @@ boundary, §3) and **Step 2** (GDPR/affiliate disclosure, §4). So the public `/
 the disclosure fields the landing page legally needs are in place. What remains (Steps 3–6)
 is real but **not launch-blocking** — each is a small, mostly decision-gated refinement.
 
-**Recommended next step: Step 3 (reliability-blended ranking)** — a pure feature step with
-no external dependency (see §4). Then Step 4 (scheduler/ops, + its two prerequisites),
-Step 5 (observability), Step 6 (multi-country, gated on a PSL adapter).
+**Recommended next step: Step 4 (scheduler / unattended-run harness)** — the highest
+operational risk for going live, and the step that promotes two deferred prerequisites
+to blocking (see §4). Step 3 (reliability-blended ranking) is DONE (§4). Then Step 5
+(observability), Step 6 (multi-country, gated on a PSL adapter).
 
 ---
 
@@ -141,9 +147,9 @@ audit found; it was fixed in the same session and is in `KNOWN_ISSUES.md` → Re
 ## 4. The remaining roadmap steps (post-C Steps 2–6) — sequence + prerequisites
 
 Each lists **what**, **why-now**, **the decision it needs first (if any)**, the
-**code surface**, and **tests required**. **Step 2 is DONE (below, kept for the record).**
-Remaining order: **Step 3 (NEXT) → Step 4 (+ its two prerequisites) → Step 5 → Step 6.**
-Steps 3–5 are independent and can reorder; Step 6 is furthest out.
+**code surface**, and **tests required**. **Steps 2 AND 3 are DONE (below, kept for the
+record).** Remaining order: **Step 4 (NEXT, + its two prerequisites) → Step 5 → Step 6.**
+Steps 4–5 are independent and can reorder; Step 6 is furthest out.
 
 ### Step 2 — GDPR + affiliate disclosure at publish — ✅ DONE (merged `4f4f077`, 2026-06-20)
 _Shipped as designed: `affiliate_disclosure` (bool, default **true** = over-disclose) +
@@ -177,7 +183,23 @@ Original plan below, retained for context:_
 - **Workflow-shaped?** No — small, decision-gated, trust-critical; do it inline after the
   human decision. `code-reviewer` + an adversarial-verify pass before merge.
 
-### Step 3 — Reliability-driven ranking + surface `last_verified` (TRUST MATURATION)
+### Step 3 — Reliability-driven ranking — ✅ DONE (merged `<set-on-merge>`, 2026-06-20)
+_Shipped as an owner-decided **read-time tiebreaker** (no new column, no migration). A
+source's `reliability_score` breaks ties on the primary sort key: `cost_asc` (equal
+`true_cost_monthly` → reliability DESC → id) and `verified_desc` (equal `verified_at` NULLS
+LAST → reliability DESC → id). Resolved by the P1 **registrable-domain** deal→source join
+(`deal.source_url` ↔ `source.url`); a deal with no matching active source → **neutral 0.5**
+(a real source score of `0` is preserved, not coerced). The raw score is **never exposed** —
+order-only; the freshness `trust` badge stays the sole public trust signal (added to the
+DTO's `FORBIDDEN_VALUE_KEYS` as defence-in-depth + an adversarial canary test). LSP-by-
+construction: one pure ranker (`src/domain/deal-record/published-ranking.ts`) + one
+`registrableDomain` used by **both** DB adapters; SQL does only `status`+filters+a
+deterministic primary-ordered bounded fetch (`LIMIT PUBLISHED_FETCH_CAP = MAX_OFFSET +
+MAX_LIMIT = 10100`), then the shared ranker does the reliability tiebreak + paginate.
+`countPublished` unchanged (reliability is order-only, never set membership). code-reviewer
+APPROVED + a 4-angle adversarial-verify pass returned SAFE-TO-MERGE (no leak / LSP parity /
+pagination-bound / neutral-and-zero all HOLD). 598 unit tests green. Original plan below,
+retained for context:_
 - **What:** blend `reliability_score` + freshness into the `listPublished` sort; surface
   `verified_at`/a coarse trust signal (already done as the `trust` badge in P3).
 - **Audit finding:** `reliability_score` is **fully wired for cadence/back-off**
@@ -185,20 +207,27 @@ Original plan below, retained for context:_
   used in any ranking** and **not exposed** anywhere. Data ready; surface blind.
 - **Decision needed:** the ranking formula + whether reliability may *silently* influence
   public order. The raw score must **never** be exposed (the public DTO forbids it; P3's
-  trust badge is freshness-only by design).
-  - **Recommendation:** read-time sort (no new column); freshness-primary with reliability
-    as a hidden down-weight/tiebreaker. Confirm the owner is comfortable with reliability
-    silently influencing public order.
+  trust badge is freshness-only by design). _Owner decisions made: freshness/cost-primary,
+  reliability as a TIEBREAKER (both sorts); read-time registrable-domain join; neutral 0.5
+  on no-match; raw score never exposed (order-only)._
 - **Caveat (from the audit):** a deal's reliability lives on its **source**; the public DTO
   has `source_url` but no source join. P1 split-by-source means each deal already carries
   a clean `source_url`, so the deal→source join is now well-defined — but confirm the join
-  path when implementing (it touches the `listPublished` query).
+  path when implementing (it touches the `listPublished` query). _Resolved: matched by
+  `registrableDomain` (the P1 dedupe fold), so `finalUrl` ≠ canonical `url` still joins._
 - **Code surface:** the `listPublished` sort (`PublishedSort` in
   `src/domain/deal-record/published-query.ts` + both DB adapters); the public DTO badge.
+  _As built: new pure `src/domain/deal-record/published-ranking.ts` (the formula + the
+  join); both `listPublished` adapters call it; both deal repos now reach the source repo._
 - **Tests:** pure ranking-function unit tests (table-driven); integration that sort order
   reflects reliability + freshness; LSP parity across both adapters (the new sort must
-  match in-memory ↔ Postgres, per the existing contract pattern).
+  match in-memory ↔ Postgres, per the existing contract pattern). _As built: 21 pure unit
+  tests; 4 reliability cases in the shared `database-contract` (both tiers); a reliability-
+  ordering integration test; a reliability no-leak canary in the DTO contract test._
 - **Workflow-shaped?** No — small, formula-driven, depends on P3's sort (done).
+- **Follow-up logged** (`docs/KNOWN_ISSUES.md`, low): `listPublished` rebuilds the
+  reliability index from a full active-source scan per public request — fine at DE-v1 scale,
+  cache/fold-into-SQL when source count or `/v1/` traffic grows.
 
 ### Step 4 — Scheduler / unattended-run harness (OPS; highest operational risk)
 - **What:** make the lanes actually RUN on a schedule. Today it's **pure external-cron**:
@@ -292,14 +321,13 @@ interactive multi-step BrowserAgent ("Option B").
   source-of-truth + the doc-hygiene rule) — keep it accurate when adding/retiring a doc.
 
 ## 7. Open decisions needing the OWNER (gate the next steps — not defaultable)
-1. **GDPR/affiliate disclosure (Step 2 — blocks the public page):** which fields are
-   legally mandatory on a published DE deal, and who supplies them (reviewer at approve-time
-   vs derived)? *Rec: legal enumerates the minimum; reviewer-set typed fields; DTO allow-list.*
+1. **GDPR/affiliate disclosure (Step 2 — blocks the public page):** ✅ DECIDED + DONE.
+   `affiliate_disclosure` (bool, default true) + `published_at`, reviewer-set at approve, DTO allow-list.
 2. **CDN exposure scope (the deployment gate):** same S3 prefix as the bundle, or a separate
-   public prefix? *Rec: separate public prefix; never make the bundle prefix listable.*
-3. **Reliability ranking exposure (Step 3):** may reliability silently influence public order
-   (raw score never exposed)? *Rec: yes — freshness-primary, reliability as hidden down-weight.*
-4. **Scheduler model (Step 4):** external cron (current) or in-process pg-boss? *Rec: external
+   public prefix? *Rec: separate public prefix; never make the bundle prefix listable.* (Still open — deploy gate.)
+3. **Reliability ranking exposure (Step 3):** ✅ DECIDED + DONE. Reliability may silently
+   influence public order as a TIEBREAKER (freshness/cost-primary); raw score never exposed (order-only).
+4. **Scheduler model (Step 4 — NEXT):** external cron (current) or in-process pg-boss? *Rec: external
    cron for v1; pg-boss only when concurrency justifies (then bound the pool + advisory lock).*
 
 ## 8. Workflow / environment facts (these bit earlier sessions — don't rediscover)
@@ -326,15 +354,16 @@ interactive multi-step BrowserAgent ("Option B").
 
 ## 9. First moves for the fresh session
 1. Confirm orientation reads + green baseline (`npm install && npm run check && npm run build`).
-   Steps 1 + 2 are DONE — no foundation repair pending; you're starting Step 3.
-2. **Build Step 3 — reliability-blended ranking** (§4). The one decision it needs first
-   (put to the owner via `AskUserQuestion`): the ranking formula + whether reliability may
-   *silently* influence public order — the raw `reliability_score` must **never** be exposed
-   (the public DTO's `trust` badge is freshness-only by design). Recommend read-time sort
-   (no new column), freshness-primary with reliability as a hidden down-weight. NB the
-   deal→source join is now well-defined (P1 split-by-source gives each deal a clean `source_url`).
-3. Then Step 4 (scheduler + its two prerequisites: monitor-finalUrl + Postgres-contract-isolation)
-   → Step 5 (observability) → Step 6 (multi-country, gated on the PSL adapter).
+   Steps 1 + 2 + 3 are DONE — no foundation repair pending; you're starting Step 4.
+2. **Build Step 4 — scheduler / unattended-run harness** (§4). The decision it needs first
+   (put to the owner via `AskUserQuestion`): external cron (the standing decision) vs wiring
+   the in-process pg-boss worker now. Recommend deployment templates + a documented cron
+   schedule for v1; pg-boss only when concurrency/autonomy justify it. **Promote its TWO
+   deferred prerequisites to blocking when you start** (both in `docs/KNOWN_ISSUES.md`):
+   (a) monitor source-scoped lookups key off `source.url` not the resolved `finalUrl`
+   (published deals from a redirecting source never auto-expire under unattended scheduling),
+   and (b) if pg-boss is wired, bound its pool + add the source-level advisory lock.
+3. Then Step 5 (observability) → Step 6 (multi-country, gated on the PSL adapter).
 4. Every change: unit + integration tests (live for new external edges); `code-reviewer` +
    an adversarial-verify pass on anything trust/publish/schema; docs updated (CLAUDE.md
    Commands + Repo layout, README, ARCHITECTURE, roadmap §5; **and `docs/testing/LIVE_TEST_TEMPLATE.md`

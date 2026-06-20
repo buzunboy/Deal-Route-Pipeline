@@ -24,6 +24,9 @@ import {
   CostSummarySchema,
   eurFromMicros,
   SOURCELESS_RUN_BUCKET,
+  buildReliabilityIndex,
+  rankPublished,
+  PUBLISHED_FETCH_CAP,
 } from '../../../domain/index.js';
 import type {
   Source,
@@ -107,7 +110,10 @@ export class PostgresDb implements Database {
     retrier: DbRetrier,
   ) {
     this.sources = new PgSourceRepo(db, retrier);
-    this.deals = new PgDealRepo(db, retrier);
+    // The deal repo reaches the source repo so listPublished can blend a source's
+    // reliability into the public-feed sort (Step 3, deal→source registrable-domain
+    // join). Same read the in-memory adapter does; ordering stays LSP-identical.
+    this.deals = new PgDealRepo(db, retrier, this.sources);
     this.crawlRuns = new PgCrawlRunRepo(db, retrier);
     this.evidence = new PgEvidenceRepo(db, retrier);
     this.manualCapture = new PgManualCaptureRepo(db, retrier);
@@ -213,6 +219,13 @@ class PgSourceRepo extends PgRepo implements SourceRepository {
 }
 
 class PgDealRepo extends PgRepo implements DealRepository {
+  constructor(
+    db: Db,
+    retrier: DbRetrier,
+    private readonly sources: SourceRepository,
+  ) {
+    super(db, retrier);
+  }
   async insert(d: DealRecord): Promise<void> {
     // Idempotent under the (dedupe_key, evidence_id) unique index: a concurrent
     // duplicate insert for the same offer+capture is a no-op rather than a dupe row.
@@ -309,15 +322,26 @@ class PgDealRepo extends PgRepo implements DealRepository {
     );
   }
   async listPublished(query: PublishedQuery): Promise<DealRecord[]> {
-    const { sort, limit, offset } = query;
+    const { sort } = query;
     // status='published' is the FIRST predicate (the trust boundary), then the
     // optional filters AND in — same conditional-predicate idiom as listBySourceUrl.
     const where = and(
       eq(schema.deals.status, 'published'),
       ...publishedFilterPredicates(query.filters),
     );
-    // Stable order: the requested key, then id ASC as a deterministic tiebreaker so
-    // offset pagination never skips/repeats. Mirrors the in-memory comparator (LSP).
+    // SQL does status + filters + a DETERMINISTIC primary-key-ordered bounded fetch
+    // ONLY. The final order (reliability tiebreak) + LIMIT/OFFSET happen in the
+    // shared pure ranker, so both adapters order byte-identically without
+    // reimplementing the deal→source registrableDomain join in SQL.
+    //
+    // The fetch is capped at PUBLISHED_FETCH_CAP rows taken in PRIMARY-key order
+    // (the deepest reachable page is [offset=PUBLISHED_MAX_OFFSET, +MAX_LIMIT) — the
+    // HTTP boundary 400s anything past the offset cap). The cap MUST be applied in a
+    // deterministic order (hence the ORDER BY before the LIMIT) so a >cap published
+    // corpus yields the same capped candidate set as the in-memory adapter; the
+    // reliability tiebreak only permutes rows within equal-primary groups, so it can
+    // never move a row across the cap boundary. select() returns deal columns only —
+    // reliability is never selected, so it can't reach rowToDeal / the public DTO.
     const orderBy =
       sort === 'verified_desc'
         ? [sql`${schema.deals.verifiedAt} desc nulls last`, asc(schema.deals.id)]
@@ -328,10 +352,11 @@ class PgDealRepo extends PgRepo implements DealRepository {
         .from(schema.deals)
         .where(where)
         .orderBy(...orderBy)
-        .limit(limit)
-        .offset(offset),
+        .limit(PUBLISHED_FETCH_CAP),
     );
-    return rows.map(rowToDeal);
+    const deals = rows.map(rowToDeal);
+    const byDomain = buildReliabilityIndex(await this.sources.listByStatus('active'));
+    return rankPublished(deals, byDomain, query);
   }
   async countPublished(filters: PublishedFilters): Promise<number> {
     const where = and(eq(schema.deals.status, 'published'), ...publishedFilterPredicates(filters));

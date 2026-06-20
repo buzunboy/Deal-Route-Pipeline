@@ -281,8 +281,15 @@ scripted fake → candidates + proposed sources persisted) + a gated live smoke
   exposed in the public `/v1/` DTO. No PII stored; own-screenshot evidence (not republished
   T&C) confirmed. Legal-confirmed field set. Trust-verified (nothing auto-publishes; every
   published deal carries a disclosure decision; DTO leaks nothing new).
-- **Reliability-driven trust** maturation: feed `reliability_score` into ranking
-  and cadence; surface `last_verified` prominently (the product's trust signal).
+- **Reliability-driven trust** maturation — **DONE (Step 3, 2026-06-20).** `reliability_score`
+  now blends into the public-feed ranking as a read-time **tiebreaker** (equal cost/freshness
+  → more-reliable source first → id), resolved by the P1 registrable-domain deal→source join
+  (neutral 0.5 when no source matches). The raw score is **never exposed** (order-only; the
+  freshness `trust` badge stays the sole public trust signal). No schema change / no migration;
+  one pure ranker (`src/domain/deal-record/published-ranking.ts`) shared by both DB adapters
+  (LSP). Reliability was already wired into **cadence** (`source-policy.ts applyCrawlOutcome`,
+  crawl + monitor); `last_verified` is surfaced as the P3 freshness badge. code-reviewer +
+  adversarial-verify clean.
 - **Multi-country** (plan "Later"): the `Country`/`Currency` enums and
   `registrableDomain` eTLD+1 approximation are .de-v1 scoped — generalize (a real
   Public Suffix List, per-country vocab/currency) when expanding.

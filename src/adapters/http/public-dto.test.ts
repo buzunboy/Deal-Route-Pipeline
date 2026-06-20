@@ -32,6 +32,10 @@ function fullyPopulatedDeal(overrides: Partial<DealRecord> = {}): DealRecord {
               status: 'SECRET-INTERNAL-QUOTE',
               verified_by: 'reviewer-LEAK-CANARY',
               confidence: 'LEAK-CANARY-GROUNDING',
+              // Step 3 reliability is order-only — a value smuggling it under a
+              // condition must be stripped (defence-in-depth on the open object).
+              reliability_score: 'LEAK-CANARY-RELIABILITY',
+              reliability: 'LEAK-CANARY-RELIABILITY',
             },
             source_quote: 'Nur mit aktivem MagentaTV-Tarif. SECRET-INTERNAL-QUOTE',
           },
@@ -88,6 +92,9 @@ const FORBIDDEN_KEYS = [
   'verified_by',
   'source_quote',
   'dedupe_key',
+  // Step 3: a source's reliability is ORDER-ONLY — never a public field.
+  'reliability_score',
+  'reliability',
 ];
 const FORBIDDEN_VALUES = [
   'SECRET-INTERNAL-QUOTE',
@@ -96,6 +103,7 @@ const FORBIDDEN_VALUES = [
   'LEAK-CANARY-GROUNDING',
   'LEAK-CANARY-PROPOSAL',
   'reviewer-LEAK-CANARY',
+  'LEAK-CANARY-RELIABILITY',
 ];
 
 /** Recursively collect every object key + every string value reachable in a value. */
@@ -247,6 +255,21 @@ describe('toPublicDeal — the no-leak trust contract', () => {
       walk(dto, [], strings);
       expect(strings).not.toContain('0.42');
       expect(strings).not.toContain(0.42 as unknown as string);
+    });
+
+    it('NEVER exposes a reliability key or value — reliability is order-only (Step 3)', () => {
+      // A source's reliability_score influences feed ORDER but must never reach the
+      // public projection. The DTO is an allow-list, so reliability is excluded by
+      // construction; this pins it explicitly + against a condition smuggling it.
+      const dto = toPublicDeal(fullyPopulatedDeal({ verified_at: now.toISOString() }), { now });
+      const keys: string[] = [];
+      const strings: string[] = [];
+      walk(dto, keys, strings);
+      expect(keys).not.toContain('reliability_score');
+      expect(keys).not.toContain('reliability');
+      expect(strings.some((s) => s.includes('LEAK-CANARY-RELIABILITY'))).toBe(false);
+      // The condition's legitimate `product` key still survives the strip.
+      expect(dto.eligibility.conditions[0]!.value).toEqual({ product: 'MagentaTV' });
     });
   });
 });
