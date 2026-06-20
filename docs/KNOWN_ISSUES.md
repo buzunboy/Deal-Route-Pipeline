@@ -262,6 +262,22 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Resolved
 
+### RSS feed items bypassed zod validation at the boundary (B1) — RESOLVED 2026-06-20
+- **Was**: high (broken invariant "never trust raw external data"), feed/ingestion,
+  `src/adapters/feed/rss-feed-reader.ts` (`parseFeed`).
+- **Problem**: `parseFeed` built `FeedItem[]` from regex-extracted XML with no `zod.parse()`;
+  `item.link` reached `fetcher.fetch()` with its scheme/format unvalidated, and title/summary
+  entered the LLM triage prompt. Surfaced by the 2026-06-20 full audit. Not exploitable
+  (triage already `frameUntrusted`-wraps the item; link still hits PoliteFetcher) but a genuine
+  invariant violation.
+- **Resolution**: added `FeedItemSchema` (zod) — `link` validated as an http/https URL (via a
+  throw-safe `isHttpUrl` refine), title/summary strings, publishedAt ISO-or-null. `parseFeed`
+  `safeParse`s each item and DROPS failures (keeps the "bad feed → []"/skip-bad-item resilience).
+  5 adversarial unit tests added (non-URL link; `javascript:`/`file:`/`data:`/`ftp:` schemes
+  dropped; a valid item survives alongside a dropped one; injection strings in title/summary
+  preserved verbatim on a valid item — framed untrusted downstream, not parseFeed's job to strip).
+  `npm run check` green (537 tests).
+
 ### `cdnBaseUrl` config parsed but not yet consumed — RESOLVED 2026-06-20
 - **Was**: low, api / config, `src/config/config.ts` (`evidence.s3.cdnBaseUrl`, env `S3_CDN_BASE_URL`).
 - **Problem**: the field was added in P2 (S3 adapter) for the upcoming public read API but nothing

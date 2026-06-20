@@ -1,5 +1,29 @@
+import { z } from 'zod';
 import type { FeedReader, FeedItem, FeedReadOptions } from '../../application/ports/index.js';
 import { withAbortableTimeout, TimeoutError } from '../shared/retry.js';
+
+/**
+ * Boundary schema for a parsed feed item. RSS/Atom is UNTRUSTED external input, so
+ * every item is validated INTO this typed shape before it leaves the adapter — the
+ * `link` must be an http/https URL (it flows into `fetcher.fetch()` and the
+ * registrable-domain proposal; a `javascript:`/`file:`/non-URL string must never
+ * reach those), title/summary are strings (downstream the LLM prompt also frames
+ * them as untrusted), and `publishedAt` is an ISO string or null. An item that
+ * fails is DROPPED (a single malformed lead never crashes a batch — the reader's
+ * resilience contract), not coerced.
+ */
+export const FeedItemSchema = z.object({
+  title: z.string(),
+  // `.url()` is the shape gate (rejects non-URLs); `.refine(isHttpUrl)` is the
+  // SECURITY control — the scheme allow-list that blocks javascript:/file:/data:/ftp:
+  // before a link reaches fetch(). Keep both; don't collapse them.
+  link: z
+    .string()
+    .url()
+    .refine((u) => isHttpUrl(u), { message: 'link must be an http(s) URL' }),
+  summary: z.string(),
+  publishedAt: z.string().datetime().nullable(),
+});
 
 /**
  * No-dependency RSS/Atom feed reader (the `FeedReader` port's default adapter).
@@ -57,9 +81,23 @@ export function parseFeed(xml: string): FeedItem[] {
     const publishedAt = normalizeDate(
       tagText(block, 'pubDate') || tagText(block, 'updated') || tagText(block, 'published'),
     );
-    items.push({ title, link: link.trim(), summary, publishedAt });
+    // Validate UNTRUSTED feed data at the boundary before it leaves the adapter
+    // (never trust raw external data). A bad item (non-URL/non-http link, etc.) is
+    // dropped, not coerced — one malformed lead never crashes the batch.
+    const parsed = FeedItemSchema.safeParse({ title, link: link.trim(), summary, publishedAt });
+    if (parsed.success) items.push(parsed.data);
   }
   return items;
+}
+
+/** Safe (never-throws) check that a string parses to an http/https URL. */
+function isHttpUrl(value: string): boolean {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 /** All `<tag …>…</tag>` inner blocks (non-greedy, case-insensitive). */

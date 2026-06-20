@@ -5,7 +5,7 @@ The crawl / LLM-extraction / verification / monitoring service for **DealRoute**
 > Full design: `docs/DealRoute_Crawl_Pipeline_Plan.md` · Seed sources: `docs/DealRoute_Seed_List_DE.md` (read on demand).
 > Phase C plan + roadmap + remaining audit gaps + recommended build sequence: `docs/DealRoute_Phase_C_and_Roadmap.md` (read before Phase C / unattended-run work).
 > Phase C **build plan (C-1, search-API-first)** — standalone fresh-session prompt: `docs/DealRoute_Phase_C_Plan.md` (resolved decisions + slice-by-slice build order + guardrail checklist).
-> Next-steps brief for a fresh session (Pre-C-2 → Pre-C-3 → Phase C, with the env/workflow gotchas): `docs/NEXT_SESSION_HANDOFF.md`.
+> **Next-steps brief for a fresh session (post-P3 — START HERE for what's next):** `docs/DealRoute_PostP3_Handoff.md` (full audit + the remaining roadmap Steps 2–6 with prerequisites + env/workflow gotchas). Supersedes `docs/DealRoute_PostC_Handoff.md` (its Step 1 = P3, done) and the stale pre-Phase-C `docs/NEXT_SESSION_HANDOFF.md`.
 > Detailed standards auto-load from `.claude/rules/` — `architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`.
 
 ## Non-negotiable invariants (always)
