@@ -39,7 +39,7 @@ Stack: **TypeScript (Node 20+, strict)** · zod · Playwright/Firecrawl · Anthr
 - `src/adapters/` — `fetcher/` (playwright, firecrawl, page-classifier, polite-fetcher [robots + per-domain rate-limit; injectable `RobotsClient` seam]) · `search/` (stub [default off-switch], brave, firecrawl `/v1/search`; behind the `SearchProvider` port) · `agent/` (search-browser-agent [thin C-1 `BrowserAgent`: search → polite-fetch → page material]) · `feed/` (rss-feed-reader) · `llm/` (anthropic, openai, stub, pricing, json-recovery) · `evidence-store/` (local-fs; atomic temp-then-rename write + structural-completeness verify on read; `save()` rejects hollow captures) · `db/` (in-memory, postgres+drizzle [tuned pool + statement_timeout + `pool.on('error')`], `postgres/db-resilience` [transient-error classification + bounded retry], migrate) · `queue/` (in-memory, pg-boss) · `http/` (review-api, test-page) · `cli/` · `seeds/` · `logger/` · `shared/retry`
 - `src/composition/container.ts` — the single composition root · `src/config/` — env→typed config (zod) · `docker-entrypoint.sh` — applies migrations on container start, then runs the CLI
 - `test/` — `contracts/` (port suites), `fixtures/golden/`, `golden/`, `fakes/`, `factories/`, `integration/` (real Container+Postgres, hermetic), `live/` (real sites+LLM, scheduled) · `drizzle/` — generated migrations · CI: `.github/workflows/{ci,live}.yml`
-- `docs/` — design + seed list · `ARCHITECTURE.md` — layers + how to add a source/model/condition
+- `docs/` — design + seed list · `docs/KNOWN_ISSUES.md` — deferred-findings register (see Working habits) · `ARCHITECTURE.md` — layers + how to add a source/model/condition
 
 ## Working habits
 - Small, reviewable commits; tests for all pure logic before wiring I/O.
@@ -47,4 +47,5 @@ Stack: **TypeScript (Node 20+, strict)** · zod · Playwright/Firecrawl · Anthr
 - After scaffolding, **update Commands + Repo layout above**.
 - **Ask before** changing the deal-record schema, the verification rules, or anything affecting trust.
 - Build **Phase A** (deterministic core) first and keep it working; B/C slot in.
+- **Log deferred findings.** When you spot a real issue (bug, fragility, tech debt, gap, open design question) that you are NOT fixing in the current change, append an entry to `docs/KNOWN_ISSUES.md` using the template there (severity, location, what, why-deferred, fix-when) — so nothing real is silently forgotten. Fix-it-now still wins for anything trivial or trust-critical; this is for the "by the way, this is worth fixing later" findings. Check `docs/KNOWN_ISSUES.md` when starting related work.
 - Helpers: skills in `.claude/skills/` (`add-source`, `dry-run-extract`, `promote-field-proposal`); review agents in `.claude/agents/` (`code-reviewer`, `extraction-evaluator`).

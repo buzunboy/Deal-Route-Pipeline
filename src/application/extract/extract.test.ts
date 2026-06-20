@@ -73,6 +73,34 @@ describe('ExtractUseCase', () => {
     await expect(runExtract('not json at all')).rejects.toThrow();
   });
 
+  it('logs a warning when the LLM reply was truncated (not a silent zero-candidate outcome)', async () => {
+    // A valid (non-truncated-shaped) JSON body but the adapter flags truncation —
+    // the use-case must surface it so an operator can tell truncation from a real miss.
+    const llm = new FakeLlm(JSON.stringify({ deals: [makeLlmDeal()] }), /* truncated */ true);
+    const logger = new FakeLogger();
+    const uc = new ExtractUseCase(llm, logger);
+    await uc.execute({
+      pageText: PAGE_TEXT,
+      sourceUrl: 'https://www.telekom.de/magenta-tv',
+      targetService: 'Disney+',
+      vocabulary: SEED_VOCABULARY,
+    });
+    expect(logger.entries.some((e) => e.level === 'warn' && /truncat/i.test(e.msg))).toBe(true);
+  });
+
+  it('does NOT warn about truncation on a normal (non-truncated) reply', async () => {
+    const llm = new FakeLlm(JSON.stringify({ deals: [makeLlmDeal()] }), false);
+    const logger = new FakeLogger();
+    const uc = new ExtractUseCase(llm, logger);
+    await uc.execute({
+      pageText: PAGE_TEXT,
+      sourceUrl: 'https://www.telekom.de/magenta-tv',
+      targetService: 'Disney+',
+      vocabulary: SEED_VOCABULARY,
+    });
+    expect(logger.entries.some((e) => /truncat/i.test(e.msg))).toBe(false);
+  });
+
   it('throws ExtractionFailedError carrying the already-spent cost on a boundary failure', async () => {
     // The LLM call ran (and was billed) before the boundary rejected its output.
     // The thrown error must surface that cost so the caller can charge the budget.

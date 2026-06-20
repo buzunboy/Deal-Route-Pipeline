@@ -93,6 +93,17 @@ export class ExtractUseCase {
     // boundary/processing throw still surfaces it to the caller (budget accounting).
     const costEur = response.usage.costEur;
 
+    // A reply truncated at the output-token cap is usually invalid JSON that the
+    // boundary then rejects — which would otherwise look like a silent "this page
+    // had no offers". Surface it loudly so the zero/partial-candidate outcome is
+    // attributable to truncation (raise LLM_MAX_OUTPUT_TOKENS), not a real miss.
+    if (response.truncated) {
+      this.logger.warn('extraction LLM reply was truncated at the token limit', {
+        sourceUrl: input.sourceUrl,
+        outputTokens: response.usage.outputTokens,
+      });
+    }
+
     let candidates: ExtractedCandidate[];
     try {
       // Boundary: raw model text → typed deals (throws BoundaryValidationError on bad shape).

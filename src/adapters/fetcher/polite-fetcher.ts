@@ -13,6 +13,10 @@ export interface RobotsClient {
 }
 export interface RobotsResponse {
   ok: boolean;
+  /** HTTP status — lets loadRobots distinguish 404 (no robots) from 5xx (fail-closed). */
+  status: number;
+  /** Final URL after redirects — lets loadRobots reject a cross-origin redirect. */
+  url: string;
   text(): Promise<string>;
 }
 
@@ -20,6 +24,9 @@ export interface RobotsResponse {
 export const globalFetchRobotsClient: RobotsClient = {
   fetch: (url, init) => fetch(url, init),
 };
+
+/** Cap the robots.txt body we parse — a hostile site shouldn't OOM us via robots. */
+const MAX_ROBOTS_BYTES = 512 * 1024; // 512 KB is far beyond any real robots.txt
 
 /**
  * Politeness decorator around any `Fetcher` (Decorator pattern, behind the port).
@@ -98,26 +105,63 @@ export class PoliteFetcher implements Fetcher {
   private async isAllowed(url: string): Promise<boolean> {
     const origin = originOf(url);
     if (origin === null) return true;
+    let rules = this.robotsCache.get(origin) ?? null;
     if (!this.robotsCache.has(origin)) {
-      this.robotsCache.set(origin, await this.loadRobots(origin));
+      rules = await this.loadRobots(origin);
+      // Cache authoritative results only. A 5xx fail-closed (DENY_ALL) is TRANSIENT
+      // — caching it process-lifetime would block a recovered origin for the rest
+      // of a long batch/crawl, so we re-check it on the next hit.
+      if (rules !== DENY_ALL) this.robotsCache.set(origin, rules);
     }
-    const rules = this.robotsCache.get(origin) ?? null;
     if (rules === null) return true; // no robots / unreachable → allowed
     return rules.isAllowed(pathOf(url));
   }
 
   private async loadRobots(origin: string): Promise<RobotsRules | null> {
+    const robotsUrl = `${origin}/robots.txt`;
     try {
       const res = await withTimeout(
-        this.robotsClient.fetch(`${origin}/robots.txt`, {
-          headers: { 'user-agent': this.opts.userAgent },
-        }),
+        this.robotsClient.fetch(robotsUrl, { headers: { 'user-agent': this.opts.userAgent } }),
         5000,
       );
-      if (!res.ok) return null;
-      return parseRobots(await res.text(), this.opts.userAgent);
+
+      // A redirect that lands on a DIFFERENT origin is not an authoritative
+      // robots.txt for this origin — ignore it (treat as no-robots = allowed)
+      // rather than applying another site's rules to ours.
+      if (res.url && originOf(res.url) !== origin) {
+        this.opts.logger.warn('robots.txt redirected cross-origin; ignoring', {
+          origin,
+          finalUrl: res.url,
+        });
+        return null;
+      }
+
+      if (res.ok) {
+        const body = await res.text();
+        if (Buffer.byteLength(body, 'utf8') > MAX_ROBOTS_BYTES) {
+          // An absurdly large robots.txt is treated as no-robots rather than parsed.
+          this.opts.logger.warn('robots.txt exceeds size cap; ignoring', { origin });
+          return null;
+        }
+        return parseRobots(body, this.opts.userAgent);
+      }
+
+      // A 5xx means the server is failing — RFC 9309 says treat it as disallow-all
+      // temporarily (fail CLOSED), not as a license to crawl everything. (Not cached
+      // long-term: the cache is per-process, so a later run re-checks.)
+      if (res.status >= 500) {
+        this.opts.logger.warn('robots.txt returned 5xx; failing closed (disallow-all)', {
+          origin,
+          status: res.status,
+        });
+        return DENY_ALL;
+      }
+
+      // 404/410/other 4xx → no robots rules for us → allowed.
+      return null;
     } catch {
-      // Unreachable robots.txt must not block crawling — fail open, but logged.
+      // Unreachable robots.txt (network error/timeout) must not block crawling —
+      // fail open, but logged.
       this.opts.logger.warn('robots.txt unreachable; proceeding', { origin });
       return null;
     }
@@ -152,6 +196,9 @@ class RobotsRules {
     return best === null || best.type === 'allow';
   }
 }
+
+/** Disallow-all rules — the fail-closed result for a 5xx robots.txt (RFC 9309). */
+const DENY_ALL = new RobotsRules([{ type: 'disallow', path: '/' }]);
 
 interface RobotsGroup {
   agents: string[];

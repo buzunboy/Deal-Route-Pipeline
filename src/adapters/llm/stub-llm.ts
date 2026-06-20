@@ -20,6 +20,7 @@ export class StubLlm implements Llm {
       text: this.resolveJson(),
       usage: { inputTokens: 0, outputTokens: 0, costEur: 0 },
       model: 'stub',
+      truncated: false,
     };
   }
 

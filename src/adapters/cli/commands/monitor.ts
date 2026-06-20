@@ -28,7 +28,24 @@ export async function monitor(config: Config, args: MonitorArgs): Promise<void> 
     let expired = 0;
     let blocked = 0;
     let failed = 0;
+    let budgetStopped = false;
     for (const id of ids) {
+      // Aggregate daily €-budget guard: a monitor pass makes no LLM call itself, but
+      // a content_changed result re-crawls via CrawlSource — a paid Lane-A run that
+      // logs cost on crawl_runs. So an unattended monitor batch can push past the
+      // daily ceiling; stop before processing more sources once it's reached. (No
+      // per-run €-cap to clamp here — the re-crawl respects its own caps; this is
+      // just the batch-level stop, mirroring ingest/discover.) Disabled at 0.
+      const budget = await container.dailyBudgetGuard.check();
+      if (!budget.ok) {
+        budgetStopped = true;
+        console.log(
+          `\nStopped early: daily budget reached (€${budget.spentTodayEur.toFixed(2)} spent today, ` +
+            `ceiling €${config.agent.dailyBudgetEur}).`,
+        );
+        break;
+      }
+
       // Per-source isolation: one bad source must never abort the batch
       // (`architecture.md`: a failed source is logged and never crashes the run).
       try {
@@ -45,7 +62,8 @@ export async function monitor(config: Config, args: MonitorArgs): Promise<void> 
       }
     }
     console.log(
-      `\nDone. re-queued=${changed} expired=${expired} manual-capture=${blocked} failed=${failed}.`,
+      `\nDone${budgetStopped ? ' (budget-stopped)' : ''}. ` +
+        `re-queued=${changed} expired=${expired} manual-capture=${blocked} failed=${failed}.`,
     );
   } finally {
     await container.shutdown();

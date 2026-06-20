@@ -25,6 +25,14 @@ export interface LlmResponse {
     costEur: number;
   };
   model: string;
+  /**
+   * True when the model stopped because it hit the output-token limit
+   * (Anthropic `stop_reason==='max_tokens'`, OpenAI `finish_reason==='length'`).
+   * A truncated reply is usually invalid JSON that the boundary then rejects as a
+   * silent zero-candidate outcome — surfacing the flag lets the caller log/flag it
+   * (so a "this source extracts nothing" regression is visible, not silent).
+   */
+  truncated: boolean;
 }
 
 export interface Llm {

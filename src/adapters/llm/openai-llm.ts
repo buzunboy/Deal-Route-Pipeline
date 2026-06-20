@@ -45,7 +45,8 @@ export class OpenAiLlm implements Llm {
       { retries: 2, baseDelayMs: 500, isRetryable: isTransient },
     );
 
-    const text = completion.choices[0]?.message?.content ?? '';
+    const choice = completion.choices[0];
+    const text = choice?.message?.content ?? '';
     const inputTokens = completion.usage?.prompt_tokens ?? 0;
     const outputTokens = completion.usage?.completion_tokens ?? 0;
     return {
@@ -57,6 +58,8 @@ export class OpenAiLlm implements Llm {
         costEur: estimateCostEur(model, inputTokens, outputTokens),
       },
       model,
+      // Hit the output-token cap → the reply is likely truncated mid-JSON.
+      truncated: choice?.finish_reason === 'length',
     };
   }
 }

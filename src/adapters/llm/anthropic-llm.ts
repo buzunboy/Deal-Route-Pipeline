@@ -62,6 +62,8 @@ export class AnthropicLlm implements Llm {
         costEur: estimateCostEur(model, inputTokens, outputTokens),
       },
       model,
+      // Hit the output-token cap → the reply is likely truncated mid-JSON.
+      truncated: message.stop_reason === 'max_tokens',
     };
   }
 }

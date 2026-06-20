@@ -46,7 +46,12 @@ binding `CLAUDE.md` + `.claude/rules/`._
 
 ## 1. Build order (one reviewed batch; commit in these slices, smallest-risk first)
 
-### Slice 1 — Monitor batch daily-budget guard (highest value, smallest fix)
+> **Status (2026-06-20):** Slices 1–4 (the C-2 prerequisites: unattended safety + cost)
+> are **DONE**. Slices 5–6 (charset, JSON-recovery/CI — quality/cosmetic) were
+> **deferred** to `docs/KNOWN_ISSUES.md` rather than built. C-2 (the real-browser
+> agent) is the separate next stage.
+
+### Slice 1 — Monitor batch daily-budget guard (highest value, smallest fix) — ✅ DONE
 
 - **Gap**: `src/adapters/cli/commands/monitor.ts` loops every due source with NO
   `DailyBudgetGuard` check. A monitor pass makes no LLM call itself, BUT a
@@ -61,7 +66,7 @@ binding `CLAUDE.md` + `.claude/rules/`._
   (fake `crawlRuns.spentSince` over the ceiling); integration — a monitor `--due`
   run with a tiny `DAILY_BUDGET_EUR` stops before processing all due sources.
 
-### Slice 2 — LLM truncation detection (silent zero-candidate bug)
+### Slice 2 — LLM truncation detection (silent zero-candidate bug) — ✅ DONE (option (a): `truncated` flag)
 
 - **Gap**: neither `anthropic-llm.ts` nor `openai-llm.ts` inspects
   `stop_reason === 'max_tokens'` / `finish_reason === 'length'`. A reply truncated at
@@ -76,7 +81,7 @@ binding `CLAUDE.md` + `.claude/rules/`._
   extract unit test (a truncated response is logged/flagged, never silently dropped);
   the LLM contract suite asserts the flag is present on every adapter.
 
-### Slice 3 — Firecrawl response/screenshot size caps
+### Slice 3 — Firecrawl response/screenshot size caps — ✅ DONE
 
 - **Gap**: `firecrawl-fetcher.ts` — `res.json()` (response body) and `downloadBytes`
   (`res.arrayBuffer()` + data-URI decode) have NO byte cap. A runaway/malicious
@@ -89,7 +94,7 @@ binding `CLAUDE.md` + `.claude/rules/`._
   (scripted `fetch` returning a large/`Content-Length`-lying body). Gated live edge
   optional.
 
-### Slice 4 — robots.txt fetch hardening (size cap + 4xx/5xx nuance + redirect origin)
+### Slice 4 — robots.txt fetch hardening (size cap + 4xx/5xx nuance + redirect origin) — ✅ DONE
 
 - **Gap**: `polite-fetcher.ts` `loadRobots` — `res.text()` has no size cap; 4xx and
   5xx both fail-open identically; the underlying fetch follows redirects without
@@ -103,7 +108,7 @@ binding `CLAUDE.md` + `.claude/rules/`._
   handled (not naive fail-open); cross-origin redirect rejected. All via the scripted
   `RobotsClient`.
 
-### Slice 5 — Charset / content-type guard (lowest risk; optional if time-boxed)
+### Slice 5 — Charset / content-type guard — ⏸ DEFERRED → `docs/KNOWN_ISSUES.md`
 
 - **Gap**: no `Content-Type`/charset handling in the fetchers; a non-UTF8
   (`iso-8859-1`) or non-HTML response is assumed UTF-8/HTML.
@@ -114,7 +119,7 @@ binding `CLAUDE.md` + `.claude/rules/`._
 - **Tests**: unit — a non-HTML content-type is not extracted; an iso-8859-1 page decodes
   correctly (a fixture with an umlaut).
 
-### Slice 6 (optional) — JSON-recovery robustness + CI ordering
+### Slice 6 — JSON-recovery robustness + CI ordering — ⏸ DEFERRED → `docs/KNOWN_ISSUES.md`
 
 - **JSON recovery**: `json-recovery.ts` inner-quote heuristic is fragile on quoted
   strings containing quotes (e.g. `"Joe "The King" Smith"`) and assumes ASCII

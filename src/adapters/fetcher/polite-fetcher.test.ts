@@ -26,20 +26,34 @@ function countingInner(result: Partial<FetchResult> = {}): Fetcher & { calls: st
   };
 }
 
-/** Scripted RobotsClient: map of `${origin}/robots.txt` → body (or `notFound`). */
-function scriptedRobots(
-  byUrl: Record<string, string | { notFound: true }>,
-): RobotsClient & { calls: string[] } {
+/**
+ * Scripted RobotsClient: map of `${origin}/robots.txt` → a body string (200), or a
+ * richer entry: `{notFound}` (404), `{status}` (e.g. 503), `{body, finalUrl}` (a
+ * redirect's final URL). Records the URLs fetched.
+ */
+type RobotsEntry =
+  | string
+  | { notFound: true }
+  | { status: number }
+  | { body: string; finalUrl: string };
+
+function scriptedRobots(byUrl: Record<string, RobotsEntry>): RobotsClient & { calls: string[] } {
   const calls: string[] = [];
   return {
     calls,
     async fetch(url: string): Promise<RobotsResponse> {
       calls.push(url);
       const entry = byUrl[url];
-      if (entry === undefined || (typeof entry !== 'string' && entry.notFound)) {
-        return { ok: false, text: async () => '' };
+      if (entry === undefined || (typeof entry === 'object' && 'notFound' in entry)) {
+        return { ok: false, status: 404, url, text: async () => '' };
       }
-      return { ok: true, text: async () => entry as string };
+      if (typeof entry === 'object' && 'status' in entry) {
+        return { ok: entry.status < 400, status: entry.status, url, text: async () => '' };
+      }
+      if (typeof entry === 'object' && 'finalUrl' in entry) {
+        return { ok: true, status: 200, url: entry.finalUrl, text: async () => entry.body };
+      }
+      return { ok: true, status: 200, url, text: async () => entry };
     },
   };
 }
@@ -197,6 +211,51 @@ describe('PoliteFetcher robots.txt runtime (injected RobotsClient)', () => {
     expect(res.outcome).toBe('robots_disallowed');
     expect(res.finalUrl).toBe('https://tracker.de/landing');
     expect(res.html).toBe('');
+  });
+
+  it('fails CLOSED on a 5xx robots.txt (does not grant crawl-all)', async () => {
+    const robots = scriptedRobots({ 'https://host.de/robots.txt': { status: 503 } });
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base(robots));
+    const res = await pf.fetch('https://host.de/anything');
+    expect(res.outcome).toBe('robots_disallowed'); // disallow-all while the server errors
+    expect(inner.calls).toEqual([]); // never fetched the page
+  });
+
+  it('still allows on a 404 robots.txt (no rules = crawl freely)', async () => {
+    const robots = scriptedRobots({ 'https://host.de/robots.txt': { notFound: true } });
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base(robots));
+    const res = await pf.fetch('https://host.de/anything');
+    expect(res.outcome).toBe('ok');
+    expect(inner.calls).toEqual(['https://host.de/anything']);
+  });
+
+  it('ignores a robots.txt that redirects cross-origin (not authoritative → allowed)', async () => {
+    const robots = scriptedRobots({
+      // host.de's robots.txt redirects to a DIFFERENT origin that disallows all.
+      'https://host.de/robots.txt': {
+        body: 'User-agent: *\nDisallow: /',
+        finalUrl: 'https://cdn-other.de/robots.txt',
+      },
+    });
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base(robots));
+    const res = await pf.fetch('https://host.de/anything');
+    // The foreign Disallow:/ is ignored; host.de is treated as no-robots = allowed.
+    expect(res.outcome).toBe('ok');
+    expect(inner.calls).toEqual(['https://host.de/anything']);
+  });
+
+  it('ignores an oversized robots.txt rather than parsing it', async () => {
+    const huge = 'User-agent: *\nDisallow: /\n' + '#'.repeat(600 * 1024); // > 512 KB cap
+    const robots = scriptedRobots({ 'https://host.de/robots.txt': huge });
+    const inner = countingInner();
+    const pf = new PoliteFetcher(inner, base(robots));
+    const res = await pf.fetch('https://host.de/anything');
+    // Over the cap → treated as no-robots = allowed (not parsed as Disallow:/).
+    expect(res.outcome).toBe('ok');
+    expect(inner.calls).toEqual(['https://host.de/anything']);
   });
 });
 

@@ -76,7 +76,11 @@ export class ScriptedFetcher implements Fetcher {
 /** Llm fake: returns scripted JSON text. */
 export class FakeLlm implements Llm {
   public lastRequest: LlmRequest | null = null;
-  constructor(private json: string) {}
+  /** Set true to simulate a reply truncated at the output-token limit. */
+  constructor(
+    private json: string,
+    private truncated = false,
+  ) {}
   setJson(json: string): void {
     this.json = json;
   }
@@ -86,6 +90,7 @@ export class FakeLlm implements Llm {
       text: this.json,
       usage: { inputTokens: 100, outputTokens: 50, costEur: 0.001 },
       model: 'fake-model',
+      truncated: this.truncated,
     };
   }
 }
@@ -98,6 +103,7 @@ export class RoleAwareFakeLlm implements Llm {
       text: this.byRole[request.role] ?? '{}',
       usage: { inputTokens: 100, outputTokens: 50, costEur: 0.001 },
       model: 'fake-model',
+      truncated: false,
     };
   }
 }
