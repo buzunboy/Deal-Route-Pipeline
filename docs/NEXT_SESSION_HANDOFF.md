@@ -1,5 +1,11 @@
 # Next-session handoff — continue the roadmap (Pre-C-2 → Pre-C-3 → Phase C)
 
+> **⚠️ SUPERSEDED (2026-06-20).** Pre-C-2/3 and all of Phase C (C-1 + C-2) are DONE +
+> merged. For the CURRENT next-steps (the post-C product track), read
+> **`docs/DealRoute_PostC_Handoff.md`**. This file is kept only for its still-accurate
+> "Workflow / environment facts" section (worktree `.env`, ff-only merge, no local
+> Postgres, drizzle migration flow) — the build steps below are historical.
+
 _Paste this (or point the session at this file) to continue in a fresh Claude Code chat._
 _Master is at the Pre-C-1 commit; this is the next-steps brief. Authoritative plan:
 `docs/DealRoute_Phase_C_and_Roadmap.md`._

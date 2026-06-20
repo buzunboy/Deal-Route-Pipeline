@@ -96,17 +96,6 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   then tighten (consider a repair-retry or a stricter parser). Don't build a full JSON parser.
 - **Logged**: 2026-06-20
 
-### CI jobs not dependency-ordered
-- **Severity**: low
-- **Area**: ci
-- **Location**: `.github/workflows/ci.yml`
-- **What**: The unit `check` job and the `integration` job run in parallel (no `needs:`).
-  Migrations are applied idempotently inside the integration harness, so it works, but a
-  unit-only break still spins up Postgres before failing.
-- **Why deferred**: Purely cosmetic / minor CI-time waste; correctness is unaffected.
-- **Fix-when**: touching CI for another reason — add `needs: check` to the integration job.
-- **Logged**: 2026-06-20
-
 ### Dedupe-key omits source/origin (provenance)
 - **Severity**: medium (trust-relevant)
 - **Area**: domain / schema
@@ -116,8 +105,10 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   canonicalization (one offer regardless of who reports it) or should split by source.
 - **Why deferred**: It's a **schema-owner decision** that affects the trust model — must be
   confirmed with the owner before changing, not decided unilaterally (roadmap §6.3).
-- **Fix-when**: Tier-4 churn makes duplicates a real review-queue problem, or the schema
-  owner rules on canonicalization-vs-provenance.
+- **Fix-when**: Tier-4 churn makes duplicates a real review-queue problem, OR the public
+  read API ships (post-C Step 1) — the public DTO's `source_url` + evidence link depend on
+  "which source's record is the canonical one shown", so resolve this BEFORE the public feed
+  goes live. See `docs/DealRoute_PostC_Handoff.md` §3. Schema-owner call.
 - **Logged**: 2026-06-20
 
 ### pg-boss queue pool not bounded
