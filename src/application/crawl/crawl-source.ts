@@ -122,7 +122,14 @@ export class CrawlSourceUseCase {
       const evidence = await this.captureEvidence(fetched, input.dryRun ?? false);
       const extraction = await this.extract.execute({
         pageText: fetched.text,
-        sourceUrl: source.url,
+        // Extract against the URL the page actually lives at (post-redirect), the
+        // SAME provenance URL the evidence bundle and CandidateSink pin to
+        // (`fetched.finalUrl`) — not the configured `source.url`, which may differ
+        // after a redirect. Keeping one provenance URL across extract + evidence +
+        // persist matches the discover/ingest lanes and means the dedupe key the
+        // extractor derives can never disagree with the one persisted/recomputed
+        // from `source_url`, should that key ever fold the source domain.
+        sourceUrl: fetched.finalUrl,
         targetService: source.subscription_service,
         vocabulary: this.vocabulary,
       });

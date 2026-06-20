@@ -163,3 +163,24 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   v1 external cron is sequential per invocation.
 - **Fix-when**: a scheduler/worker introduces real concurrency on the same source.
 - **Logged**: 2026-06-20
+
+### Lane A provenance URL aligned to `finalUrl` — closes a latent dedupe divergence (RESOLVED)
+- **Severity**: low (consistency; latent, not a present-tense bug)
+- **Area**: crawl / extraction
+- **Location**: `src/application/crawl/crawl-source.ts` (`extract.execute` call)
+- **What**: Lane A previously extracted against the configured `source.url` while the evidence
+  bundle and `CandidateSink` pin `source_url` to `fetched.finalUrl` (the post-redirect
+  location). The discover/ingest lanes already pass `fetched.finalUrl` into extract
+  (`lane-b-support.ts`, `discover-broad.ts`, `discover-site.ts`, `ingest-community.ts`).
+  Lane A now matches them, so extract + evidence + persist share ONE provenance URL.
+- **Why this was latent, not a live bug**: the dedupe key today is
+  `service + provider + route_type + country` (`dedupe-key.ts`) with **no URL/domain
+  segment** — so the extract-time key and the persisted/recomputed key already agreed on a
+  cross-domain redirect (both ignore the URL). The divergence would only have become real
+  IF the "split-by-source" / domain-folding change to the dedupe key (see *"Dedupe-key omits
+  source/origin (provenance)"* above) were built without first unifying the provenance URL.
+  Aligning the URL now removes that trap ahead of that schema-owner decision.
+- **Fix-when**: n/a (done). Keep the lanes consistent — any future provenance-URL change must
+  stay identical across crawl/discover/ingest. Covered by the crawl-source unit test
+  *"cross-domain redirect: one provenance URL across extract+evidence+persist"*.
+- **Logged**: 2026-06-20
