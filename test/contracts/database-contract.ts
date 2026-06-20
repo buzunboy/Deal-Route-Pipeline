@@ -93,11 +93,11 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       const deal = dealRecord();
       await db.deals.insert(deal);
       const { dedupeKey } = await import('../../src/domain/index.js');
-      const found = await db.deals.findByDedupeKey(dedupeKey(deal));
+      const found = await db.deals.findByDedupeKey(dedupeKey(deal, deal.source_url));
       expect(found!.id).toBe(deal.id);
 
       await db.deals.updateStatus(deal.id, DealStatus.enum.rejected, 'r', 't');
-      expect(await db.deals.findByDedupeKey(dedupeKey(deal))).toBeNull();
+      expect(await db.deals.findByDedupeKey(dedupeKey(deal, deal.source_url))).toBeNull();
     });
 
     it('deals: listBySourceUrl is source-scoped + status-filtered', async () => {
@@ -151,7 +151,7 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       await db.evidence.insert(ev);
       const deal = dealRecord({ evidence_id: ev.id, status: DealStatus.enum.candidate });
       await db.deals.insert(deal);
-      const key = dedupeKey(deal);
+      const key = dedupeKey(deal, deal.source_url);
 
       expect((await db.deals.findActiveByDedupeKeyAndHash(key, 'HASH_A'))!.id).toBe(deal.id);
       expect(await db.deals.findActiveByDedupeKeyAndHash(key, 'OTHER_HASH')).toBeNull();
@@ -244,7 +244,7 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       await db.deals.insert(high);
       // Both share a dedupe key; the canonical (highest-confidence) one must win,
       // regardless of insertion order — so the two adapters don't diverge here.
-      const found = await db.deals.findByDedupeKey(dedupeKey(low));
+      const found = await db.deals.findByDedupeKey(dedupeKey(low, low.source_url));
       expect(found!.id).toBe(high.id);
     });
 

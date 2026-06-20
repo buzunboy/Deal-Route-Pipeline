@@ -44,7 +44,10 @@ export function dealToRow(d: DealRecord): DealRow {
     sourceUrl: d.source_url,
     evidenceId: d.evidence_id,
     confidence: d.confidence,
-    dedupeKey: dedupeKey(d),
+    // Recompute from the PINNED source_url (= the fetched finalUrl, set by
+    // CandidateSink). This is the SAME url extract.ts used at extract time, so the
+    // stored key is identical to the extract-time key (consistency invariant).
+    dedupeKey: dedupeKey(d, d.source_url),
     status: d.status,
     verifiedBy: d.verified_by,
     verifiedAt: d.verified_at,
