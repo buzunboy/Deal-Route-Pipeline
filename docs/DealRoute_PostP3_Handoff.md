@@ -2,10 +2,12 @@
 
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`79bada3`** (Step 5). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
-disclosure), 3 (reliability-blended ranking), 4 (scheduler / unattended-run harness) AND
-5 (observability: alerting) are DONE + merged; the next step is Step 6 (multi-country) —
-the last post-C step, gated on a real Public Suffix List adapter.** This supersedes
+**`<set-on-merge>`** (Step 6). **ALL post-C Steps 1–6 are DONE + merged (1 public API,
+2 GDPR/affiliate disclosure, 3 reliability ranking, 4 scheduler, 5 observability, 6
+multi-country foundation). The pipeline is post-C FEATURE-COMPLETE for DE v1** — no
+roadmap step remains; what's left is the deferred-findings register (`docs/KNOWN_ISSUES.md`)
++ (only when expanding) actually enabling a 2nd country (data/config behind the now-extensible
+seams). This supersedes
 `docs/DealRoute_PostC_Handoff.md` (kept, banner-marked). (`NEXT_SESSION_HANDOFF.md` was deleted.)_
 
 > **What shipped since the original audit** (all merged to `master`, in order):
@@ -29,8 +31,13 @@ the last post-C step, gated on a real Public Suffix List adapter.** This superse
 > auto-expire**, migration **0011**) · **Step 5** (observability: a new `Alerting` port +
 > `NoopAlerter`/`WebhookAlerter` — webhook+Slack — wired at the source-reliability-low + daily-
 > budget-reached warn points; best-effort, dark by default `ALERT_KIND=noop`; Datadog/CloudWatch
-> deferred per `docs/DealRoute_Observability.md`; NO schema change). Deal-record `schema_version`
-> is still **3**; latest migration is still **`drizzle/0011`**.
+> deferred per `docs/DealRoute_Observability.md`; NO schema change) · **Step 6** (multi-country
+> FOUNDATION, DE stays the only enabled country: a real Public Suffix List via `tldts` behind a pure
+> `SuffixOracle` — the naive last-two-labels `registrableDomain` is gone; `source_registrable_domain`/
+> `registrable_domain` PINNED at extract/source-create/seed-import so dedupe + the reliability join read
+> a frozen field, schema **v4**, migration **0012**; config-driven `MARKETS` registry → closed
+> `Country`/`Currency` enums + a per-country currency trust rule; DE byte-identical, no dedupe churn).
+> Deal-record `schema_version` is now **4**; latest migration is now **`drizzle/0012`**.
 
 > Binding rules still govern: `CLAUDE.md` + `.claude/rules/`
 > (`architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`).
@@ -100,9 +107,9 @@ invariants hold. **The implementation is sound; the foundation is strong.**
 `FETCHER=playwright`, `EVIDENCE_STORE=local`. Do not change these defaults.
 
 **Roadmap position:** post-C **Steps 1 (public read API = P3), 2 (GDPR/affiliate
-disclosure), 3 (reliability-blended ranking), 4 (scheduler/ops) AND 5 (observability) are
-DONE + merged.** Remaining: **Step 6 (multi-country) ← NEXT (and last)** — gated on a real
-PSL adapter. See §4.
+disclosure), 3 (reliability-blended ranking), 4 (scheduler/ops), 5 (observability) AND 6
+(multi-country foundation) are ALL DONE + merged.** No roadmap step remains — the pipeline
+is **post-C feature-complete for DE v1**. See §4 (all six marked ✅).
 
 ---
 
@@ -113,12 +120,11 @@ boundary, §3) and **Step 2** (GDPR/affiliate disclosure, §4). So the public `/
 the disclosure fields the landing page legally needs are in place. What remains (Steps 3–6)
 is real but **not launch-blocking** — each is a small, mostly decision-gated refinement.
 
-**Recommended next step: Step 6 (multi-country)** — the last post-C step, and the
-furthest-out: it's gated on a real **Public Suffix List adapter** (dedupe correctness +
-the reliability/expiry registrable-domain joins depend on it; the current eTLD+1
-approximation breaks on multi-label TLDs like `.co.uk`), then de-hardcoding the
-`Country`/`Currency` enums + per-country vocab/deny-list/queries (§4). Only do it when
-actually expanding past DE. Steps 1–5 are DONE.
+**No recommended next step — all post-C roadmap steps (1–6) are DONE.** The pipeline is
+post-C feature-complete for DE v1. The only forward work is **enabling a real 2nd country**
+when the business decides to expand (data/config behind the Step-6 seams: a MARKETS row +
+per-country seeds/vocab/deny-list/queries; see the KNOWN_ISSUES "multi-country enablement"
+entry), plus working down the deferred-findings register (`docs/KNOWN_ISSUES.md`).
 
 ---
 
@@ -159,8 +165,8 @@ audit found; it was fixed in the same session and is in `KNOWN_ISSUES.md` → Re
 ## 4. The remaining roadmap steps (post-C Steps 2–6) — sequence + prerequisites
 
 Each lists **what**, **why-now**, **the decision it needs first (if any)**, the
-**code surface**, and **tests required**. **Steps 2, 3, 4 AND 5 are DONE (below, kept for the
-record).** Remaining: **Step 6 (multi-country) — the last post-C step, gated on a PSL adapter.**
+**code surface**, and **tests required**. **ALL of Steps 2–6 are DONE (below, kept for the
+record).** No roadmap step remains; the pipeline is post-C feature-complete for DE v1.
 
 ### Step 2 — GDPR + affiliate disclosure at publish — ✅ DONE (merged `4f4f077`, 2026-06-20)
 _Shipped as designed: `affiliate_disclosure` (bool, default **true** = over-disclose) +
@@ -318,7 +324,32 @@ Original plan below, retained for context:_
 - **Tests:** port contract suite + unit; thresholds are pure logic → table-driven.
 - **Workflow-shaped?** Partly (discrete signal types could fan out) but small; likely inline.
 
-### Step 6 — Multi-country generalization (LATER — only when expanding)
+### Step 6 — Multi-country FOUNDATION — ✅ DONE (merged `<set-on-merge>`, 2026-06-21)
+_Shipped the multi-country PREREQUISITES (DE stays the only ENABLED country — no real 2nd
+country wired, per the owner decision). Three parts:_
+- **(1) Real Public Suffix List.** The naive last-two-labels `registrableDomain` (wrong on
+  multi-label TLDs like `.co.uk`) is GONE; resolution now goes through a pure domain type
+  `SuffixOracle` (`src/domain/discovery/suffix-oracle.ts`, zero imports) backed by the `tldts`
+  package (pinned exact `7.4.3`) in `src/adapters/suffix/tldts-suffix-oracle.ts`, injected from the
+  one composition root. **DE byte-identical** (golden gate `test/golden/suffix-equivalence.golden.test.ts`
+  proves old==new for every single-label-suffix host → no dedupe churn; multi-label cases now
+  correct). One documented IDN divergence (raw umlaut → Unicode vs punycode; no DE host today) in
+  KNOWN_ISSUES.
+- **(2) Pinned registrable domain (schema v4, migration 0012, additive nullable).**
+  `deal.source_registrable_domain` + `source.registrable_domain` are resolved ONCE via the PSL at
+  extract / source-create / **seed-import** and PINNED, so the trust-critical sync rules
+  (`dedupeKey`, the `comparePublished` sort comparator, `buildReliabilityIndex`/`resolveReliability`)
+  read a frozen field — no PSL call inside `Array.sort`, structurally. No data backfill (existing
+  rows self-heal on re-crawl; null → unknown-source dedupe / neutral reliability).
+- **(3) Config-driven markets.** `src/domain/markets/markets.ts` (MARKETS, DE→{EUR}); the
+  `Country`/`Currency` enums are DERIVED from it but STILL closed `z.enum`s (out-of-scope rejected at
+  the boundary); the DE⇒EUR currency trust rule generalized to `isCurrencyAllowedForCountry`
+  (mismatch → must-review, unchanged strictness). "Add a country" = one MARKETS data row + per-country
+  seed/vocab/deny-list/query DATA (a follow-up, logged in KNOWN_ISSUES) — NO logic edit.
+- code-reviewer caught + I FIXED a blocker (seed-import was leaving registrable_domain null →
+  seeds would fold to neutral reliability) + a 4-angle adversarial-verify pass. ~662 unit tests green.
+  **Step 6 was the LAST post-C step — the pipeline is now post-C feature-complete for DE v1.**
+  Original plan below, retained for context:_
 - **Audit finding (HIGH, but .de-v1-scoped):** hard-coded DE/EUR —
   `Country = z.enum(['DE'])`, `Currency = z.enum(['EUR'])`
   (`src/domain/deal-record/enums.ts:27,31`); and `registrableDomain`
@@ -406,15 +437,18 @@ interactive multi-step BrowserAgent ("Option B").
 
 ## 9. First moves for the fresh session
 1. Confirm orientation reads + green baseline (`npm install && npm run check && npm run build`).
-   Steps 1–5 are DONE — no foundation repair pending; the only remaining post-C step is Step 6.
-2. **Build Step 6 — multi-country generalization** (§4) — the LAST post-C step, and only when
-   actually expanding past DE. **Hard prerequisite first: a real Public Suffix List adapter**
-   behind a small port — `registrableDomain` (`src/domain/discovery/links.ts`) is an eTLD+1
-   approximation (last two labels) that breaks on multi-label TLDs (`www.bbc.co.uk` → `co.uk`),
-   and dedupe correctness + the Step-3 reliability join + the Step-4 monitor expiry all depend on
-   it. Then de-hardcode the `Country`/`Currency` enums (`src/domain/deal-record/enums.ts`) +
-   per-country vocab/deny-list/queries (data, already parameterizable). Ask the owner before
-   touching the enums (trust/schema). Otherwise the pipeline is post-C feature-complete for DE v1.
+   **ALL post-C steps (1–6) are DONE — the pipeline is post-C feature-complete for DE v1.** No
+   roadmap step is pending; no foundation repair pending.
+2. **There is no next roadmap step.** Forward work, when the business calls for it:
+   - **Enable a real 2nd country** (Step 6 built the foundation): add a `MARKETS` row
+     (`src/domain/markets/markets.ts`) + the country's seed sources, catalog vocab, deny-list, and
+     Tier-4 intent queries (all data, behind the now-extensible seams). NO logic change. See the
+     KNOWN_ISSUES "multi-country enablement" entry. Ask the owner before enabling (it's a scope call).
+   - **Work down `docs/KNOWN_ISSUES.md`** — the deferred-findings register (e.g. the Postgres
+     contract-suite CI gap, the per-request active-source scan, the raw-IDN suffix normalisation,
+     the pg-boss pool bound if/when pg-boss is wired). Pick by the listed fix-when triggers.
+   - **Operate / curate**: real seed-list curation + live tests (the per-source fetcher-selection
+     findings), the deploy-time CDN scoping gate, etc.
 4. Every change: unit + integration tests (live for new external edges); `code-reviewer` +
    an adversarial-verify pass on anything trust/publish/schema; docs updated (CLAUDE.md
    Commands + Repo layout, README, ARCHITECTURE, roadmap §5; **and `docs/testing/LIVE_TEST_TEMPLATE.md`

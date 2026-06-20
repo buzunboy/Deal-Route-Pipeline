@@ -9,6 +9,7 @@ import {
 } from '../../src/domain/index.js';
 import { makeLlmDeal } from '../factories/deal.js';
 import { makeSource } from '../factories/source.js';
+import { tldtsSuffixOracle } from '../../src/adapters/suffix/tldts-suffix-oracle.js';
 import { randomUUID } from 'node:crypto';
 
 /** A valid succeeded CrawlRun with a fixed started_at + cost, for cost-summary cases. */
@@ -34,12 +35,13 @@ function makeRun(
 }
 
 function dealRecord(overrides: Partial<DealRecord> = {}): DealRecord {
-  return {
+  const record: DealRecord = {
     ...makeLlmDeal(),
     id: randomUUID(),
     schema_version: 1,
     true_cost_monthly: 10,
     evidence_id: randomUUID(),
+    source_registrable_domain: null,
     status: DealStatus.enum.candidate,
     verified_by: null,
     verified_at: null,
@@ -47,6 +49,14 @@ function dealRecord(overrides: Partial<DealRecord> = {}): DealRecord {
     published_at: null,
     ...overrides,
   };
+  // Step 6: pin source_registrable_domain from the (possibly-overridden) source_url
+  // via the real PSL — exactly as extract pins it on a persisted record — unless a
+  // test explicitly overrides it. This is what the dedupe-key recompute + the
+  // reliability join key off.
+  if (!('source_registrable_domain' in overrides)) {
+    record.source_registrable_domain = tldtsSuffixOracle(record.source_url);
+  }
+  return record;
 }
 
 /**
@@ -156,11 +166,13 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       const deal = dealRecord();
       await db.deals.insert(deal);
       const { dedupeKey } = await import('../../src/domain/index.js');
-      const found = await db.deals.findByDedupeKey(dedupeKey(deal, deal.source_url));
+      const found = await db.deals.findByDedupeKey(dedupeKey(deal, deal.source_registrable_domain));
       expect(found!.id).toBe(deal.id);
 
       await db.deals.updateStatus(deal.id, DealStatus.enum.rejected, 'r', 't');
-      expect(await db.deals.findByDedupeKey(dedupeKey(deal, deal.source_url))).toBeNull();
+      expect(
+        await db.deals.findByDedupeKey(dedupeKey(deal, deal.source_registrable_domain)),
+      ).toBeNull();
     });
 
     it('deals: listBySourceUrl is source-scoped + status-filtered', async () => {
@@ -214,7 +226,7 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       await db.evidence.insert(ev);
       const deal = dealRecord({ evidence_id: ev.id, status: DealStatus.enum.candidate });
       await db.deals.insert(deal);
-      const key = dedupeKey(deal, deal.source_url);
+      const key = dedupeKey(deal, deal.source_registrable_domain);
 
       expect((await db.deals.findActiveByDedupeKeyAndHash(key, 'HASH_A'))!.id).toBe(deal.id);
       expect(await db.deals.findActiveByDedupeKeyAndHash(key, 'OTHER_HASH')).toBeNull();
@@ -681,7 +693,7 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       await db.deals.insert(high);
       // Both share a dedupe key; the canonical (highest-confidence) one must win,
       // regardless of insertion order — so the two adapters don't diverge here.
-      const found = await db.deals.findByDedupeKey(dedupeKey(low, low.source_url));
+      const found = await db.deals.findByDedupeKey(dedupeKey(low, low.source_registrable_domain));
       expect(found!.id).toBe(high.id);
     });
 

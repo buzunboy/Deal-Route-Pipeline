@@ -14,6 +14,7 @@ import {
   type Vocabulary,
   type RuleFailure,
   type FieldProposal,
+  type SuffixOracle,
 } from '../../domain/index.js';
 import type { Llm, Logger } from '../ports/index.js';
 import { buildExtractionPrompt } from './extraction-prompt.js';
@@ -48,6 +49,13 @@ export interface ExtractedCandidate {
   trueCostMonthly: number;
   dedupeKey: string;
   schemaVersion: number;
+  /**
+   * The registrable domain (eTLD+1) of the trusted fetched source URL, resolved
+   * once here via the real PSL (Step 6) and pinned onto the persisted deal. The
+   * dedupe key was built from THIS exact value, so the recompute-from-row key
+   * matches. Null when the host has no registrable domain.
+   */
+  sourceRegistrableDomain: string | null;
   adjustedConfidence: number;
   mustReview: boolean;
   failures: RuleFailure[];
@@ -94,6 +102,7 @@ export class ExtractUseCase {
   constructor(
     private readonly llm: Llm,
     private readonly logger: Logger,
+    private readonly suffixOracle: SuffixOracle,
   ) {}
 
   async execute(input: ExtractInput): Promise<ExtractResult> {
@@ -242,14 +251,18 @@ export class ExtractUseCase {
     const adjusted = adjustConfidence(deal, failures.length);
     const review = mustReview(adjusted, failures.length);
 
+    // Resolve the registrable domain ONCE, from the TRUSTED fetched source URL
+    // (input.sourceUrl), via the real PSL (Step 6). Pin it onto the candidate and
+    // build the dedupe key from it — the key's source-origin segment must come from
+    // provenance we control, not the LLM-supplied deal.source_url. CandidateSink
+    // pins the persisted deal.source_url + source_registrable_domain to this same
+    // fetched URL, so the recompute-from-row key matches this extract-time key.
+    const sourceRegistrableDomain = this.suffixOracle(sourceUrl);
     return {
       deal: { ...deal, confidence: adjusted },
       trueCostMonthly: trueCostMonthly(deal.price),
-      // Use the TRUSTED fetched source URL (input.sourceUrl), not the LLM-supplied
-      // deal.source_url — the key's source-origin segment must come from provenance
-      // we control. CandidateSink pins the persisted deal.source_url to this same
-      // fetched URL, so the recompute-from-row key matches this extract-time key.
-      dedupeKey: dedupeKey(deal, sourceUrl),
+      dedupeKey: dedupeKey(deal, sourceRegistrableDomain),
+      sourceRegistrableDomain,
       schemaVersion: CURRENT_SCHEMA_VERSION,
       adjustedConfidence: adjusted,
       mustReview: review,

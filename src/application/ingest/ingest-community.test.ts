@@ -14,6 +14,7 @@ import {
 import type { FeedItem } from '../ports/index.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
 import { makeSource } from '../../../test/factories/source.js';
+import { tldtsSuffixOracle } from '../../adapters/suffix/tldts-suffix-oracle.js';
 
 const FEED_URL = 'https://www.mydealz.de/rss';
 const DEAL_LINK = 'https://www.telekom.de/magenta-disney';
@@ -57,7 +58,7 @@ function build(opts: {
   const evidence = new FakeEvidenceStore();
   const clock = new FixedClock();
   const logger = new FakeLogger();
-  const extract = new ExtractUseCase(llm, logger);
+  const extract = new ExtractUseCase(llm, logger, tldtsSuffixOracle);
   const uc = new IngestCommunityUseCase(
     fetcher,
     feeds,
@@ -70,6 +71,7 @@ function build(opts: {
     SEED_VOCABULARY,
     'TestAgent/0.1',
     30000,
+    tldtsSuffixOracle,
   );
   return { uc, db, fetcher, evidence };
 }

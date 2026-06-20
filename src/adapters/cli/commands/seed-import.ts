@@ -35,7 +35,14 @@ export async function seedImport(config: Config, path: string, dryRun: boolean):
       });
     }
     for (const s of sources) {
-      await container.db.sources.upsert(s);
+      // Pin the registrable domain via the real PSL before upsert (Step 6) — the
+      // parser leaves it null. Without this, every seed (the Tier-1/2 provider/
+      // bundler backbone) would join to NEUTRAL reliability in the public-feed
+      // ranking, silently no-op'ing the Step-3 tiebreak for the production corpus.
+      await container.db.sources.upsert({
+        ...s,
+        registrable_domain: container.suffixOracle(s.url),
+      });
     }
     console.log(
       `\nImported ${catalog.length} catalog services and ${sources.length} sources into the registry.`,

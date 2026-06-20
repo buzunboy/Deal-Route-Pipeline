@@ -8,7 +8,7 @@
  * The set is BOUNDED: a big catalog must not explode the batch (each query is a
  * paid search + N fetches + N extractions). The use-case clamps to `maxQueries`.
  */
-import { registrableDomain } from './links.js';
+import type { SuffixOracle } from './suffix-oracle.js';
 
 /** Service-oriented templates: how a service appears in a deal/bundle context. */
 export const SERVICE_QUERY_TEMPLATES = [
@@ -76,9 +76,11 @@ export function buildBroadQueries(input: BroadQueryInput): string[] {
  * registrable domain (e.g. `https://www.telekom.de/...` → `telekom`). The Source
  * entity has a URL but no marketing name, so the domain is the deterministic,
  * testable signal. Returns null for an unparseable URL or a bare-eTLD domain.
+ * The registrable domain is supplied via the injected {@link SuffixOracle} (a real
+ * PSL), so the domain layer stays vendor-free (Step 6).
  */
-export function providerTokenFromUrl(url: string): string | null {
-  const domain = registrableDomain(url);
+export function providerTokenFromUrl(url: string, suffixOracle: SuffixOracle): string | null {
+  const domain = suffixOracle(url);
   if (domain === null) return null;
   const label = domain.split('.')[0] ?? '';
   return label.length > 0 ? label : null;

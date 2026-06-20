@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { SearchBrowserAgent } from './search-browser-agent.js';
 import { StubSearchProvider } from '../search/stub-search-provider.js';
 import { ScriptedFetcher, FixedClock, FakeLogger } from '../../../test/fakes/fakes.js';
+import { tldtsSuffixOracle } from '../suffix/tldts-suffix-oracle.js';
 import { sampleResults } from '../../../test/contracts/search-provider-contract.js';
 import { browserAgentContract } from '../../../test/contracts/browser-agent-contract.js';
 import type { Clock, SearchResult } from '../../application/ports/index.js';
@@ -37,7 +38,7 @@ function agentWith(
   clock: Clock = new FixedClock(),
 ) {
   const search = new StubSearchProvider({ [QUERY]: results });
-  return new SearchBrowserAgent(search, fetcher, clock, new FakeLogger(), OPTS);
+  return new SearchBrowserAgent(search, fetcher, clock, new FakeLogger(), tldtsSuffixOracle, OPTS);
 }
 
 // Contract: substitutable behind the BrowserAgent port (same as NoopBrowserAgent).
@@ -140,10 +141,14 @@ describe('SearchBrowserAgent', () => {
       Object.fromEntries(results.map((r) => [r.url, { text: 'x', html: '<html>x</html>' }])),
     );
     const search = new StubSearchProvider({ [QUERY]: results });
-    const agent = new SearchBrowserAgent(search, fetcher, new FixedClock(), new FakeLogger(), {
-      ...OPTS,
-      resultsPerQuery: 3,
-    });
+    const agent = new SearchBrowserAgent(
+      search,
+      fetcher,
+      new FixedClock(),
+      new FakeLogger(),
+      tldtsSuffixOracle,
+      { ...OPTS, resultsPerQuery: 3 },
+    );
     const result = await agent.run(QUERY, budget);
     expect(result.stepsUsed).toBe(3);
   });
@@ -159,6 +164,7 @@ describe('SearchBrowserAgent', () => {
       new ScriptedFetcher({}),
       new FixedClock(),
       new FakeLogger(),
+      tldtsSuffixOracle,
       OPTS,
     );
     const result = await agent.run(QUERY, budget);
@@ -221,6 +227,7 @@ describe('SearchBrowserAgent — inline scrape (Tier-4 v2 search-scrape)', () =>
       fetcher,
       new FixedClock(),
       new FakeLogger(),
+      tldtsSuffixOracle,
       INLINE_OPTS,
     );
 
@@ -240,6 +247,7 @@ describe('SearchBrowserAgent — inline scrape (Tier-4 v2 search-scrape)', () =>
       fetcher,
       new FixedClock(),
       new FakeLogger(),
+      tldtsSuffixOracle,
       INLINE_OPTS,
     );
 
@@ -266,6 +274,7 @@ describe('SearchBrowserAgent — inline scrape (Tier-4 v2 search-scrape)', () =>
       fetcher,
       new FixedClock(),
       new FakeLogger(),
+      tldtsSuffixOracle,
       INLINE_OPTS,
     );
 
@@ -279,7 +288,14 @@ describe('SearchBrowserAgent — inline scrape (Tier-4 v2 search-scrape)', () =>
     const fetcher = new InlineAwareFetcher();
     const search = new StubSearchProvider({ [QUERY]: [inlineResult(url)] });
     // OPTS has no inlineScrape → off.
-    const agent = new SearchBrowserAgent(search, fetcher, new FixedClock(), new FakeLogger(), OPTS);
+    const agent = new SearchBrowserAgent(
+      search,
+      fetcher,
+      new FixedClock(),
+      new FakeLogger(),
+      tldtsSuffixOracle,
+      OPTS,
+    );
 
     const result = await agent.run(QUERY, budget);
     expect(fetcher.fetchedUrls).toEqual([url]); // always the polite fetch

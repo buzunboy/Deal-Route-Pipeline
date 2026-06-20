@@ -126,6 +126,10 @@ function makeSource(
     last_seen: null,
     next_due: null,
     resolved_url: null, // set on the first successful crawl (= the post-redirect finalUrl)
+    // The parser is pure (no PSL); seed-import pins registrable_domain via the
+    // container's oracle right before upsert (it must — else seeds join to neutral
+    // reliability). See seed-import.ts. Null here is just the pre-pin placeholder.
+    registrable_domain: null,
   };
 }
 

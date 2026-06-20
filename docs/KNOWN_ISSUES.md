@@ -31,6 +31,59 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### Enabling a real 2nd country (the Step-6 foundation is built; the data/launch work isn't)
+- **Severity**: low (a feature-enablement task, not a defect — DE v1 is complete)
+- **Area**: discovery / catalog / config
+- **Location**: `src/domain/markets/markets.ts` (the MARKETS registry — the one logic seam); the
+  seed list (`docs/DealRoute_Seed_List_DE.md`), catalog vocab, deny-list, Tier-4 intent queries (data).
+- **What**: Step 6 made multi-country a CONFIG/DATA change (real PSL + pinned registrable domain +
+  config-driven `Country`/`Currency` enums + per-country currency trust rule), but DE is the only
+  ENABLED country. Actually launching e.g. AT/CH means: add a `MARKETS` row (country → currencies);
+  add that country's seed sources + subscription catalog vocab; extend the deny-list + the Tier-4
+  intent-query templates for it; parameterize the extraction prompt's "Germany v1 / DE / EUR" framing
+  from the active market; and run a multi-country live test. No pipeline-LOGIC edit is needed (OCP).
+- **Why deferred**: owner-decided — v1 ships DE-only; build the foundation now, enable a 2nd country
+  only when the business expands. Doing it speculatively would add unmaintained per-country data.
+- **Fix-when**: when expanding past Germany. Start with the `MARKETS` row + that country's seed/vocab
+  data; the schema enums, the currency rule, and the public-API country filter all widen automatically.
+- **Logged**: 2026-06-21
+
+### A raw-Unicode IDN host resolves differently old↔new (no DE host today; would split on add)
+- **Severity**: low (latent; no current data hits it)
+- **Area**: discovery / dedupe / db
+- **Location**: `src/adapters/suffix/tldts-suffix-oracle.ts`; pinned + documented in
+  `test/golden/suffix-equivalence.golden.test.ts` (the "KNOWN divergence" block).
+- **What**: the old last-two-labels rule resolved via `new URL().hostname` (always **punycode**),
+  while `tldts.getDomain` returns the **Unicode** form — so a host typed with a raw umlaut/eszett
+  diverges: `müller.de` → `müller.de` (new) vs `xn--mller-kva.de` (old). The DE seed list has NO
+  such IDN host today (grep-confirmed), so there is no stored-key churn now — but a deal stored
+  under the old punycode key and re-crawled under the new Unicode key would **split into two
+  records** the moment a raw-IDN German source is added.
+- **Why deferred**: unreachable with the current DE corpus; Step 6's golden gate documents the
+  divergence as a conscious decision rather than letting it surprise a future reader.
+- **Fix-when**: before adding a raw-IDN (umlaut/eszett) source — pick the canonical form (likely
+  normalise the oracle output to punycode) so a deal can't split old↔new, and add that host to the
+  golden corpus. (Related, same fix: a MALFORMED punycode host like `e.xn--ja.com` resolves to null
+  under the old rule but to a domain under `tldts` — non-DE, benign today, same boundary-normalise fix.)
+- **Logged**: 2026-06-21
+
+### `source.registrable_domain` no-neutral-fold rests on write-site discipline, not a DB constraint
+- **Severity**: low (defence-in-depth; all current write paths are correct)
+- **Area**: db / discovery
+- **Location**: `src/domain/source/source.ts` (`registrable_domain` is `.nullable().default(null)`);
+  the pin sites: `seed-import.ts`, `lane-b-support.ts`, `source-review.ts` (spreads).
+- **What**: the guarantee "a seed/discovered source joins to its real reliability, not neutral 0.5"
+  is enforced only by every source-create path remembering to pin `registrable_domain` via the
+  oracle — there is no NOT NULL column constraint or composition-root assertion. All current paths
+  pin it (verified), but a FUTURE write path that forgets would silently fold that source's deals to
+  neutral reliability (no error — `null` is a valid column value and `resolveReliability` `??`s to 0.5).
+- **Why deferred**: every production write site is correct today; this is a guard against future
+  regressions, not a live bug.
+- **Fix-when**: if a new source-create path is added — add it to the pin discipline AND consider a
+  belt-and-suspenders guard (a NOT NULL constraint after a one-time backfill, or an assertion at the
+  composition root that every upserted active source has a non-null `registrable_domain`).
+- **Logged**: 2026-06-21
+
 ### `withAbortableTimeout` can emit an unhandledRejection when the inner promise loses the race
 - **Severity**: low (noise, not a control-flow bug)
 - **Area**: shared / resilience
@@ -427,6 +480,30 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   screenshots to a separate public prefix/bucket from the rest of the bundle. Verify by attempting
   to fetch `…/<id>/terms.txt` against the public CDN (must be denied).
 - **Logged**: 2026-06-20
+
+### Inline `DealRecord` test literals don't satisfy the full schema type (only caught by `tsconfig.test.json`)
+- **Severity**: low (test-only; runtime-correct via zod defaults + esbuild type-stripping)
+- **Area**: ci / testing
+- **Location**: `src/adapters/http/{public-api,public-dto,review-api}.test.ts`,
+  `src/application/review/review.test.ts`, `src/application/monitor/monitor-source.test.ts` (the
+  `seedPublishedDeal` literal), `test/integration/public-api.integration.test.ts` — inline objects
+  typed as `DealRecord`/`ReviewRecord` that omit defaulted fields (`affiliate_disclosure`,
+  `published_at`, and now `source_registrable_domain`).
+- **What**: these literals are missing schema fields that carry a zod `.default()`, so they fail
+  `tsc -p tsconfig.test.json` (which includes `*.test.ts` + `test/**`) but pass at runtime (the
+  default fills the field) and under `npm run check` (its `typecheck` is `tsconfig.json`, which
+  EXCLUDES `*.test.ts`). Count was 18 errors before the Step-6 PSL/multi-country refactor and 18
+  after — this change neither introduced nor removed any; it only shifted which missing field each
+  error names (`published_at` → `source_registrable_domain`). Pre-existing since Step 2 added
+  `affiliate_disclosure`/`published_at`.
+- **Why deferred**: out of scope for the Step-6 test-signature fixups (these files were not in the
+  run-failing set), and not a CI gate — CI runs `lint` + `typecheck` (tsconfig.json) + `npm test`,
+  none of which compile `tsconfig.test.json`. The literals are runtime-correct.
+- **Fix-when**: route every test through the `dealRecord()` contract helper / `makeLlmDeal` factory
+  (which now pin all defaulted fields) instead of hand-rolled literals, OR add `tsconfig.test.json`
+  to CI as a typecheck gate. Do the former first; then the latter stays green. Verify with
+  `npx tsc -p tsconfig.test.json --noEmit` (must be clean).
+- **Logged**: 2026-06-21
 
 ---
 

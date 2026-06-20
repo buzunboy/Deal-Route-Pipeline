@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { dedupeKey, normalizeName } from './dedupe-key.js';
+import { tldtsSuffixOracle } from '../../adapters/suffix/tldts-suffix-oracle.js';
+
+/** Resolve a source URL to its registrable domain (the pinned 2nd arg dedupeKey now takes). */
+const domainOf = tldtsSuffixOracle;
 
 describe('normalizeName', () => {
   const cases: [string, string][] = [
@@ -24,7 +28,8 @@ describe('dedupeKey', () => {
     route_type: 'bundle' as const,
     country: 'DE' as const,
   };
-  const SOURCE = 'https://www.telekom.de/magenta-tv';
+  // dedupeKey's 2nd arg is the PRE-RESOLVED registrable domain (Step 6), not a URL.
+  const SOURCE = domainOf('https://www.telekom.de/magenta-tv'); // 'telekom.de'
 
   it('is stable for the same logical route + same source', () => {
     const a = dedupeKey(base, SOURCE);
@@ -55,15 +60,20 @@ describe('dedupeKey', () => {
   // The core new behaviour: split-by-source. Identical route fields, DIFFERENT
   // source domains → DIFFERENT keys, so each source's report is its own record.
   it('produces DIFFERENT keys for the same route from DIFFERENT source domains', () => {
-    const fromTelekom = dedupeKey(base, 'https://www.telekom.de/magenta-tv');
-    const fromMydealz = dedupeKey(base, 'https://www.mydealz.de/deals/disney-magentatv-123');
+    const fromTelekom = dedupeKey(base, domainOf('https://www.telekom.de/magenta-tv'));
+    const fromMydealz = dedupeKey(
+      base,
+      domainOf('https://www.mydealz.de/deals/disney-magentatv-123'),
+    );
     expect(fromTelekom).not.toBe(fromMydealz);
   });
 
   // Same registrable domain must collapse: www-vs-bare host, trailing slash, and a
   // different path on the same site are the SAME source (idempotency on re-crawl).
+  // All these URLs resolve (via the real PSL) to the SAME registrable domain
+  // `telekom.de`, so the pre-resolved 2nd arg is identical → one key.
   it('produces the SAME key for the same route + same source domain (host/path/slash variants)', () => {
-    const canonical = dedupeKey(base, 'https://www.telekom.de/magenta-tv');
+    const canonical = dedupeKey(base, domainOf('https://www.telekom.de/magenta-tv'));
     const variants = [
       'https://telekom.de/magenta-tv', // bare host
       'https://www.telekom.de/magenta-tv/', // trailing slash
@@ -71,15 +81,18 @@ describe('dedupeKey', () => {
       'http://shop.telekom.de/magenta-tv', // subdomain + scheme
     ];
     for (const url of variants) {
-      expect(dedupeKey(base, url)).toBe(canonical);
+      expect(dedupeKey(base, domainOf(url))).toBe(canonical);
     }
   });
 
   it('uses a stable sentinel for an unparseable source URL (no throw, well-formed key)', () => {
-    expect(() => dedupeKey(base, 'not a url')).not.toThrow();
-    const key = dedupeKey(base, 'not a url');
+    // An unparseable URL resolves to a null registrable domain (the sentinel input).
+    expect(() => dedupeKey(base, null)).not.toThrow();
+    const key = dedupeKey(base, null);
     expect(key.endsWith('|unknown-source')).toBe(true);
-    // Two unparseable URLs for the same route collapse to one key (stable sentinel).
-    expect(dedupeKey(base, 'not a url')).toBe(dedupeKey(base, '::::garbage::::'));
+    // Two unresolvable domains for the same route collapse to one key (stable sentinel).
+    expect(dedupeKey(base, domainOf('not a url'))).toBe(
+      dedupeKey(base, domainOf('::::garbage::::')),
+    );
   });
 });

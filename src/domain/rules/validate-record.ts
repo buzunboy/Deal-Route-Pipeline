@@ -1,6 +1,7 @@
 import type { LlmExtractedDeal } from '../deal-record/index.js';
 import { KEY_GROUNDED_FIELDS } from './confidence.js';
 import { trueCostMonthly } from './true-cost.js';
+import { isCurrencyAllowedForCountry } from '../markets/index.js';
 
 /**
  * Vocabulary key signalling a discounted introductory period (see
@@ -39,13 +40,17 @@ const MAX_PLAUSIBLE_MONTHLY_EUR = 1000;
 export function validateRecord(deal: LlmExtractedDeal, sourceText?: string): ValidationResult {
   const failures: RuleFailure[] = [];
 
-  // ── Currency vs country (DE ⇒ EUR). The schema already constrains the enums,
-  //    but this guards against a future widening that forgets the pairing.
-  if (deal.country === 'DE' && deal.price.currency !== 'EUR') {
+  // ── Currency vs country (per-market; DE ⇒ EUR today). The trust rule reads the
+  //    market registry (`domain/markets`) so it covers EVERY in-scope country with
+  //    one lookup and can't silently no-op when the enums widen. A deal whose
+  //    currency isn't allowed for its country → must-review (never auto-publish),
+  //    exactly the prior strictness, now data-driven. An out-of-scope country also
+  //    fails here (belt-and-suspenders; the schema enum already rejects it).
+  if (!isCurrencyAllowedForCountry(deal.country, deal.price.currency)) {
     failures.push({
       rule: 'currency_matches_country',
       field: 'price.currency',
-      message: `DE deals must be priced in EUR, got ${deal.price.currency}.`,
+      message: `${deal.country} deals may not be priced in ${deal.price.currency} (not an allowed currency for that market).`,
     });
   }
 

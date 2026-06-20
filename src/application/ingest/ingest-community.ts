@@ -1,9 +1,9 @@
 import {
   looksRelevant,
   parseTriageResult,
-  registrableDomain,
   type Vocabulary,
   type Source,
+  type SuffixOracle,
 } from '../../domain/index.js';
 import type {
   Fetcher,
@@ -84,9 +84,10 @@ export class IngestCommunityUseCase {
     private readonly vocabulary: Vocabulary,
     private readonly fetchUserAgent: string,
     private readonly fetchTimeoutMs: number,
+    private readonly suffixOracle: SuffixOracle,
   ) {
     this.sink = new CandidateSink(db, clock, logger);
-    this.support = new LaneBSupport(evidenceStore, db, clock, logger);
+    this.support = new LaneBSupport(evidenceStore, db, clock, logger, suffixOracle);
     this.runs = new RunRecorder(db, clock, logger, 'ingest');
   }
 
@@ -342,7 +343,7 @@ export class IngestCommunityUseCase {
     url: string,
     feedUrl: string,
   ): void {
-    const domain = registrableDomain(url);
+    const domain = this.suffixOracle(url);
     if (domain === null || proposed.has(domain) || knownDomains.has(domain)) return;
     proposed.set(domain, {
       url,

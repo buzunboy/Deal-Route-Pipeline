@@ -6,6 +6,7 @@ import type { ExtractedCandidate } from '../extract/extract.js';
 import { InMemoryDb } from '../../../test/fakes/in-memory-db.js';
 import { FixedClock, FakeLogger } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
+import { tldtsSuffixOracle } from '../../adapters/suffix/tldts-suffix-oracle.js';
 
 /**
  * Build an evidence bundle for a given source URL + content hash. CandidateSink
@@ -32,10 +33,14 @@ function evidenceFor(sourceUrl: string, contentHash: string): Evidence {
  */
 function candidateForSource(sourceUrl: string): ExtractedCandidate {
   const deal = makeLlmDeal();
+  // Step 6: the key + pin both come from the PRE-RESOLVED registrable domain of the
+  // fetched URL (the eTLD+1), exactly as ExtractUseCase derives them.
+  const sourceRegistrableDomain = tldtsSuffixOracle(sourceUrl);
   return {
     deal,
     trueCostMonthly: 10,
-    dedupeKey: dedupeKey(deal, sourceUrl),
+    dedupeKey: dedupeKey(deal, sourceRegistrableDomain),
+    sourceRegistrableDomain,
     schemaVersion: CURRENT_SCHEMA_VERSION,
     adjustedConfidence: deal.confidence,
     mustReview: false,
@@ -74,7 +79,9 @@ describe('CandidateSink — split-by-source dedupe', () => {
     // Each record keeps its own source provenance (split-by-source).
     expect(all.map((d) => d.source_url).sort()).toEqual([mydealz, telekom].sort());
     // And they carry DISTINCT dedupe keys (the actual split mechanism).
-    expect(dedupeKey(all[0]!, all[0]!.source_url)).not.toBe(dedupeKey(all[1]!, all[1]!.source_url));
+    expect(dedupeKey(all[0]!, all[0]!.source_registrable_domain)).not.toBe(
+      dedupeKey(all[1]!, all[1]!.source_registrable_domain),
+    );
   });
 
   it('keeps ONE record when the SAME source re-crawls the SAME content (idempotency)', async () => {

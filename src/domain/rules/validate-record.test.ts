@@ -13,6 +13,26 @@ describe('validateRecord — sanity rules', () => {
     expect(result.failures).toHaveLength(0);
   });
 
+  it('flags a currency not allowed for the deal’s country (DE ⇒ EUR; Step 6 per-market rule)', () => {
+    // Defensive rule: a DE deal priced in a non-EUR currency must be flagged →
+    // must-review, never auto-publish. Construct the price object directly (the
+    // schema enum gates currency upstream; this guards a future widening/bug).
+    const deal = makeLlmDeal();
+    const wrongCurrency = {
+      ...deal,
+      country: 'DE' as const,
+      price: { ...deal.price, currency: 'USD' as unknown as 'EUR' },
+    };
+    const result = validateRecord(wrongCurrency, SOURCE_TEXT);
+    expect(result.failures.some((f) => f.rule === 'currency_matches_country')).toBe(true);
+  });
+
+  it('does NOT flag a DE deal priced in EUR (the allowed market currency)', () => {
+    const deal = makeLlmDeal({ price: { amount: 9.99, currency: 'EUR', billing: 'monthly' } });
+    const result = validateRecord(deal, SOURCE_TEXT);
+    expect(result.failures.some((f) => f.rule === 'currency_matches_country')).toBe(false);
+  });
+
   it('flags an implausibly high price', () => {
     const deal = makeLlmDeal({ price: { amount: 5000, currency: 'EUR', billing: 'monthly' } });
     const result = validateRecord(deal, SOURCE_TEXT);

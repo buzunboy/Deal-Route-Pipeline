@@ -5,6 +5,7 @@ import {
   SERVICE_QUERY_TEMPLATES,
   PROVIDER_QUERY_TEMPLATES,
 } from './broad-queries.js';
+import { tldtsSuffixOracle } from '../../adapters/suffix/tldts-suffix-oracle.js';
 
 const PER_SERVICE = SERVICE_QUERY_TEMPLATES.length;
 const PER_PROVIDER = PROVIDER_QUERY_TEMPLATES.length;
@@ -75,10 +76,10 @@ describe('providerTokenFromUrl', () => {
     ['http://vodafone.de', 'vodafone'],
     ['https://shop.sub.example.de/x', 'example'], // registrable domain = example.de
   ])('%s → %s', (url, expected) => {
-    expect(providerTokenFromUrl(url)).toBe(expected);
+    expect(providerTokenFromUrl(url, tldtsSuffixOracle)).toBe(expected);
   });
 
   it('returns null for an unparseable url', () => {
-    expect(providerTokenFromUrl('not a url')).toBeNull();
+    expect(providerTokenFromUrl('not a url', tldtsSuffixOracle)).toBeNull();
   });
 });

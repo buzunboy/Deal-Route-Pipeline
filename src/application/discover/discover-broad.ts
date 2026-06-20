@@ -2,9 +2,9 @@ import {
   buildBroadQueries,
   providerTokenFromUrl,
   DomainDenylist,
-  registrableDomain,
   InvariantViolation,
   type Vocabulary,
+  type SuffixOracle,
 } from '../../domain/index.js';
 import type {
   EvidenceStore,
@@ -74,9 +74,10 @@ export class DiscoverBroadUseCase {
     private readonly logger: Logger,
     private readonly vocabulary: Vocabulary,
     private readonly denylist: DomainDenylist,
+    private readonly suffixOracle: SuffixOracle,
   ) {
     this.sink = new CandidateSink(db, clock, logger);
-    this.support = new LaneBSupport(evidenceStore, db, clock, logger);
+    this.support = new LaneBSupport(evidenceStore, db, clock, logger, suffixOracle);
     this.runs = new RunRecorder(db, clock, logger, 'discover_broad');
   }
 
@@ -376,7 +377,7 @@ export class DiscoverBroadUseCase {
       ...new Set(
         active
           .filter((s) => s.type === 'provider' || s.type === 'bundler')
-          .map((s) => providerTokenFromUrl(s.url))
+          .map((s) => providerTokenFromUrl(s.url, this.suffixOracle))
           .filter((t): t is string => t !== null),
       ),
     ];
@@ -394,7 +395,7 @@ export class DiscoverBroadUseCase {
     known: Set<string>,
   ): void {
     if (this.denylist.isDenied(ps.url)) return;
-    const domain = registrableDomain(ps.url);
+    const domain = this.suffixOracle(ps.url);
     if (domain === null || known.has(domain) || proposed.has(domain)) return;
     proposed.set(domain, { url: ps.url, rationale: ps.rationale });
   }

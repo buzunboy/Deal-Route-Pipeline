@@ -157,16 +157,16 @@ so it carries the load-bearing trust contract:
   freshness `trust` badge** derived from `verified_at` — never the raw reliability/confidence score.
 - **Reliability-blended ordering, order-only (Step 3).** The feed sort blends a source's
   `reliability_score` as a **tiebreaker**: the primary key (`cost_asc` true-cost / `verified_desc`
-  freshness) decides order, ties break by reliability DESC then `id`. Reliability is resolved at
-  read time by the P1 **registrable-domain** deal→source join (`deal.source_url` ↔ `source.url`;
-  neutral `0.5` when no active source matches, a real `0` preserved). The raw score **never**
-  reaches the DTO — it lives only inside the comparator (`reliability_score`/`reliability` are also
-  in `FORBIDDEN_VALUE_KEYS` as defence-in-depth). One pure ranker
-  (`domain/deal-record/published-ranking.ts`) + one `registrableDomain` are shared by **both** DB
-  adapters, so the order is LSP-identical by construction: SQL does only `status`+filters+a
-  deterministic primary-ordered bounded fetch (`LIMIT PUBLISHED_FETCH_CAP`), then the shared ranker
-  applies the tiebreak + paginates. `countPublished` is order-invariant (reliability never changes
-  set membership). No schema change / no migration.
+  freshness) decides order, ties break by reliability DESC then `id`. The deal→source join keys on
+  the **registrable domain**: each deal carries a PINNED `source_registrable_domain` (Step 6,
+  below) and the index is built from active sources' pinned `registrable_domain` — so the comparator
+  reads a frozen string (neutral `0.5` when no active source matches, a real `0` preserved), never
+  resolves a URL. The raw score **never** reaches the DTO — it lives only inside the comparator
+  (`reliability_score`/`reliability` are also in `FORBIDDEN_VALUE_KEYS` as defence-in-depth). One
+  pure ranker (`domain/deal-record/published-ranking.ts`) is shared by **both** DB adapters, so the
+  order is LSP-identical by construction: SQL does only `status`+filters+a deterministic
+  primary-ordered bounded fetch (`LIMIT PUBLISHED_FETCH_CAP`), then the shared ranker applies the
+  tiebreak + paginates. `countPublished` is order-invariant. No public-API schema change.
 - **Evidence as CDN URLs.** `evidence_screenshot_url` is derived purely from `evidence_id` + the
   deterministic evidence layout (`${S3_CDN_BASE_URL}/<evidence_id>/screenshot.png`); null when no
   CDN base is configured (no broken/relative URL). No screenshot-streaming route.
@@ -187,11 +187,39 @@ so it carries the load-bearing trust contract:
 - **No in-process rate-limit.** Front `/v1/` with a CDN/reverse-proxy at deploy for rate-limiting +
   caching (the published feed is highly cacheable). See `docs/KNOWN_ISSUES.md`.
 
+## Registrable domains + multi-country (Step 6)
+
+"The same website" — the discriminator for the split-by-source dedupe key, the reliability join,
+and the Lane-B same-site boundary — is a URL's **registrable domain** (eTLD+1). It is resolved by a
+real **Public Suffix List**, not a `lastTwoLabels` approximation (which is wrong for multi-label
+suffixes like `bbc.co.uk`). The PSL sits behind a pure domain TYPE `SuffixOracle`
+(`domain/discovery/suffix-oracle.ts`, zero imports); the only vendor (`tldts`, pinned exactly) lives
+in `adapters/suffix/tldts-suffix-oracle.ts`, injected from the one composition root — so the domain
+layer stays vendor-free and the resolver is swappable in one file.
+
+The registrable domain is **pinned at write time**, never recomputed in a hot path: extract pins
+`deal.source_registrable_domain` (from the fetched URL), and source-create / seed-import pin
+`source.registrable_domain` (from `source.url`). The trust-critical SYNC rules — `dedupeKey` and the
+`Array.sort` ranking comparator — read those frozen fields, so the PSL is never called inside a
+comparator (it can't regress to async) and the dedupe key is stable. `.de` (a single-label suffix)
+resolves byte-identically to the old rule, so the swap caused no dedupe churn (golden-gated by
+`test/golden/suffix-equivalence.golden.test.ts`); existing rows are nullable and self-heal on
+re-crawl (migration 0012 is additive, no backfill).
+
+In-scope countries + their currencies live in one **market registry**
+(`domain/markets/markets.ts`, DE→{EUR} in v1). The `Country`/`Currency` schema enums are DERIVED
+from it but stay CLOSED allow-lists (an out-of-scope country is rejected at the boundary), and the
+currency-sanity trust rule reads it (`isCurrencyAllowedForCountry`; a wrong currency → must-review).
+
 ## How to add things (no editing of existing logic)
 
 - **A new source** → add a row to the `sources` registry (via `seed-import` or the
   `add-source` skill): `url`, `type`, `tier`, `cadence_days`. No code change. If it needs a
   different fetch strategy, that's a new `Fetcher` adapter behind the port.
+- **A new country (market)** → add one row to `MARKETS` (`domain/markets/markets.ts`): the country
+  code → its allowed currencies. The `Country`/`Currency` enums, the currency trust rule, and the
+  public-API country filter all widen automatically. Then add that country's seed sources, catalog
+  vocab, deny-list, and Tier-4 intent queries (data). No pipeline-logic edit. See `docs/KNOWN_ISSUES.md`.
 - **A new model / vendor** → add an adapter implementing `Llm` (or `Fetcher`, etc.) + its
   contract test, then select it via env in the composition root. No business-logic change.
 - **A new condition** → add a `condition_vocabulary` entry (data). Recurring unknown

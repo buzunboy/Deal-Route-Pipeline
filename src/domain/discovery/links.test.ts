@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  extractLinks,
-  sameRegistrableDomain,
-  registrableDomain,
-  scoreCandidateUrl,
-} from './links.js';
+import { extractLinks, scoreCandidateUrl } from './links.js';
 
 const BASE = 'https://www.mydealz.de/gruppe/spotify';
 
@@ -51,22 +46,10 @@ describe('extractLinks', () => {
   });
 });
 
-describe('registrableDomain / sameRegistrableDomain', () => {
-  it('treats subdomains of the same site as the same registrable domain', () => {
-    expect(registrableDomain('https://www.mydealz.de/x')).toBe('mydealz.de');
-    expect(sameRegistrableDomain('https://www.mydealz.de/a', 'https://mydealz.de/b')).toBe(true);
-  });
-
-  it('distinguishes different sites', () => {
-    expect(sameRegistrableDomain('https://www.mydealz.de/a', 'https://www.spotify.com/b')).toBe(
-      false,
-    );
-  });
-
-  it('returns null for a non-URL', () => {
-    expect(registrableDomain('nope')).toBeNull();
-  });
-});
+// NB: registrable-domain resolution moved to the real PSL behind `SuffixOracle`
+// (Step 6); its DE-equivalence + multi-label correctness is covered by
+// test/golden/suffix-equivalence.golden.test.ts. The old last-two-labels helpers
+// were removed from links.ts, so their tests live there now, not here.
 
 describe('scoreCandidateUrl (frontier prioritisation)', () => {
   const deal =

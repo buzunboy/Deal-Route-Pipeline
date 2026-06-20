@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import {
   ManualCaptureReason,
-  registrableDomain,
   type Evidence,
   type Source,
+  type SuffixOracle,
 } from '../../domain/index.js';
 import type { Database, Clock, Logger, EvidenceStore, FetchResult } from '../ports/index.js';
 import { newId } from '../shared/id.js';
@@ -30,6 +30,7 @@ export class LaneBSupport {
     private readonly db: Database,
     private readonly clock: Clock,
     private readonly logger: Logger,
+    private readonly suffixOracle: SuffixOracle,
   ) {}
 
   /** Capture + persist an evidence bundle for a fetched page (caller must be non-dry-run). */
@@ -82,7 +83,7 @@ export class LaneBSupport {
     // Includes `rejected` so a domain a human declined is never re-proposed.
     for (const status of ['active', 'pending_approval', 'disabled', 'rejected'] as const) {
       for (const s of await this.db.sources.listByStatus(status)) {
-        const d = registrableDomain(s.url);
+        const d = this.suffixOracle(s.url);
         if (d !== null) known.add(d);
       }
     }
@@ -99,7 +100,7 @@ export class LaneBSupport {
     if (proposals.length === 0) return;
     const known = await this.knownDomains();
     for (const p of proposals) {
-      const domain = registrableDomain(p.url);
+      const domain = this.suffixOracle(p.url);
       if (domain === null || known.has(domain)) continue;
       known.add(domain);
       const source: Source = {
@@ -115,6 +116,9 @@ export class LaneBSupport {
         last_seen: null,
         next_due: null,
         resolved_url: null, // set on the first successful crawl after approval
+        // Pin the registrable domain now (we already resolved it for the dedupe
+        // check above) so the reliability join works the moment it's crawled.
+        registrable_domain: domain,
       };
       await this.db.sources.upsert(source);
       this.logger.info('lane-b: proposed novel source (pending approval)', { url: p.url });

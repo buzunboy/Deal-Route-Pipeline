@@ -23,7 +23,13 @@ import {
   type BrowserAgent,
   type Alerting,
 } from '../application/index.js';
-import { SEED_VOCABULARY, DomainDenylist, type Vocabulary } from '../domain/index.js';
+import {
+  SEED_VOCABULARY,
+  DomainDenylist,
+  type Vocabulary,
+  type SuffixOracle,
+} from '../domain/index.js';
+import { tldtsSuffixOracle } from '../adapters/suffix/tldts-suffix-oracle.js';
 import { S3Client } from '@aws-sdk/client-s3';
 import { ConsoleLogger } from '../adapters/logger/console-logger.js';
 import { LocalFsEvidenceStore } from '../adapters/evidence-store/local-fs-evidence-store.js';
@@ -72,6 +78,7 @@ export interface ContainerOptions {
     searchProvider?: SearchProvider;
     browserAgent?: BrowserAgent;
     alerting?: Alerting;
+    suffixOracle?: SuffixOracle;
   };
 }
 
@@ -88,6 +95,7 @@ export class Container {
   readonly searchProvider: SearchProvider;
   readonly browserAgent: BrowserAgent;
   readonly alerting: Alerting;
+  readonly suffixOracle: SuffixOracle;
 
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
@@ -117,6 +125,11 @@ export class Container {
     this.evidenceStore = this.buildEvidenceStore(config);
     this.db = this.buildDatabase(config, usePersistence);
     this.searchProvider = overrides.searchProvider ?? this.buildSearchProvider(config);
+    // The real Public Suffix List oracle (Step 6) — the one place the domain's
+    // registrable-domain resolution depends on a PSL vendor; injected so every
+    // pin/discovery site shares one instance and the domain layer stays vendor-free.
+    // Built BEFORE the browser agent (the search agent threads it in).
+    this.suffixOracle = overrides.suffixOracle ?? tldtsSuffixOracle;
     this.browserAgent = overrides.browserAgent ?? this.buildBrowserAgent(config);
     this.alerting = overrides.alerting ?? this.buildAlerter(config);
     // NB: there is intentionally no job queue wired here. v1 runs as external
@@ -125,7 +138,7 @@ export class Container {
     // in-memory adapters remain in the tree for the future in-process worker
     // (Phase C scheduler), but are not a runtime dependency of the container.
 
-    this.extract = new ExtractUseCase(this.llm, this.logger);
+    this.extract = new ExtractUseCase(this.llm, this.logger, this.suffixOracle);
     this.crawlSource = new CrawlSourceUseCase(
       this.fetcher,
       this.evidenceStore,
@@ -148,6 +161,7 @@ export class Container {
       this.vocabulary,
       config.fetcher.userAgent,
       config.fetcher.timeoutMs,
+      this.suffixOracle,
     );
     this.discoverBroad = new DiscoverBroadUseCase(
       this.browserAgent,
@@ -157,7 +171,8 @@ export class Container {
       this.clock,
       this.logger,
       this.vocabulary,
-      DomainDenylist.fromConfig(config.discovery.denyDomains),
+      DomainDenylist.fromConfig(this.suffixOracle, config.discovery.denyDomains),
+      this.suffixOracle,
     );
     this.ingestCommunity = new IngestCommunityUseCase(
       this.fetcher,
@@ -171,6 +186,7 @@ export class Container {
       this.vocabulary,
       config.fetcher.userAgent,
       config.fetcher.timeoutMs,
+      this.suffixOracle,
     );
     this.review = new ReviewUseCase(this.db, this.clock, this.logger);
     this.sourceReview = new SourceReviewUseCase(this.db, this.clock, this.logger);
@@ -281,15 +297,22 @@ export class Container {
     if (config.agent.kind === 'noop') return new NoopBrowserAgent();
     // The thin search-API-first agent reuses the configured (polite) Fetcher, so
     // its fetches respect robots + per-domain rate limits exactly like all lanes.
-    return new SearchBrowserAgent(this.searchProvider, this.fetcher, this.clock, this.logger, {
-      resultsPerQuery: config.search.resultsPerQuery,
-      country: config.country,
-      searchTimeoutMs: config.fetcher.timeoutMs,
-      fetchTimeoutMs: config.fetcher.timeoutMs,
-      userAgent: config.fetcher.userAgent,
-      searchCostEur: config.agent.searchCostEur,
-      inlineScrape: config.agent.inlineScrape,
-    });
+    return new SearchBrowserAgent(
+      this.searchProvider,
+      this.fetcher,
+      this.clock,
+      this.logger,
+      this.suffixOracle,
+      {
+        resultsPerQuery: config.search.resultsPerQuery,
+        country: config.country,
+        searchTimeoutMs: config.fetcher.timeoutMs,
+        fetchTimeoutMs: config.fetcher.timeoutMs,
+        userAgent: config.fetcher.userAgent,
+        searchCostEur: config.agent.searchCostEur,
+        inlineScrape: config.agent.inlineScrape,
+      },
+    );
   }
 
   private buildLlm(config: Config): Llm {

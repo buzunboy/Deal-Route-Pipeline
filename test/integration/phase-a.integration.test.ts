@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { hasDb, applyMigrations, resetDb, makeContainer } from './harness.js';
 import { ScriptedFetcher, RoleAwareFakeLlm, SequencedFakeLlm, FixedClock } from '../fakes/fakes.js';
 import { makeLlmDeal } from '../factories/deal.js';
 import { makeSource } from '../factories/source.js';
+import { DealStatus, type DealRecord } from '../../src/domain/index.js';
+import { tldtsSuffixOracle } from '../../src/adapters/suffix/tldts-suffix-oracle.js';
 import type { Container } from '../../src/composition/container.js';
 
 /**
@@ -53,6 +56,59 @@ suite('Phase A pipeline (Container + Postgres)', () => {
     const history = await container.review.listReviews(deal.id);
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({ action: 'approve', approver: 'reviewer@dealroute' });
+  });
+
+  it('Step 6: a crawled candidate pins source_registrable_domain, and the deal→source reliability join resolves non-neutral', async () => {
+    // The end-to-end PSL pin path through real Postgres: a source pinned the way
+    // seed-import/lane-b pin it (registrable_domain set), a crawl pins the deal's
+    // source_registrable_domain via the same PSL, and the published-feed reliability
+    // join matches the two by that pinned domain (NOT folding to neutral 0.5).
+    const url = 'https://www.telekom.de/magenta-disney';
+    const source = makeSource({
+      url,
+      reliability_score: 0.9,
+      // Pinned by the real PSL exactly as seed-import does before upsert (Step 6).
+      registrable_domain: tldtsSuffixOracle(url),
+    });
+    container = makeContainer({
+      fetcher: new ScriptedFetcher({ [url]: { text: PAGE, html: '<html></html>' } }),
+      llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [makeLlmDeal()] }) }),
+    });
+    await container.db.sources.upsert(source);
+    expect((await container.db.sources.getById(source.id))!.registrable_domain).toBe('telekom.de');
+
+    await container.crawlSource.execute({ sourceId: source.id });
+    const candidate = (await container.db.deals.listByStatus('candidate', 10))[0]!;
+    // The deal pinned the registrable domain of the fetched URL (same as the source).
+    expect(candidate.source_registrable_domain).toBe('telekom.de');
+
+    // Approve, then a SECOND equal-cost published deal from an UNKNOWN source (neutral
+    // 0.5). The high-reliability (0.9) seed deal must rank FIRST — proving the join
+    // resolved its real score, not neutral (the seed-import bug would have folded it).
+    await container.review.approve(candidate.id, 'reviewer@dealroute');
+    const neutral: DealRecord = {
+      ...makeLlmDeal(),
+      id: randomUUID(),
+      schema_version: 4,
+      service: candidate.service,
+      true_cost_monthly: candidate.true_cost_monthly,
+      evidence_id: randomUUID(),
+      source_url: 'https://unknown-src.de/x',
+      source_registrable_domain: tldtsSuffixOracle('https://unknown-src.de/x'), // no source row → neutral
+      status: DealStatus.enum.published,
+      verified_by: 'reviewer',
+      verified_at: '2026-06-19T00:00:00.000Z',
+      affiliate_disclosure: true,
+      published_at: '2026-06-19T00:00:00.000Z',
+    };
+    await container.db.deals.insert(neutral);
+    const out = await container.db.deals.listPublished({
+      filters: { service: candidate.service },
+      sort: 'cost_asc',
+      limit: 50,
+      offset: 0,
+    });
+    expect(out.map((d) => d.id)).toEqual([candidate.id, neutral.id]); // 0.9 before 0.5
   });
 
   it('login-gated page routes to the manual-capture queue (no candidate)', async () => {

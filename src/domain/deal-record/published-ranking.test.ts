@@ -10,10 +10,14 @@ import {
 } from './published-ranking.js';
 import { PUBLISHED_MAX_LIMIT, PUBLISHED_MAX_OFFSET } from './published-query.js';
 import type { DealRecord } from './deal-record.js';
+import { tldtsSuffixOracle } from '../../adapters/suffix/tldts-suffix-oracle.js';
 
 /**
  * Minimal DealRecord carrying ONLY the fields the ranking touches
- * (true_cost_monthly, verified_at, source_url, id). The ranker is pure over these.
+ * (true_cost_monthly, verified_at, source_url, source_registrable_domain, id).
+ * The ranker is pure over these. Step 6: the comparator reads the PINNED
+ * `source_registrable_domain`, so we resolve it here from `source_url` via the
+ * real PSL — mirroring how extract pins it on a persisted record.
  */
 function deal(over: {
   id: string;
@@ -24,10 +28,11 @@ function deal(over: {
   return {
     id: over.id,
     source_url: over.source_url,
+    source_registrable_domain: tldtsSuffixOracle(over.source_url),
     true_cost_monthly: over.true_cost_monthly ?? 10,
     verified_at: over.verified_at ?? null,
     // Padding to satisfy the type — irrelevant to ranking.
-    schema_version: 3,
+    schema_version: 4,
     service: 'svc',
     route_type: 'bundle',
     provider: 'prov',
@@ -67,8 +72,9 @@ const fullQuery = (sort: 'cost_asc' | 'verified_desc') => ({
 
 describe('buildReliabilityIndex', () => {
   it('keys by registrable domain (folds subdomain/path/scheme differences)', () => {
+    // Step 6: sources arrive with their PINNED registrable_domain already resolved.
     const idx = buildReliabilityIndex([
-      { url: 'https://www.telekom.de/magenta', reliability_score: 0.8 },
+      { registrable_domain: 'telekom.de', reliability_score: 0.8 },
     ]);
     // A deal scraped at any path/subdomain of the same registrable domain resolves.
     expect(idx.get('telekom.de')).toBe(0.8);
@@ -76,17 +82,17 @@ describe('buildReliabilityIndex', () => {
 
   it('on a registrable-domain collision keeps the MAX score', () => {
     const idx = buildReliabilityIndex([
-      { url: 'https://shop.telekom.de/a', reliability_score: 0.3 },
-      { url: 'https://www.telekom.de/b', reliability_score: 0.9 },
-      { url: 'https://telekom.de/c', reliability_score: 0.6 },
+      { registrable_domain: 'telekom.de', reliability_score: 0.3 },
+      { registrable_domain: 'telekom.de', reliability_score: 0.9 },
+      { registrable_domain: 'telekom.de', reliability_score: 0.6 },
     ]);
     expect(idx.get('telekom.de')).toBe(0.9);
   });
 
-  it('skips an unparseable source url (no null key)', () => {
+  it('skips a source with a null registrable domain (no null key)', () => {
     const idx = buildReliabilityIndex([
-      { url: 'not a url', reliability_score: 0.9 },
-      { url: 'https://valid.de', reliability_score: 0.4 },
+      { registrable_domain: null, reliability_score: 0.9 },
+      { registrable_domain: 'valid.de', reliability_score: 0.4 },
     ]);
     expect(idx.size).toBe(1);
     expect(idx.get('valid.de')).toBe(0.4);
@@ -95,31 +101,32 @@ describe('buildReliabilityIndex', () => {
 
 describe('resolveReliability', () => {
   const idx = buildReliabilityIndex([
-    { url: 'https://www.telekom.de', reliability_score: 0.8 },
-    { url: 'https://distrusted.de', reliability_score: 0 },
+    { registrable_domain: 'telekom.de', reliability_score: 0.8 },
+    { registrable_domain: 'distrusted.de', reliability_score: 0 },
   ]);
 
   it('resolves a matching registrable domain', () => {
-    expect(resolveReliability('https://www.telekom.de/deep/path?x=1', idx)).toBe(0.8);
+    // 2nd arg is now the PINNED registrable domain, not a URL.
+    expect(resolveReliability('telekom.de', idx)).toBe(0.8);
   });
 
   it('PRESERVES a real score of 0 (a distrusted domain never floats to neutral)', () => {
-    expect(resolveReliability('https://distrusted.de/x', idx)).toBe(0);
+    expect(resolveReliability('distrusted.de', idx)).toBe(0);
   });
 
   it('falls back to neutral 0.5 for a domain with no active source', () => {
-    expect(resolveReliability('https://unknown.de', idx)).toBe(NEUTRAL_RELIABILITY);
+    expect(resolveReliability('unknown.de', idx)).toBe(NEUTRAL_RELIABILITY);
   });
 
-  it('falls back to neutral 0.5 for an unparseable source url', () => {
-    expect(resolveReliability('::::not-a-url', idx)).toBe(NEUTRAL_RELIABILITY);
+  it('falls back to neutral 0.5 for an unpinned (null) registrable domain', () => {
+    expect(resolveReliability(null, idx)).toBe(NEUTRAL_RELIABILITY);
   });
 });
 
 describe('comparePublished — cost_asc', () => {
   const idx = buildReliabilityIndex([
-    { url: 'https://high.de', reliability_score: 0.9 },
-    { url: 'https://low.de', reliability_score: 0.1 },
+    { registrable_domain: 'high.de', reliability_score: 0.9 },
+    { registrable_domain: 'low.de', reliability_score: 0.1 },
   ]);
 
   it('orders by true_cost_monthly primarily', () => {
@@ -162,8 +169,8 @@ describe('comparePublished — cost_asc', () => {
 
 describe('comparePublished — verified_desc', () => {
   const idx = buildReliabilityIndex([
-    { url: 'https://high.de', reliability_score: 0.9 },
-    { url: 'https://low.de', reliability_score: 0.1 },
+    { registrable_domain: 'high.de', reliability_score: 0.9 },
+    { registrable_domain: 'low.de', reliability_score: 0.1 },
   ]);
 
   it('orders by verified_at newest-first, nulls last, primarily', () => {
@@ -208,8 +215,8 @@ describe('comparePublished — verified_desc', () => {
 
 describe('rankPublished — sort + paginate', () => {
   const idx = buildReliabilityIndex([
-    { url: 'https://high.de', reliability_score: 0.9 },
-    { url: 'https://low.de', reliability_score: 0.1 },
+    { registrable_domain: 'high.de', reliability_score: 0.9 },
+    { registrable_domain: 'low.de', reliability_score: 0.1 },
   ]);
   // Five equal-cost deals so reliability + id fully decide the order.
   const ds = [

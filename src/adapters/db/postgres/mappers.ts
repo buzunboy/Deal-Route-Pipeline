@@ -46,15 +46,17 @@ export function dealToRow(d: DealRecord): DealRow {
     sourceUrl: d.source_url,
     evidenceId: d.evidence_id,
     confidence: d.confidence,
-    // Recompute from the PINNED source_url (= the fetched finalUrl, set by
-    // CandidateSink). This is the SAME url extract.ts used at extract time, so the
-    // stored key is identical to the extract-time key (consistency invariant).
-    dedupeKey: dedupeKey(d, d.source_url),
+    // Recompute from the PINNED source_registrable_domain (Step 6) — the eTLD+1
+    // extract resolved via the real PSL and stored on the record. This is the SAME
+    // value extract.ts fed dedupeKey, so the stored key is identical to the
+    // extract-time key (consistency invariant), now correct for multi-label TLDs.
+    dedupeKey: dedupeKey(d, d.source_registrable_domain),
     status: d.status,
     verifiedBy: d.verified_by,
     verifiedAt: d.verified_at,
     affiliateDisclosure: d.affiliate_disclosure,
     publishedAt: d.published_at,
+    sourceRegistrableDomain: d.source_registrable_domain,
   };
 }
 
@@ -128,6 +130,7 @@ export function rowToDeal(r: DealSelect): DealRecord {
     affiliate_disclosure: r.affiliateDisclosure,
     // timestamptz → canonical ISO-Z (same normalisation as verified_at).
     published_at: isoTimestampOrNull(r.publishedAt),
+    source_registrable_domain: r.sourceRegistrableDomain,
   };
   return DealRecordSchema.parse(candidate);
 }

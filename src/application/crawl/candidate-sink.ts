@@ -111,6 +111,11 @@ export class CandidateSink {
       // safe default (true) + no published_at. The reviewer confirms/sets them at approve.
       affiliate_disclosure: true,
       published_at: null,
+      // The eTLD+1 of the fetched source URL, resolved once at extract via the real
+      // PSL (Step 6) — pinned so the dedupe key + reliability join read a frozen
+      // value, never recompute. Derived from the SAME fetched URL evidence.source_url
+      // pins above, so the extract-time and recompute-from-row dedupe keys agree.
+      source_registrable_domain: candidate.sourceRegistrableDomain,
     };
   }
 }

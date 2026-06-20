@@ -1,10 +1,10 @@
 import {
   extractLinks,
-  registrableDomain,
   hostOf,
   scoreCandidateUrl,
   normalizeUrl,
   type Vocabulary,
+  type SuffixOracle,
 } from '../../domain/index.js';
 import type {
   Fetcher,
@@ -88,9 +88,10 @@ export class DiscoverSiteUseCase {
     private readonly vocabulary: Vocabulary,
     private readonly fetchUserAgent: string,
     private readonly fetchTimeoutMs: number,
+    private readonly suffixOracle: SuffixOracle,
   ) {
     this.sink = new CandidateSink(db, clock, logger);
-    this.support = new LaneBSupport(evidenceStore, db, clock, logger);
+    this.support = new LaneBSupport(evidenceStore, db, clock, logger, suffixOracle);
     this.runs = new RunRecorder(db, clock, logger, 'discover');
   }
 
@@ -320,18 +321,18 @@ export class DiscoverSiteUseCase {
   /** The start domain plus every already-active registered source's domain. */
   private async allowedDomains(startUrl: string): Promise<Set<string>> {
     const allow = new Set<string>();
-    const start = registrableDomain(startUrl);
+    const start = this.suffixOracle(startUrl);
     if (start !== null) allow.add(start);
     const active = await this.db.sources.listByStatus('active');
     for (const s of active) {
-      const d = registrableDomain(s.url);
+      const d = this.suffixOracle(s.url);
       if (d !== null) allow.add(d);
     }
     return allow;
   }
 
   private isAllowed(url: string, allowDomains: Set<string>): boolean {
-    const d = registrableDomain(url);
+    const d = this.suffixOracle(url);
     return d !== null && allowDomains.has(d);
   }
 
@@ -340,7 +341,7 @@ export class DiscoverSiteUseCase {
     url: string,
     startUrl: string,
   ): void {
-    const domain = registrableDomain(url);
+    const domain = this.suffixOracle(url);
     if (domain === null || proposed.has(domain)) return;
     proposed.set(domain, {
       url,

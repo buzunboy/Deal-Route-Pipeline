@@ -1,7 +1,6 @@
 import type { LlmExtractedDeal } from '../deal-record/index.js';
-import { registrableDomain } from '../discovery/links.js';
 
-/** Stable key segment used when a source URL can't be parsed into a domain. */
+/** Stable key segment used when a source URL has no resolvable registrable domain. */
 const UNKNOWN_SOURCE = 'unknown-source';
 
 /**
@@ -16,12 +15,18 @@ const UNKNOWN_SOURCE = 'unknown-source';
  * The discriminator is the **registrable domain** of the source URL, NOT the full
  * URL. Path/query/fragment, `www.`/bare host, and trailing-slash differences all
  * point at the *same* source and must collapse — so the same source re-crawling
- * the same route (idempotency on re-crawl / flapping URLs) stays one record. An
- * unparseable URL folds to a stable sentinel (`unknown-source`) so the key is
- * always well-formed and never throws. NB: on a *persisted* record the sentinel is
- * effectively unreachable — `deal.source_url` is pinned to `evidence.source_url`,
- * which only exists because a real HTTP fetch resolved a parseable URL; the
- * sentinel just guards the function's totality, it is not a real collapse hazard.
+ * the same route (idempotency on re-crawl / flapping URLs) stays one record.
+ *
+ * **Step 6:** the registrable domain is supplied PRE-RESOLVED (not recomputed from
+ * the URL here), pinned at extract via a real Public Suffix List
+ * (`deal.source_registrable_domain`). This keeps `dedupeKey` pure with no PSL
+ * dependency, makes the extract-time key identical to the recompute-from-row key
+ * (both pass the same pinned value), and handles multi-label TLDs (`bbc.co.uk`)
+ * correctly. A `null` domain (an unparseable host) folds to a stable sentinel
+ * (`unknown-source`) so the key is always well-formed and never throws. NB: on a
+ * *persisted* record the sentinel is effectively unreachable — the domain is pinned
+ * from `evidence.source_url`, which only exists because a real fetch resolved a
+ * parseable URL.
  *
  * Normalisation of service/provider is intentionally aggressive but pure:
  * lowercased, trimmed, internal whitespace collapsed, and common punctuation /
@@ -30,14 +35,14 @@ const UNKNOWN_SOURCE = 'unknown-source';
  */
 export function dedupeKey(
   deal: Pick<LlmExtractedDeal, 'service' | 'provider' | 'route_type' | 'country'>,
-  sourceUrl: string,
+  sourceRegistrableDomain: string | null,
 ): string {
   return [
     normalizeName(deal.service),
     normalizeName(deal.provider),
     deal.route_type,
     deal.country,
-    registrableDomain(sourceUrl) ?? UNKNOWN_SOURCE,
+    sourceRegistrableDomain ?? UNKNOWN_SOURCE,
   ].join('|');
 }
 

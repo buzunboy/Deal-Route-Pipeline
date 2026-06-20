@@ -11,7 +11,7 @@ import type {
   Logger,
   Clock,
 } from '../../application/ports/index.js';
-import { registrableDomain } from '../../domain/index.js';
+import type { SuffixOracle } from '../../domain/index.js';
 import { resolveScreenshotBytes } from '../shared/screenshot-download.js';
 
 /**
@@ -38,6 +38,7 @@ export class SearchBrowserAgent implements BrowserAgent {
     private readonly fetcher: Fetcher,
     private readonly clock: Clock,
     private readonly logger: Logger,
+    private readonly suffixOracle: SuffixOracle,
     private readonly opts: {
       resultsPerQuery: number;
       country: string;
@@ -66,7 +67,7 @@ export class SearchBrowserAgent implements BrowserAgent {
     let stoppedReason: AgentRunResult['stoppedReason'] = 'completed';
 
     const recordProposal = (url: string): void => {
-      const domain = registrableDomain(url);
+      const domain = this.suffixOracle(url);
       if (domain === null || proposedDomains.has(domain)) return;
       proposedDomains.add(domain);
       proposedSources.push({

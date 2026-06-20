@@ -43,6 +43,10 @@ export const sources = pgTable(
     // the first successful crawl/monitor pass. Nullable; monitor matches its
     // source-scoped expiry/baseline lookups on resolved_url ?? url (Prereq A).
     resolvedUrl: text('resolved_url'),
+    // The eTLD+1 of `url`, pinned via a real PSL when the source is created/promoted
+    // (Step 6). A deal copies this onto source_registrable_domain so the reliability
+    // join matches by identical strings. Nullable (no backfill; self-heals on re-crawl).
+    registrableDomain: text('registrable_domain'),
   },
   (t) => ({
     dueIdx: index('sources_due_idx').on(t.status, t.nextDue),
@@ -107,6 +111,11 @@ export const deals = pgTable(
     // (over-disclose); `published_at` is the publish instant, distinct from verified_at.
     affiliateDisclosure: boolean('affiliate_disclosure').notNull().default(true),
     publishedAt: timestamp('published_at', { withTimezone: true, mode: 'string' }),
+    // The eTLD+1 of source_url, pinned at extract via a real PSL (Step 6). The
+    // reliability-ranking join (deals.source_registrable_domain = sources.registrable_domain)
+    // reads it; nullable (no backfill — a pre-Step-6 deal folds to neutral/unknown
+    // until its source is re-crawled, by design).
+    sourceRegistrableDomain: text('source_registrable_domain'),
   },
   (t) => ({
     statusIdx: index('deals_status_idx').on(t.status),

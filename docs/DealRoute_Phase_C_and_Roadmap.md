@@ -290,9 +290,15 @@ scripted fake → candidates + proposed sources persisted) + a gated live smoke
   (LSP). Reliability was already wired into **cadence** (`source-policy.ts applyCrawlOutcome`,
   crawl + monitor); `last_verified` is surfaced as the P3 freshness badge. code-reviewer +
   adversarial-verify clean.
-- **Multi-country** (plan "Later"): the `Country`/`Currency` enums and
-  `registrableDomain` eTLD+1 approximation are .de-v1 scoped — generalize (a real
-  Public Suffix List, per-country vocab/currency) when expanding.
+- **Multi-country FOUNDATION — DONE (Step 6, 2026-06-21).** The two .de-v1 landmines are
+  fixed: (1) the `registrableDomain` eTLD+1 approximation is replaced by a real Public Suffix
+  List (`tldts` behind a pure `SuffixOracle`, injected) and the registrable domain is PINNED on
+  the deal+source (schema v4, migration 0012) so dedupe + the reliability join read a frozen
+  field — DE byte-identical, no churn, multi-label TLDs now correct; (2) the `Country`/`Currency`
+  enums are config-driven from a `MARKETS` registry (still closed allow-lists) and the DE⇒EUR
+  currency trust rule generalized per-market. **DE stays the only ENABLED country** — actually
+  launching a 2nd country is data/config (a MARKETS row + per-country seeds/vocab/deny-list/
+  queries), tracked as a deferred "multi-country enablement" item in `docs/KNOWN_ISSUES.md`.
 - **Credentialed / login-gated capture** (plan "Later"): the manual-capture queue
   is the v1 answer; revisit automated credentialed access only if value justifies.
 - **Auto-publish for high-confidence Tier-1** (plan "Later"): only after the trust

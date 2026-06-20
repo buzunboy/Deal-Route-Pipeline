@@ -6,6 +6,7 @@ import { makeLlmDeal } from '../factories/deal.js';
 import { makeSource } from '../factories/source.js';
 import { DealStatus, type DealRecord } from '../../src/domain/index.js';
 import { toPublicDeal } from '../../src/adapters/http/public-dto.js';
+import { tldtsSuffixOracle } from '../../src/adapters/suffix/tldts-suffix-oracle.js';
 import type { Container } from '../../src/composition/container.js';
 
 /**
@@ -30,17 +31,25 @@ suite('P3 public read feed (Container + Postgres)', () => {
 
   /** Insert a published deal straight into Postgres (read-path tests don't need a crawl). */
   async function insertPublished(overrides: Partial<DealRecord>): Promise<DealRecord> {
-    const deal: DealRecord = {
+    const base: DealRecord = {
       ...makeLlmDeal(),
       id: randomUUID(),
-      schema_version: 1,
+      schema_version: 4,
       true_cost_monthly: 10,
       evidence_id: randomUUID(),
+      source_registrable_domain: null,
       status: DealStatus.enum.published,
       verified_by: 'reviewer',
       verified_at: '2026-06-19T00:00:00.000Z',
       ...overrides,
     };
+    // Pin source_registrable_domain from the (possibly-overridden) source_url via
+    // the real PSL — exactly as extract pins it on a persisted record (Step 6) —
+    // unless a test set it explicitly. This is what the reliability join reads.
+    const deal: DealRecord =
+      'source_registrable_domain' in overrides
+        ? base
+        : { ...base, source_registrable_domain: tldtsSuffixOracle(base.source_url) };
     await container.db.deals.insert(deal);
     return deal;
   }

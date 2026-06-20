@@ -1,4 +1,5 @@
 export * from './links.js';
+export * from './suffix-oracle.js';
 export * from './community-keywords.js';
 export * from './triage-result.js';
 export * from './untrusted-text.js';

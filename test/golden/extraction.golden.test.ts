@@ -7,6 +7,7 @@ import { ExtractUseCase, type ExtractedCandidate } from '../../src/application/i
 import { SEED_VOCABULARY } from '../../src/domain/index.js';
 import { StubLlm } from '../../src/adapters/llm/stub-llm.js';
 import { FakeLogger } from '../fakes/fakes.js';
+import { tldtsSuffixOracle } from '../../src/adapters/suffix/tldts-suffix-oracle.js';
 
 /**
  * Golden-file extraction test. Saved HTML fixture → (markdown via the same
@@ -31,7 +32,7 @@ async function extract(name: string): Promise<ExtractedCandidate[]> {
   const { pageText, responseFile } = loadFixture(name);
   process.env.STUB_LLM_RESPONSE_FILE = responseFile;
   try {
-    const uc = new ExtractUseCase(new StubLlm(), new FakeLogger());
+    const uc = new ExtractUseCase(new StubLlm(), new FakeLogger(), tldtsSuffixOracle);
     const result = await uc.execute({
       pageText,
       sourceUrl: 'https://www.telekom.de/magenta-tv',

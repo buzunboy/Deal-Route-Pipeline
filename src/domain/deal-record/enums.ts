@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MARKET_COUNTRIES, MARKET_CURRENCIES } from '../markets/index.js';
 
 /**
  * Closed enumerations for the deal record's typed core.
@@ -8,6 +9,11 @@ import { z } from 'zod';
  * `conditions[]` / `attributes`, and unknown conditions become `field_proposals`
  * (see `.claude/rules/extraction-and-schema.md`).
  */
+
+/** A z.enum from a readonly string[] (the market registry drives Country/Currency). */
+function enumFrom(values: readonly string[]): z.ZodEnum<[string, ...string[]]> {
+  return z.enum(values as [string, ...string[]]);
+}
 
 export const RouteType = z.enum(['bundle', 'standalone', 'promo', 'regional']);
 export type RouteType = z.infer<typeof RouteType>;
@@ -27,10 +33,20 @@ export type Billing = z.infer<typeof Billing>;
 export const DealStatus = z.enum(['candidate', 'in_review', 'published', 'expired', 'rejected']);
 export type DealStatus = z.infer<typeof DealStatus>;
 
-/** ISO-4217 currencies we support in v1. Germany v1 ⇒ EUR; widen as we expand. */
-export const Currency = z.enum(['EUR']);
+/**
+ * ISO-4217 currencies in scope, derived from the market registry
+ * (`domain/markets`). Germany v1 ⇒ `['EUR']`. STILL a CLOSED enum (an out-of-scope
+ * currency is rejected at the schema boundary) — adding a currency is a market-
+ * registry data change, never a schema-logic edit.
+ */
+export const Currency = enumFrom(MARKET_CURRENCIES);
 export type Currency = z.infer<typeof Currency>;
 
-/** ISO-3166-1 alpha-2 countries in scope. Germany v1. */
-export const Country = z.enum(['DE']);
+/**
+ * ISO-3166-1 alpha-2 countries in scope, derived from the market registry. Germany
+ * v1 ⇒ `['DE']`. STILL a CLOSED enum (an out-of-scope country is rejected at the
+ * boundary, e.g. `'FR'` before France launches) — adding a country is a one-row
+ * market-registry change, the enum picks it up automatically.
+ */
+export const Country = enumFrom(MARKET_COUNTRIES);
 export type Country = z.infer<typeof Country>;

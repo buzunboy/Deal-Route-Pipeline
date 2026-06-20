@@ -7,12 +7,13 @@ import {
 } from '../../domain/index.js';
 import { FakeLlm, FakeLogger, SequencedFakeLlm } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
+import { tldtsSuffixOracle } from '../../adapters/suffix/tldts-suffix-oracle.js';
 
 const PAGE_TEXT = 'Disney+ ist im Tarif MagentaTV SmartStream enthalten.';
 
 function runExtract(json: string) {
   const llm = new FakeLlm(json);
-  const uc = new ExtractUseCase(llm, new FakeLogger());
+  const uc = new ExtractUseCase(llm, new FakeLogger(), tldtsSuffixOracle);
   return uc.execute({
     pageText: PAGE_TEXT,
     sourceUrl: 'https://www.telekom.de/magenta-tv',
@@ -46,7 +47,7 @@ describe('ExtractUseCase', () => {
     const hugePage = `${PAGE_TEXT}\n${'padding '.repeat(MAX_EXTRACTION_INPUT_CHARS)}`;
     const llm = new FakeLlm(JSON.stringify({ deals: [makeLlmDeal()] }));
     const logger = new FakeLogger();
-    const uc = new ExtractUseCase(llm, logger);
+    const uc = new ExtractUseCase(llm, logger, tldtsSuffixOracle);
     const result = await uc.execute({
       pageText: hugePage,
       sourceUrl: 'https://www.telekom.de/magenta-tv',
@@ -108,7 +109,7 @@ describe('ExtractUseCase', () => {
     // the use-case must surface it so an operator can tell truncation from a real miss.
     const llm = new FakeLlm(JSON.stringify({ deals: [makeLlmDeal()] }), /* truncated */ true);
     const logger = new FakeLogger();
-    const uc = new ExtractUseCase(llm, logger);
+    const uc = new ExtractUseCase(llm, logger, tldtsSuffixOracle);
     await uc.execute({
       pageText: PAGE_TEXT,
       sourceUrl: 'https://www.telekom.de/magenta-tv',
@@ -121,7 +122,7 @@ describe('ExtractUseCase', () => {
   it('does NOT warn about truncation on a normal (non-truncated) reply', async () => {
     const llm = new FakeLlm(JSON.stringify({ deals: [makeLlmDeal()] }), false);
     const logger = new FakeLogger();
-    const uc = new ExtractUseCase(llm, logger);
+    const uc = new ExtractUseCase(llm, logger, tldtsSuffixOracle);
     await uc.execute({
       pageText: PAGE_TEXT,
       sourceUrl: 'https://www.telekom.de/magenta-tv',
@@ -151,7 +152,7 @@ describe('ExtractUseCase', () => {
     const good = JSON.stringify({ deals: [makeLlmDeal()] });
     const llm = new SequencedFakeLlm(['totally broken {not json', good]);
     const logger = new FakeLogger();
-    const uc = new ExtractUseCase(llm, logger);
+    const uc = new ExtractUseCase(llm, logger, tldtsSuffixOracle);
     const result = await uc.execute({
       pageText: PAGE_TEXT,
       sourceUrl: 'https://www.telekom.de/magenta-tv',
@@ -166,7 +167,7 @@ describe('ExtractUseCase', () => {
 
   it('re-asks at most ONCE — a second failure throws, never loops', async () => {
     const llm = new SequencedFakeLlm(['bad one {', 'bad two {']);
-    const uc = new ExtractUseCase(llm, new FakeLogger());
+    const uc = new ExtractUseCase(llm, new FakeLogger(), tldtsSuffixOracle);
     await expect(
       uc.execute({
         pageText: PAGE_TEXT,
@@ -214,7 +215,7 @@ describe('ExtractUseCase', () => {
         ],
       }),
     );
-    const uc = new ExtractUseCase(llm, new FakeLogger());
+    const uc = new ExtractUseCase(llm, new FakeLogger(), tldtsSuffixOracle);
     const result = await uc.execute({
       pageText: injectionPage,
       sourceUrl: 'https://attacker.example/disney',

@@ -6,6 +6,7 @@ import { InMemoryDb } from '../../../test/fakes/in-memory-db.js';
 import { FakeLlm, FakeEvidenceStore, FixedClock, FakeLogger } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
 import { makeSource } from '../../../test/factories/source.js';
+import { tldtsSuffixOracle } from '../../adapters/suffix/tldts-suffix-oracle.js';
 import type {
   BrowserAgent,
   AgentBudget,
@@ -65,7 +66,7 @@ class FakeAgent implements BrowserAgent {
 
 function build(
   agent: BrowserAgent,
-  denylist = new DomainDenylist([]),
+  denylist = new DomainDenylist(tldtsSuffixOracle, []),
   llmJson = JSON.stringify({ deals: [makeLlmDeal({ service: 'Disney+' })] }),
 ) {
   const db = new InMemoryDb();
@@ -74,7 +75,7 @@ function build(
   const logger = new FakeLogger();
   // Distinct service per deal so each page yields a distinct dedupe key.
   const llm = new FakeLlm(llmJson);
-  const extract = new ExtractUseCase(llm, logger);
+  const extract = new ExtractUseCase(llm, logger, tldtsSuffixOracle);
   const uc = new DiscoverBroadUseCase(
     agent,
     evidence,
@@ -84,6 +85,7 @@ function build(
     logger,
     SEED_VOCABULARY,
     denylist,
+    tldtsSuffixOracle,
   );
   return { uc, db, evidence };
 }
@@ -169,7 +171,7 @@ describe('DiscoverBroadUseCase', () => {
 
   it('drops a deny-listed page (never fetched-deeper, never extracted)', async () => {
     const agent = new FakeAgent({}, { pages: [okPage('https://facebook.com/some-deal')] });
-    const { uc, db } = build(agent, new DomainDenylist(['facebook.com']));
+    const { uc, db } = build(agent, new DomainDenylist(tldtsSuffixOracle, ['facebook.com']));
     await seedCatalog(db);
     const result = await uc.execute({ query: 'q', maxQueries: 1, budget: BUDGET });
     expect(result.candidatesFound).toBe(0);
@@ -187,7 +189,7 @@ describe('DiscoverBroadUseCase', () => {
         ],
       },
     );
-    const { uc, db } = build(agent, new DomainDenylist(['facebook.com']));
+    const { uc, db } = build(agent, new DomainDenylist(tldtsSuffixOracle, ['facebook.com']));
     await seedCatalog(db);
     const result = await uc.execute({ query: 'q', maxQueries: 1, budget: BUDGET });
     const domains = result.proposedSources.map((p: ProposedSource) => p.url);
@@ -230,7 +232,7 @@ describe('DiscoverBroadUseCase', () => {
       {},
       { pages: [okPage('https://a.de/1'), okPage('https://b.de/2')], stepsUsed: 2 },
     );
-    const { uc, db } = build(agent, new DomainDenylist([]), 'not json at all');
+    const { uc, db } = build(agent, new DomainDenylist(tldtsSuffixOracle, []), 'not json at all');
     await seedCatalog(db);
 
     const result = await uc.execute({ query: 'q', maxQueries: 1, budget: BUDGET });
@@ -248,7 +250,7 @@ describe('DiscoverBroadUseCase', () => {
     // Many pages, each a paid-then-failed extraction (0.001 ea); a tiny cap stops it.
     const pages = Array.from({ length: 10 }, (_, i) => okPage(`https://e${i}.de/x`));
     const agent = new FakeAgent({}, { pages, stepsUsed: 10 });
-    const { uc } = build(agent, new DomainDenylist([]), 'not json at all');
+    const { uc } = build(agent, new DomainDenylist(tldtsSuffixOracle, []), 'not json at all');
     // maxCostEur small enough that a few failed extractions exhaust it.
     const result = await uc.execute({
       query: 'q',

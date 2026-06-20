@@ -64,27 +64,12 @@ function isAssetPath(pathname: string): boolean {
   return ASSET_EXT.test(pathname);
 }
 
-/**
- * True when two URLs share a registrable domain (eTLD+1 approximation): we
- * compare the last two labels of the host (e.g. `www.mydealz.de` ~ `mydealz.de`).
- * This intentionally treats subdomains of the same site as "same site" so a
- * discovery run started at a deal page can follow the site's own listing pages.
- * Not a full Public Suffix List — adequate for the .de single-country v1; a PSL
- * adapter can replace this behind the same function if multi-country needs it.
- */
-export function sameRegistrableDomain(a: string, b: string): boolean {
-  const ra = registrableDomain(a);
-  const rb = registrableDomain(b);
-  return ra !== null && ra === rb;
-}
-
-export function registrableDomain(url: string): string | null {
-  const u = safeUrl(url);
-  if (u === null) return null;
-  const labels = u.hostname.toLowerCase().split('.').filter(Boolean);
-  if (labels.length <= 2) return labels.join('.');
-  return labels.slice(-2).join('.');
-}
+// NB (Step 6): the old `registrableDomain` / `sameRegistrableDomain` eTLD+1
+// approximation (last-two-labels) lived here but was WRONG on multi-label TLDs
+// (`www.bbc.co.uk` → `co.uk`). It has been removed in favour of a real Public
+// Suffix List behind the injected `SuffixOracle` (`domain/discovery/suffix-oracle.ts`
+// + the `tldts` adapter). Do NOT reintroduce a last-two-labels helper here — resolve
+// registrable domains through the oracle so multi-label suffixes stay correct.
 
 export function hostOf(url: string): string | null {
   const u = safeUrl(url);

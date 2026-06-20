@@ -54,5 +54,15 @@ export const SourceSchema = z.object({
    * Additive + nullable so existing rows parse unchanged and self-heal on next crawl.
    */
   resolved_url: z.string().url().nullable().default(null),
+  /**
+   * The registrable domain (eTLD+1) of this source's `url`, resolved via a real
+   * Public Suffix List and pinned when the source is created/promoted (Step 6). A
+   * deal copies THIS onto its `source_registrable_domain` when its fetched URL maps
+   * to this source — so the deal→source reliability join matches by an identical,
+   * non-recomputed string and the two pins can't drift. Nullable/additive — a
+   * pre-Step-6 row reads back null and self-heals (re-pins) on its next successful
+   * crawl; there is NO data backfill (migration 0012 only adds the column).
+   */
+  registrable_domain: z.string().nullable().default(null),
 });
 export type Source = z.infer<typeof SourceSchema>;

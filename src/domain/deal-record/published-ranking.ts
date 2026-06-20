@@ -1,4 +1,3 @@
-import { registrableDomain } from '../discovery/links.js';
 import type { DealRecord } from './deal-record.js';
 import type { PublishedQuery, PublishedSort } from './published-query.js';
 import { PUBLISHED_MAX_LIMIT, PUBLISHED_MAX_OFFSET } from './published-query.js';
@@ -42,41 +41,47 @@ export const NEUTRAL_RELIABILITY = 0.5;
 export const PUBLISHED_FETCH_CAP = PUBLISHED_MAX_OFFSET + PUBLISHED_MAX_LIMIT;
 
 /**
- * Resolve a deal's reliability from a `registrableDomain → score` index.
+ * Resolve a deal's reliability from a `registrableDomain → score` index, keyed by
+ * the deal's PINNED `source_registrable_domain` (Step 6 — resolved once at extract
+ * via a real PSL, never recomputed here, so no PSL call enters a sort comparator).
  *
  * Uses `??` (never `&&`/`||`) on purpose: a real source score of `0` (a
  * deliberately-distrusted domain) is a meaningful value in [0,1] and must be
- * PRESERVED — only an unparseable domain or an absent source falls back to
+ * PRESERVED — only an unpinned domain (null) or an absent source falls back to
  * neutral. Folding `0` up to neutral would silently rescue a distrusted source.
  */
 export function resolveReliability(
-  sourceUrl: string,
+  sourceRegistrableDomain: string | null,
   byDomain: ReadonlyMap<string, number>,
 ): number {
-  const domain = registrableDomain(sourceUrl);
-  const score = domain === null ? undefined : byDomain.get(domain);
+  const score =
+    sourceRegistrableDomain === null ? undefined : byDomain.get(sourceRegistrableDomain);
   return score ?? NEUTRAL_RELIABILITY;
 }
 
 /**
- * Fold active sources into a `registrableDomain → reliability_score` index. The
- * join is by REGISTRABLE DOMAIN (not raw URL): a deal's `source_url` is the
- * post-redirect `finalUrl` while a source's `url` is its canonical/configured URL,
- * so they routinely differ in scheme/`www.`/path/redirect — but both fold to the
- * same eTLD+1, so the deal resolves to its source's reliability.
+ * Fold active sources into a `registrableDomain → reliability_score` index, keyed by
+ * each source's PINNED `registrable_domain` (Step 6). The join is by registrable
+ * domain: a deal's `source_url` is the post-redirect `finalUrl` while a source's
+ * `url` is its canonical/configured URL — but BOTH are folded to the same eTLD+1 by
+ * the real PSL at their pin sites (extract for the deal, source-create for the
+ * source), so a deal resolves to its source's reliability by matching pinned strings.
  *
+ * A source whose `registrable_domain` is null (a pre-Step-6 row not yet backfilled)
+ * is skipped — it simply contributes no reliability, folding its deals to neutral.
  * Collision (two active sources sharing a registrable domain) resolves to the MAX
  * score — fixed once here so both adapters agree.
  */
 export function buildReliabilityIndex(
-  sources: ReadonlyArray<{ url: string; reliability_score: number }>,
+  sources: ReadonlyArray<{ registrable_domain: string | null; reliability_score: number }>,
 ): Map<string, number> {
   const byDomain = new Map<string, number>();
   for (const s of sources) {
-    const domain = registrableDomain(s.url);
-    if (domain === null) continue;
-    const prev = byDomain.get(domain);
-    if (prev === undefined || s.reliability_score > prev) byDomain.set(domain, s.reliability_score);
+    if (s.registrable_domain === null) continue;
+    const prev = byDomain.get(s.registrable_domain);
+    if (prev === undefined || s.reliability_score > prev) {
+      byDomain.set(s.registrable_domain, s.reliability_score);
+    }
   }
   return byDomain;
 }
@@ -114,8 +119,8 @@ export function comparePublished(
   return (a, b) => {
     const primary = comparePrimary(sort, a, b);
     if (primary !== 0) return primary;
-    const ra = resolveReliability(a.source_url, byDomain);
-    const rb = resolveReliability(b.source_url, byDomain);
+    const ra = resolveReliability(a.source_registrable_domain, byDomain);
+    const rb = resolveReliability(b.source_registrable_domain, byDomain);
     if (ra !== rb) return rb - ra; // reliability DESC (more reliable first)
     return a.id.localeCompare(b.id);
   };

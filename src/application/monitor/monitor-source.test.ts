@@ -15,6 +15,7 @@ import {
 } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
 import { makeSource } from '../../../test/factories/source.js';
+import { tldtsSuffixOracle } from '../../adapters/suffix/tldts-suffix-oracle.js';
 import { randomUUID } from 'node:crypto';
 
 const PAGE_TEXT = 'Disney+ ist im Tarif MagentaTV SmartStream enthalten.';
@@ -25,7 +26,7 @@ function build(fetcher: FakeFetcher) {
   const evidenceStore = new FakeEvidenceStore();
   const clock = new FixedClock();
   const logger = new FakeLogger();
-  const extract = new ExtractUseCase(llm, logger);
+  const extract = new ExtractUseCase(llm, logger, tldtsSuffixOracle);
   const alerter = new FakeAlerter();
   const crawl = new CrawlSourceUseCase(
     fetcher,
@@ -73,6 +74,7 @@ async function seedPublishedDeal(
     schema_version: 1,
     true_cost_monthly: 10,
     evidence_id: ev.id,
+    source_registrable_domain: tldtsSuffixOracle(sourceUrl),
     status: DealStatus.enum.published,
     verified_by: 'reviewer',
     verified_at: '2026-06-19T00:00:00.000Z',

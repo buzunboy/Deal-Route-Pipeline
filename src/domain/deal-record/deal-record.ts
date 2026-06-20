@@ -9,7 +9,12 @@ import { GroundingSchema, FieldProposalSchema } from './grounding.js';
 // v3 (2026-06-20): added `affiliate_disclosure` (default true) + `published_at`
 // for the EU-Omnibus disclosure at publish (Step 2). All additive/defaulted, so
 // v1/v2 rows parse unchanged.
-export const CURRENT_SCHEMA_VERSION = 3 as const;
+// v4 (2026-06-21): added `source_registrable_domain` — the eTLD+1 of `source_url`,
+// pinned at extract via a real Public Suffix List (Step 6). The split-by-source
+// dedupe key + the reliability ranking join read this field instead of recomputing
+// from the URL, so a multi-label TLD (`.co.uk`) is handled correctly. Nullable/
+// additive (null ⇒ the unknown-source fallback), so v1–v3 rows parse unchanged.
+export const CURRENT_SCHEMA_VERSION = 4 as const;
 
 /**
  * The fields the LLM is allowed to PROPOSE for a single deal record.
@@ -93,5 +98,15 @@ export const DealRecordSchema = LlmExtractedDealSchema.extend({
    * `verified_at` (last verification). Null until published. Set on the approve path.
    */
   published_at: z.string().nullable().default(null),
+  /**
+   * The registrable domain (eTLD+1) of `source_url`, resolved via a real Public
+   * Suffix List and PINNED at extract time (Step 6). The split-by-source dedupe key
+   * and the reliability-ranking join read THIS — never recompute from the URL — so a
+   * multi-label public suffix (`bbc.co.uk`) is handled correctly and a sort
+   * comparator never invokes the PSL. Pinned from the matched source's own
+   * `registrable_domain` when one exists (so the two can't drift). Null ⇒ the
+   * `unknown-source` dedupe fallback / neutral reliability (an unparseable host).
+   */
+  source_registrable_domain: z.string().nullable().default(null),
 });
 export type DealRecord = z.infer<typeof DealRecordSchema>;

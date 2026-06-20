@@ -12,7 +12,7 @@
  * filter or a substitute for human approval — just a cheap pre-filter so obvious
  * non-providers never reach the fetch loop or the approval queue.
  */
-import { registrableDomain } from './links.js';
+import type { SuffixOracle } from './suffix-oracle.js';
 
 /** Well-known social / aggregator / search noise — never a provider offer page. */
 export const DEFAULT_DENY_DOMAINS: readonly string[] = [
@@ -47,22 +47,25 @@ export const DEFAULT_DENY_DOMAINS: readonly string[] = [
 export class DomainDenylist {
   private readonly denied: Set<string>;
 
-  constructor(domains: readonly string[] = DEFAULT_DENY_DOMAINS) {
+  constructor(
+    private readonly suffixOracle: SuffixOracle,
+    domains: readonly string[] = DEFAULT_DENY_DOMAINS,
+  ) {
     this.denied = new Set(domains.map((d) => d.trim().toLowerCase()).filter((d) => d.length > 0));
   }
 
   /** Build from the default set plus extra comma/whitespace-separated domains. */
-  static fromConfig(extra: string | undefined): DomainDenylist {
+  static fromConfig(suffixOracle: SuffixOracle, extra: string | undefined): DomainDenylist {
     const extras = (extra ?? '')
       .split(/[\s,]+/)
       .map((d) => d.trim().toLowerCase())
       .filter((d) => d.length > 0);
-    return new DomainDenylist([...DEFAULT_DENY_DOMAINS, ...extras]);
+    return new DomainDenylist(suffixOracle, [...DEFAULT_DENY_DOMAINS, ...extras]);
   }
 
   /** True when the URL's registrable domain is denied (or the URL is unparseable). */
   isDenied(url: string): boolean {
-    const domain = registrableDomain(url);
+    const domain = this.suffixOracle(url);
     // An unparseable URL has no registrable domain — deny it (can't fetch/propose it).
     if (domain === null) return true;
     return this.denied.has(domain);

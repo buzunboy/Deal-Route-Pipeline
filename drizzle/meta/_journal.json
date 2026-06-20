@@ -85,6 +85,13 @@
       "when": 1781991276051,
       "tag": "0011_ordinary_barracuda",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1781995527298,
+      "tag": "0012_spooky_king_cobra",
+      "breakpoints": true
     }
   ]
 }

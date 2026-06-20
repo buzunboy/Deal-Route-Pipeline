@@ -14,6 +14,7 @@ import {
 } from '../../../test/fakes/fakes.js';
 import { makeLlmDeal } from '../../../test/factories/deal.js';
 import { makeSource } from '../../../test/factories/source.js';
+import { tldtsSuffixOracle } from '../../adapters/suffix/tldts-suffix-oracle.js';
 
 const PAGE_TEXT = 'Disney+ ist im Tarif MagentaTV SmartStream enthalten.';
 
@@ -24,7 +25,7 @@ function build(opts: { fetcher?: FakeFetcher; llmJson?: string } = {}) {
   const evidence = new FakeEvidenceStore();
   const clock = new FixedClock();
   const logger = new FakeLogger();
-  const extract = new ExtractUseCase(llm, logger);
+  const extract = new ExtractUseCase(llm, logger, tldtsSuffixOracle);
   const alerter = new FakeAlerter();
   const uc = new CrawlSourceUseCase(
     fetcher,
@@ -143,9 +144,15 @@ describe('CrawlSourceUseCase', () => {
     // NOT the configured source.url's — which is exactly why aligning extract to
     // finalUrl matters: deriving the key from source.url would have produced a
     // DIFFERENT key that never matched its own persisted row.
-    expect(dealToRow(persisted).dedupeKey).toBe(dedupeKey(persisted, persisted.source_url));
-    expect(dealToRow(persisted).dedupeKey).toBe(dedupeKey(persisted, FINAL_URL));
-    expect(dedupeKey(persisted, SOURCE_URL)).not.toBe(dedupeKey(persisted, FINAL_URL));
+    // The persisted key is recomputed from the PINNED source_registrable_domain
+    // (Step 6), which is the eTLD+1 of the post-redirect finalUrl.
+    expect(dealToRow(persisted).dedupeKey).toBe(
+      dedupeKey(persisted, persisted.source_registrable_domain),
+    );
+    expect(dealToRow(persisted).dedupeKey).toBe(dedupeKey(persisted, tldtsSuffixOracle(FINAL_URL)));
+    expect(dedupeKey(persisted, tldtsSuffixOracle(SOURCE_URL))).not.toBe(
+      dedupeKey(persisted, tldtsSuffixOracle(FINAL_URL)),
+    );
   });
 
   it('changed content on the same route → fresh in_review candidate, original untouched', async () => {
