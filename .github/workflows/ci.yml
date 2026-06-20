@@ -1,8 +1,11 @@
 name: CI
 
+# Runs on PRs and on pushes to the default branch (master). NB: the trigger was
+# previously `main`, which never matched this repo's `master` default — so pushes
+# to master ran no CI. Fixed.
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 jobs:
@@ -26,7 +29,12 @@ jobs:
       - run: npm run build
 
   # Hermetic integration tests: real composition root + real Postgres, no network.
+  # Runs only after the fast unit `check` passes, so a unit break fails fast without
+  # spinning up Postgres. Migrations are applied as an explicit gate before the suite
+  # (the suite's harness also applies them idempotently — this makes the gate visible
+  # and fails loudly on a bad migration rather than mid-test).
   integration:
+    needs: check
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -51,4 +59,9 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # Explicit migrate gate against the test DB (the same DB the suite uses).
+      - name: Apply migrations
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgres://dealroute:dealroute@localhost:5432/dealroute_test
       - run: npm run test:integration

@@ -1,0 +1,69 @@
+name: Release image
+
+# Builds the production Docker image and pushes it to the GitHub Container
+# Registry (ghcr.io). The image is the deploy artifact the cron host / scheduler
+# pulls and runs (`crawl --due`, `monitor --due`, `discover --broad`, `serve`, …).
+#
+# Triggers:
+#  - a semver tag push (`v1.2.3`) → the released image, tagged with the version;
+#  - a push to master → a rolling `:edge` + `:sha-<short>` image for staging;
+#  - manual dispatch → ad-hoc build of the current ref.
+#
+# Auth uses the built-in GITHUB_TOKEN (no cloud credentials needed); the image is
+# published under ghcr.io/<owner>/<repo>. The actual deploy to a host lives in
+# deploy.yml (separate, gated) so building and shipping are decoupled.
+on:
+  push:
+    branches: [master]
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write # required to push to GHCR
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags + labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `edge` for master, the semver for tags, and an immutable sha tag always.
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=edge,enable={{is_default_branch}}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Build the published `runtime` stage from the multi-stage Dockerfile.
+          target: runtime
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Layer cache via GHA so repeat builds (deps/build stages) are fast.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

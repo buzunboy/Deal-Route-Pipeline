@@ -1,0 +1,87 @@
+name: Deploy
+
+# Deploys a published GHCR image (built by release.yml) to the runtime host.
+#
+# ⚠️ SCAFFOLD — the deploy TARGET is not decided yet. This workflow is wired but
+# intentionally INERT until the deploy secrets are configured: the deploy step
+# self-skips with a clear message when `DEPLOY_SSH_HOST` is unset, so the pipeline
+# never fails before a host exists. When you pick a host, fill in the TODOs below
+# and add the listed secrets/variables; nothing else needs to change.
+#
+# Model: v1 runs as scheduled jobs + an on-demand `serve` (see Dockerfile /
+# docker-entrypoint.sh). The host pulls the image tag and runs the container with
+# the desired CLI command (`crawl --due`, `monitor --due`, `discover --broad`, …)
+# — typically wired to cron on the host or a scheduler. This workflow ships the
+# image to the host and (re)starts whatever runs it.
+#
+# Triggers: manual dispatch (pick the image tag) and after a successful Release on
+# master. Guarded by the `production` Environment so a human approves (configure
+# required reviewers on the Environment in repo settings).
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g. edge, v1.2.3, sha-abc1234)'
+        required: true
+        default: edge
+  workflow_run:
+    workflows: ['Release image']
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: read
+
+# Required secrets/variables (add in repo Settings → Secrets/Variables, and set up
+# the `production` Environment with required reviewers):
+#   secrets.DEPLOY_SSH_HOST     — host to SSH into (also the on/off switch: unset ⇒ skip)
+#   secrets.DEPLOY_SSH_USER     — SSH user
+#   secrets.DEPLOY_SSH_KEY      — private key (or use an OIDC/cloud action instead)
+#   secrets.DEPLOY_DATABASE_URL — Postgres URL the container runs against (if not host-managed)
+# GHCR pull on the host uses a read token / `docker login ghcr.io` configured on the host.
+jobs:
+  deploy:
+    # Only proceed for a manual dispatch, or a Release run that actually succeeded.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production # gate: configure required reviewers on this Environment
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}:${{ github.event.inputs.image_tag || 'edge' }}
+    steps:
+      - name: Check deploy target is configured
+        id: gate
+        env:
+          # Pass the secret via env (never interpolate a secret into the script body).
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+        run: |
+          if [ -z "$DEPLOY_SSH_HOST" ]; then
+            echo "::notice::DEPLOY_SSH_HOST is not set — deploy target not configured yet; skipping."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # TODO(deploy): replace this block with the real deploy for the chosen host.
+      # The shape below is SSH-pull-and-run; swap for your platform's deploy action
+      # (e.g. a cloud-run/ECS/Fly deploy action) if not SSH. Everything above this
+      # line (image tag derivation, environment gate, on/off switch) is reusable.
+      - name: Deploy (SSH pull + run) — scaffold
+        if: steps.gate.outputs.configured == 'true'
+        run: |
+          echo "Would deploy image: $IMAGE"
+          echo "TODO: ssh into \$DEPLOY_SSH_HOST, 'docker pull $IMAGE', then"
+          echo "      restart the scheduled-jobs unit / re-point cron at the new tag."
+          echo "      Migrations run automatically on container start (docker-entrypoint.sh)."
+          # Example (uncomment + harden once the host exists):
+          #   - uses: appleboy/ssh-action@v1
+          #     with:
+          #       host: ${{ secrets.DEPLOY_SSH_HOST }}
+          #       username: ${{ secrets.DEPLOY_SSH_USER }}
+          #       key: ${{ secrets.DEPLOY_SSH_KEY }}
+          #       script: |
+          #         docker pull ${{ env.IMAGE }}
+          #         docker tag  ${{ env.IMAGE }} dealroute:current
+          #         # restart cron units / compose services that reference dealroute:current
+          exit 0
