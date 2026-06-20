@@ -265,6 +265,29 @@ describe('CrawlSourceUseCase', () => {
     expect((await env.db.sources.getById(source.id))!.reliability_score).toBeLessThan(0.5);
   });
 
+  // Prereq A: a successful crawl pins the POST-REDIRECT finalUrl onto the source's
+  // resolved_url, so monitor can match deals (keyed by source_url=finalUrl) later.
+  it('records resolved_url = the post-redirect finalUrl on a successful crawl', async () => {
+    const finalUrl = 'https://www.telekom.de/magenta-final';
+    env = build({ fetcher: new FakeFetcher({ text: PAGE_TEXT, finalUrl }) });
+    const source = makeSource({ url: 'https://telekom.de/redirects', resolved_url: null });
+    await env.db.sources.upsert(source);
+
+    await env.uc.execute({ sourceId: source.id });
+
+    expect((await env.db.sources.getById(source.id))!.resolved_url).toBe(finalUrl);
+  });
+
+  it('does NOT change resolved_url on a failed crawl (a failed pass saw no final URL)', async () => {
+    env = build({ fetcher: new FakeFetcher({ outcome: 'error', error: 'boom', text: '' }) });
+    const source = makeSource({ resolved_url: 'https://prior.de/r' });
+    await env.db.sources.upsert(source);
+
+    await env.uc.execute({ sourceId: source.id });
+
+    expect((await env.db.sources.getById(source.id))!.resolved_url).toBe('https://prior.de/r');
+  });
+
   it('reliability decides cadence: a flaky source is scheduled further out than a healthy one', async () => {
     // A successful crawl of a high-reliability source → tight cadence (≈base).
     const healthy = makeSource({ reliability_score: 0.95, cadence_days: 3, next_due: null });

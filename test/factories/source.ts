@@ -14,6 +14,7 @@ export function makeSource(overrides: Partial<Source> = {}): Source {
     status: 'active',
     last_seen: null,
     next_due: null,
+    resolved_url: null,
     ...overrides,
   };
 }

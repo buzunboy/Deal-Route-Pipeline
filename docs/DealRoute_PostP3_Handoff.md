@@ -2,9 +2,10 @@
 
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`0c98be8`** (Step 3). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
-disclosure) AND 3 (reliability-blended ranking) are DONE + merged; the next step is
-Step 4 (scheduler / unattended-run harness).** This supersedes
+**`<set-on-merge>`** (Step 4). **Post-C Steps 1 (P3 public API), 2 (GDPR/affiliate
+disclosure), 3 (reliability-blended ranking) AND 4 (scheduler / unattended-run harness)
+are DONE + merged; the next step is Step 5 (observability: alerting + metrics push).**
+This supersedes
 `docs/DealRoute_PostC_Handoff.md` (kept, banner-marked). (`NEXT_SESSION_HANDOFF.md` was deleted.)_
 
 > **What shipped since the original audit** (all merged to `master`, in order):
@@ -20,8 +21,13 @@ Step 4 (scheduler / unattended-run harness).** This supersedes
 > ranking: a source's `reliability_score` is a read-time TIEBREAKER in the public feed
 > sort — equal cost/freshness → more-reliable-source first → id; resolved by the P1
 > registrable-domain deal→source join, neutral 0.5 when no source matches; raw score
-> NEVER exposed, order-only; **no schema change / no migration**). Deal-record
-> `schema_version` is still **3**; latest migration is still **`drizzle/0010`**.
+> NEVER exposed, order-only; **no schema change / no migration**) · **Step 4** (scheduler /
+> unattended-run harness: external-cron templates — K8s CronJobs + a guarded scheduled
+> Action + `deploy/README.md` — pg-boss stays unwired; **Prereq A**: a nullable Source
+> `resolved_url` set on first successful crawl/monitor pass so monitor matches expiry/
+> baseline on `resolved_url ?? url` → a **redirecting source's published deals now
+> auto-expire**, migration **0011**). Deal-record `schema_version` is still **3**; latest
+> migration is now **`drizzle/0011`** (the Source `resolved_url` column).
 
 > Binding rules still govern: `CLAUDE.md` + `.claude/rules/`
 > (`architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`).
@@ -91,8 +97,8 @@ invariants hold. **The implementation is sound; the foundation is strong.**
 `FETCHER=playwright`, `EVIDENCE_STORE=local`. Do not change these defaults.
 
 **Roadmap position:** post-C **Steps 1 (public read API = P3), 2 (GDPR/affiliate
-disclosure) AND 3 (reliability-blended ranking) are DONE + merged.** Remaining: **Step 4
-(scheduler/ops) ← NEXT**, Step 5 (observability), Step 6 (multi-country). See §4 for each.
+disclosure), 3 (reliability-blended ranking) AND 4 (scheduler/ops) are DONE + merged.**
+Remaining: **Step 5 (observability) ← NEXT**, Step 6 (multi-country). See §4 for each.
 
 ---
 
@@ -103,10 +109,11 @@ boundary, §3) and **Step 2** (GDPR/affiliate disclosure, §4). So the public `/
 the disclosure fields the landing page legally needs are in place. What remains (Steps 3–6)
 is real but **not launch-blocking** — each is a small, mostly decision-gated refinement.
 
-**Recommended next step: Step 4 (scheduler / unattended-run harness)** — the highest
-operational risk for going live, and the step that promotes two deferred prerequisites
-to blocking (see §4). Step 3 (reliability-blended ranking) is DONE (§4). Then Step 5
-(observability), Step 6 (multi-country, gated on a PSL adapter).
+**Recommended next step: Step 5 (observability: alerting + metrics push)** — the
+lowest-risk remaining step: a new `Alerting` port + a webhook/Slack adapter, thresholds
+in config, hooking the existing warn points (reliability-low, daily-budget). No
+schema/trust impact (§4). Step 4 (scheduler/ops) is DONE (§4). Then Step 6 (multi-country,
+gated on a PSL adapter).
 
 ---
 
@@ -147,9 +154,9 @@ audit found; it was fixed in the same session and is in `KNOWN_ISSUES.md` → Re
 ## 4. The remaining roadmap steps (post-C Steps 2–6) — sequence + prerequisites
 
 Each lists **what**, **why-now**, **the decision it needs first (if any)**, the
-**code surface**, and **tests required**. **Steps 2 AND 3 are DONE (below, kept for the
-record).** Remaining order: **Step 4 (NEXT, + its two prerequisites) → Step 5 → Step 6.**
-Steps 4–5 are independent and can reorder; Step 6 is furthest out.
+**code surface**, and **tests required**. **Steps 2, 3 AND 4 are DONE (below, kept for the
+record).** Remaining order: **Step 5 (NEXT) → Step 6.** Step 6 (multi-country) is furthest
+out (gated on a PSL adapter).
 
 ### Step 2 — GDPR + affiliate disclosure at publish — ✅ DONE (merged `4f4f077`, 2026-06-20)
 _Shipped as designed: `affiliate_disclosure` (bool, default **true** = over-disclose) +
@@ -229,7 +236,30 @@ retained for context:_
   reliability index from a full active-source scan per public request — fine at DE-v1 scale,
   cache/fold-into-SQL when source count or `/v1/` traffic grows.
 
-### Step 4 — Scheduler / unattended-run harness (OPS; highest operational risk)
+### Step 4 — Scheduler / unattended-run harness — ✅ DONE (merged `<set-on-merge>`, 2026-06-20)
+_Shipped as the owner-decided **external-cron** model (pg-boss stays unwired). Two
+workstreams: **(A) Prereq A trust fix** + **(B) scheduler templates**._
+- **(A) Prereq A — resolved-URL tracking (the trust-critical part).** A nullable
+  `resolved_url` on the Source (schema + migration **0011**, additive/backfill-safe) is set
+  on the **first successful crawl/monitor pass** (= `fetched.finalUrl`, via the shared pure
+  `applyCrawlOutcome`, success-only + never overwritten with undefined). Monitor now matches
+  its source-scoped expiry + diff-baseline on `resolved_url ?? url` (the `dealMatchUrl`
+  helper) — so a **redirecting source's published deals now auto-expire** (deals are keyed by
+  `finalUrl`; before, monitor keyed off the configured `url` and never matched). Existing
+  rows are `NULL` → fall back to `url`, self-healing on the next crawl. Unit (crawl sets it /
+  failed pass preserves it / all `applyCrawlOutcome` permutations / monitor expires a
+  redirecting source) + integration (real Container+Postgres end-to-end: redirecting source →
+  published deal **does** expire) + contract round-trip. **Prereq B (pg-boss pool bound +
+  source advisory lock) is N/A** — pg-boss stays unwired in the external-cron model; it stays
+  deferred in `docs/KNOWN_ISSUES.md` against the day pg-boss is wired.
+- **(B) Scheduler templates (config/docs, no composition change).** `deploy/k8s/cronjobs.yaml`
+  (ConfigMap + Secret + 4 CronJobs: `crawl --due` 6h / `monitor --due` 3h / `ingest
+  --community-due` hourly / `discover --broad` daily, **discover `suspend: true`**), a guarded
+  opt-in `.github/workflows/scheduled.yml` (cron commented + `SCHEDULED_LANES_ENABLED` var +
+  `production` Environment), and `deploy/README.md` (cadence rationale, env/secrets, trust
+  posture). Safe-by-default: Tier-4 off, agentic lanes dark, `EVIDENCE_STORE=s3` required
+  under cron (ephemeral pod FS), `concurrencyPolicy: Forbid`. code-reviewer APPROVED +
+  adversarial-verify clean. 607 unit tests green. Original plan below, retained for context:_
 - **What:** make the lanes actually RUN on a schedule. Today it's **pure external-cron**:
   the Docker entrypoint runs migrations then the CLI; the `Queue` (pg-boss) port exists
   but is **intentionally unwired** (`container.ts` does not instantiate it). No crontab /
@@ -327,8 +357,13 @@ interactive multi-step BrowserAgent ("Option B").
    public prefix? *Rec: separate public prefix; never make the bundle prefix listable.* (Still open — deploy gate.)
 3. **Reliability ranking exposure (Step 3):** ✅ DECIDED + DONE. Reliability may silently
    influence public order as a TIEBREAKER (freshness/cost-primary); raw score never exposed (order-only).
-4. **Scheduler model (Step 4 — NEXT):** external cron (current) or in-process pg-boss? *Rec: external
-   cron for v1; pg-boss only when concurrency justifies (then bound the pool + advisory lock).*
+4. **Scheduler model (Step 4):** ✅ DECIDED + DONE. External-cron templates (K8s CronJobs +
+   a guarded scheduled Action + docs); pg-boss stays unwired (its pool-bound + advisory-lock
+   prereqs stay deferred in KNOWN_ISSUES against the day it's wired). Prereq A (monitor
+   resolved_url) fixed.
+5. **Observability backend (Step 5 — NEXT):** Datadog/CloudWatch/Grafana/Slack-webhook?
+   *Rec: a small `Alerting` port + a webhook/Slack adapter; thresholds in config; hook the
+   existing reliability-low + daily-budget warn points.*
 
 ## 8. Workflow / environment facts (these bit earlier sessions — don't rediscover)
 - You're in a git **worktree** on your own branch. The runtime `.env` (real keys) lives only
@@ -354,16 +389,16 @@ interactive multi-step BrowserAgent ("Option B").
 
 ## 9. First moves for the fresh session
 1. Confirm orientation reads + green baseline (`npm install && npm run check && npm run build`).
-   Steps 1 + 2 + 3 are DONE — no foundation repair pending; you're starting Step 4.
-2. **Build Step 4 — scheduler / unattended-run harness** (§4). The decision it needs first
-   (put to the owner via `AskUserQuestion`): external cron (the standing decision) vs wiring
-   the in-process pg-boss worker now. Recommend deployment templates + a documented cron
-   schedule for v1; pg-boss only when concurrency/autonomy justify it. **Promote its TWO
-   deferred prerequisites to blocking when you start** (both in `docs/KNOWN_ISSUES.md`):
-   (a) monitor source-scoped lookups key off `source.url` not the resolved `finalUrl`
-   (published deals from a redirecting source never auto-expire under unattended scheduling),
-   and (b) if pg-boss is wired, bound its pool + add the source-level advisory lock.
-3. Then Step 5 (observability) → Step 6 (multi-country, gated on the PSL adapter).
+   Steps 1 + 2 + 3 + 4 are DONE — no foundation repair pending; you're starting Step 5.
+2. **Build Step 5 — observability: alerting + metrics push** (§4). The decision it needs first
+   (put to the owner via `AskUserQuestion`): the ops backend (Datadog/CloudWatch/Grafana/
+   Slack-webhook), which drives the adapter. Recommend a small `Alerting` port + a webhook/
+   Slack adapter, thresholds in config, hooking the existing warn points — crawl-source
+   reliability-low (`source-policy.isReliabilityLow`) and the daily-budget guard. It's the
+   lowest-risk step: pure adapter work behind a new port (OCP), no schema/trust impact.
+   Tests: port contract suite + unit; thresholds are pure logic → table-driven.
+3. Then Step 6 (multi-country, gated on a real PSL adapter — `registrableDomain` eTLD+1
+   breaks on multi-label TLDs like `.co.uk`; de-hardcode the `Country`/`Currency` enums).
 4. Every change: unit + integration tests (live for new external edges); `code-reviewer` +
    an adversarial-verify pass on anything trust/publish/schema; docs updated (CLAUDE.md
    Commands + Repo layout, README, ARCHITECTURE, roadmap §5; **and `docs/testing/LIVE_TEST_TEMPLATE.md`

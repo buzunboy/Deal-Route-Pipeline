@@ -88,12 +88,21 @@ export interface CrawlOutcomeUpdate {
  *    keeps the prior `last_seen` (we did NOT see the source this pass).
  *  - `next_due` always uses the reliability-aware back-off curve, so a flaky source
  *    is scheduled further out (stops hammering an unreliable origin / wasting budget).
+ *  - on `success`, the post-redirect `resolvedUrl` (the fetch's `finalUrl`) is pinned
+ *    onto `resolved_url` so MONITOR can match its source-scoped lookups on the same
+ *    URL that deals are keyed by (`source_url = finalUrl`). Only set on success (a failed
+ *    pass saw no final URL) and only when supplied; otherwise the prior value stands.
  *
  * NB a `blocked` page (login/captcha/anti-bot wall) is NOT a reliability failure —
  * it's a manual-capture route (plan §9). Callers pass it through as a non-mutating
  * schedule advance, not as `success:false`.
  */
-export function applyCrawlOutcome(source: Source, success: boolean, now: Date): CrawlOutcomeUpdate {
+export function applyCrawlOutcome(
+  source: Source,
+  success: boolean,
+  now: Date,
+  resolvedUrl?: string,
+): CrawlOutcomeUpdate {
   const reliability = reliabilityAfter(source.reliability_score, success);
   return {
     source: {
@@ -101,6 +110,10 @@ export function applyCrawlOutcome(source: Source, success: boolean, now: Date): 
       reliability_score: reliability,
       last_seen: success ? now.toISOString() : source.last_seen,
       next_due: nextDueWithBackoffIso(now, source.cadence_days, reliability),
+      // Pin the resolved (post-redirect) URL on a successful pass so monitor's
+      // expiry/baseline lookups match the URL deals are keyed by. A failed pass
+      // (or no resolvedUrl supplied) leaves the prior value untouched.
+      resolved_url: success && resolvedUrl !== undefined ? resolvedUrl : source.resolved_url,
     },
     reliabilityLow: isReliabilityLow(reliability),
   };

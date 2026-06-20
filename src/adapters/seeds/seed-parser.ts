@@ -125,6 +125,7 @@ function makeSource(
     status: 'active',
     last_seen: null,
     next_due: null,
+    resolved_url: null, // set on the first successful crawl (= the post-redirect finalUrl)
   };
 }
 

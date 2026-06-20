@@ -297,8 +297,19 @@ scripted fake → candidates + proposed sources persisted) + a gated live smoke
   is the v1 answer; revisit automated credentialed access only if value justifies.
 - **Auto-publish for high-confidence Tier-1** (plan "Later"): only after the trust
   track record + metrics justify relaxing human-in-the-loop for the safest tier.
-- **Ops dashboards / alerting**: run metrics, cost, queue depth, source-reliability
-  flags, failed-source alerts.
+- **Scheduler / unattended-run harness — DONE (Step 4, 2026-06-20).** Shipped the
+  owner-decided external-cron model: deployment templates (`deploy/k8s/cronjobs.yaml` — 4
+  CronJobs: crawl 6h / monitor 3h / ingest hourly / discover daily-but-suspended) + a guarded
+  opt-in scheduled Action (`.github/workflows/scheduled.yml`) + `deploy/README.md` (cadence,
+  env/secrets, trust posture). pg-boss stays unwired (its pool-bound + advisory-lock prereqs
+  stay deferred against the day it's wired). Shipped with **Prereq A** (the one trust-critical
+  blocker for unattended running): a Source `resolved_url` set on first successful crawl/monitor
+  pass so monitor matches expiry/baseline on `resolved_url ?? url` → a redirecting source's
+  published deals now auto-expire (migration 0011; see `docs/KNOWN_ISSUES.md` → Resolved).
+  Safe-by-default: Tier-4 off, agentic lanes dark, S3 evidence required under cron.
+- **Ops dashboards / alerting** (Step 5, NEXT): run metrics, cost, queue depth,
+  source-reliability flags, failed-source alerts — a new `Alerting` port + a webhook/Slack
+  adapter, thresholds in config, hooking the existing reliability-low + daily-budget warn points.
 
 ---
 
@@ -306,8 +317,9 @@ scripted fake → candidates + proposed sources persisted) + a gated live smoke
 
 1. **Phase-C agent vendor**: search-API-first (C-1) then Browser Use/Stagehand
    (C-2), or go straight to a hosted browser? (Recommendation: C-1 first.)
-2. **Scheduler**: stay on external cron (current decision) or build the in-process
-   pg-boss worker when autonomy/concurrency grows? The `Queue` port is ready.
+2. **Scheduler**: ✅ DECIDED + DONE (Step 4). External cron — deployment templates +
+   a guarded scheduled Action; pg-boss stays unwired (wire it only when autonomy/concurrency
+   grows, then bound its pool + add the source advisory lock per `docs/KNOWN_ISSUES.md`).
 3. **Dedupe-key provenance** (audit medium): should two sources reporting the same
    route collapse to one canonical deal, or stay split by source? Affects the
    trust model — schema-owner call.

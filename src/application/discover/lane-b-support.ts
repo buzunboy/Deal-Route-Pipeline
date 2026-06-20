@@ -114,6 +114,7 @@ export class LaneBSupport {
         status: 'pending_approval',
         last_seen: null,
         next_due: null,
+        resolved_url: null, // set on the first successful crawl after approval
       };
       await this.db.sources.upsert(source);
       this.logger.info('lane-b: proposed novel source (pending approval)', { url: p.url });

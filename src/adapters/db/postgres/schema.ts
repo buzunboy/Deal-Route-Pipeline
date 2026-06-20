@@ -39,6 +39,10 @@ export const sources = pgTable(
     status: text('status').notNull(),
     lastSeen: timestamp('last_seen', { withTimezone: true, mode: 'string' }),
     nextDue: timestamp('next_due', { withTimezone: true, mode: 'string' }),
+    // The post-redirect URL this source resolves to (= a deal's source_url), set on
+    // the first successful crawl/monitor pass. Nullable; monitor matches its
+    // source-scoped expiry/baseline lookups on resolved_url ?? url (Prereq A).
+    resolvedUrl: text('resolved_url'),
   },
   (t) => ({
     dueIdx: index('sources_due_idx').on(t.status, t.nextDue),

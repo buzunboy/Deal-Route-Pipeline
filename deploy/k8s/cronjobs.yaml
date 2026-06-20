@@ -1,0 +1,195 @@
+# DealRoute — unattended scheduling (Kubernetes CronJob template, Step 4)
+#
+# ⚠️ TEMPLATE — copy + fill the TODOs before applying. This is the v1 scheduler:
+# the pipeline is a CLI, not a self-running daemon (the pg-boss Queue port exists
+# but is intentionally unwired — see ARCHITECTURE.md / docs handoff). External cron
+# (here, K8s CronJobs) invokes the published GHCR image on a schedule, one CronJob
+# per lane. Each runs the container's entrypoint, which applies pending migrations
+# then runs the given CLI command (`crawl --due`, etc.). Nothing auto-publishes;
+# every lane is bounded (per-run caps + the daily €-budget guard).
+#
+# Apply:   kubectl apply -f deploy/k8s/cronjobs.yaml
+# Image:   ghcr.io/<owner>/<repo>:<tag>  (built by .github/workflows/release.yml)
+#
+# The four lanes + WHY their cadences differ:
+#   crawl --due            re-crawl due seed sources (Lane A)          — every 6h
+#   monitor --due          re-verify published deals / diff & expire   — every 3h (freshness)
+#   ingest --community-due RSS community feeds (Lane B / Tier 3)       — hourly (promos move fast)
+#   discover --broad       agentic Tier-4 discovery (OFF by default)   — daily (expensive; AGENT=search to enable)
+# `--due` selectors only act on sources whose next_due has elapsed, so a frequent
+# schedule is cheap — it just advances whatever is actually due.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dealroute-config
+  namespace: dealroute # TODO: your namespace
+data:
+  # Non-secret runtime config. Defaults keep every expensive/agentic lane DARK
+  # (AGENT=noop, SEARCH_PROVIDER=stub, FETCHER=playwright, EVIDENCE_STORE=local) —
+  # do NOT change these here without intent; enable Tier-4 deliberately per-CronJob.
+  NODE_ENV: 'production'
+  LLM_PROVIDER: 'anthropic' # cheap extractor; the stronger discovery model is configured separately
+  FETCHER: 'playwright'
+  # ⚠️ 'local' is for dev/CLI only — a CronJob pod has an EPHEMERAL filesystem (no PVC
+  # here), so a local evidence bundle is discarded when the pod exits, leaving the
+  # candidate's evidence_id dangling (breaks "evidence required before review" in
+  # practice). Under cron you MUST use 's3' (set the S3_* secrets) — or mount a PVC.
+  EVIDENCE_STORE: 's3' # TODO: set the S3_* secrets below (see ARCHITECTURE.md "Public read surface")
+  DAILY_BUDGET_EUR: '10.00' # aggregate €/UTC-day ceiling across the agentic lane (0 disables)
+  # AGENT / SEARCH_PROVIDER deliberately UNSET here → stay at their dark defaults.
+  # Set AGENT=search + a SEARCH backend ONLY on the discover CronJob below to enable Tier-4.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dealroute-secrets
+  namespace: dealroute # TODO
+type: Opaque
+stringData:
+  # TODO: fill these in (or wire from your secret manager — never commit real values).
+  DATABASE_URL: 'postgres://USER:PASS@HOST:5432/dealroute'
+  ANTHROPIC_API_KEY: '' # required when LLM_PROVIDER=anthropic
+  # SEARCH_API_KEY: ''  # required when enabling Tier-4 discover with SEARCH_PROVIDER=api (Brave)
+  # S3 evidence (REQUIRED under cron — see EVIDENCE_STORE note above): set these when
+  # EVIDENCE_STORE=s3. See ARCHITECTURE.md "Public read surface" for the load-bearing
+  # CDN scoping contract — expose ONLY */screenshot.png publicly.
+  # S3_BUCKET: ''
+  # S3_REGION: ''
+  # S3_ACCESS_KEY_ID: ''
+  # S3_SECRET_ACCESS_KEY: ''
+  # S3_CDN_BASE_URL: ''
+---
+# Lane A — re-crawl due seed sources. Every 6 hours.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dealroute-crawl
+  namespace: dealroute # TODO
+spec:
+  schedule: '0 */6 * * *' # 00:00, 06:00, 12:00, 18:00 UTC
+  concurrencyPolicy: Forbid # never overlap a lane with itself (no source-level lock yet — see KNOWN_ISSUES)
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1 # a failed source is contained in-process; don't hammer-retry the whole batch
+      activeDeadlineSeconds: 3600 # hard wall so a wedged run can't pin resources
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: crawl
+              image: ghcr.io/OWNER/REPO:edge # TODO: pin to a released version tag in prod
+              args: ['crawl', '--due']
+              envFrom:
+                - configMapRef: { name: dealroute-config }
+                - secretRef: { name: dealroute-secrets }
+              resources:
+                requests: { cpu: '250m', memory: '512Mi' }
+                limits: { cpu: '1', memory: '1Gi' }
+---
+# Monitoring — re-verify published deals, diff price/terms, expire on disappearance.
+# Every 3 hours (the freshness signal users see). Migrations are idempotent, but
+# only ONE schedule needs to own them; the others can set RUN_MIGRATIONS=false if
+# you prefer a single migrator. Here every lane self-migrates (safe, idempotent).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dealroute-monitor
+  namespace: dealroute # TODO
+spec:
+  schedule: '30 */3 * * *' # offset :30 so it doesn't collide with the crawl slot
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: monitor
+              image: ghcr.io/OWNER/REPO:edge # TODO
+              args: ['monitor', '--due']
+              envFrom:
+                - configMapRef: { name: dealroute-config }
+                - secretRef: { name: dealroute-secrets }
+              resources:
+                requests: { cpu: '250m', memory: '512Mi' }
+                limits: { cpu: '1', memory: '1Gi' }
+---
+# Lane B / Tier 3 — community RSS ingestion. Hourly (community promos are short-lived).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dealroute-ingest
+  namespace: dealroute # TODO
+spec:
+  schedule: '15 * * * *' # hourly at :15
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: ingest
+              image: ghcr.io/OWNER/REPO:edge # TODO
+              args: ['ingest', '--community-due']
+              envFrom:
+                - configMapRef: { name: dealroute-config }
+                - secretRef: { name: dealroute-secrets }
+              resources:
+                requests: { cpu: '250m', memory: '512Mi' }
+                limits: { cpu: '1', memory: '1Gi' }
+---
+# Tier 4 — agentic broad discovery. Daily. EXPENSIVE + OFF BY DEFAULT: it does
+# nothing unless AGENT=search + a search backend are set. The daily €-budget guard
+# (DAILY_BUDGET_EUR) caps total agentic spend per UTC day; nothing auto-publishes
+# and no discovered domain is auto-crawled (a human approves proposed sources).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dealroute-discover
+  namespace: dealroute # TODO
+spec:
+  schedule: '0 2 * * *' # 02:00 UTC daily (off-peak)
+  suspend: true # TODO: set false to enable Tier-4 — AND set AGENT=search + SEARCH_* below
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0 # a broad-discovery run is costly; do not auto-retry
+      activeDeadlineSeconds: 3600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: discover
+              image: ghcr.io/OWNER/REPO:edge # TODO
+              args: ['discover', '--broad']
+              env:
+                # Enabling Tier-4 is OPT-IN and lives ONLY on this CronJob, so the
+                # other lanes stay on the dark defaults. SEARCH_PROVIDER=api uses Brave
+                # and needs SEARCH_API_KEY (set it in the Secret above). To use Firecrawl
+                # instead, set SEARCH_PROVIDER=firecrawl and add FIRECRAWL_API_KEY.
+                - { name: AGENT, value: 'search' }
+                - { name: SEARCH_PROVIDER, value: 'api' }
+              envFrom:
+                - configMapRef: { name: dealroute-config }
+                - secretRef: { name: dealroute-secrets }
+              resources:
+                requests: { cpu: '500m', memory: '1Gi' }
+                limits: { cpu: '2', memory: '2Gi' }

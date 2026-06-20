@@ -144,6 +144,7 @@ export class CrawlSourceUseCase {
         evidence,
         false,
         input.dryRun ?? false,
+        fetched.finalUrl,
       );
     } catch (err) {
       return await this.failRun(run, source, err, input.dryRun ?? false);
@@ -220,6 +221,7 @@ export class CrawlSourceUseCase {
     evidence: Evidence | null,
     routedToManualCapture: boolean,
     dryRun: boolean,
+    resolvedUrl?: string,
   ): Promise<CrawlSourceResult> {
     run.status = routedToManualCapture ? 'skipped' : 'succeeded';
     run.finished_at = this.clock.nowIso();
@@ -227,7 +229,10 @@ export class CrawlSourceUseCase {
 
     if (!dryRun) {
       await this.db.crawlRuns.update(run);
-      await this.updateSourceAfterCrawl(source, true);
+      // Pin the post-redirect URL only when we actually fetched a page (an OK crawl
+      // that produced evidence) — a manual-capture/robots skip saw no trustworthy
+      // final URL, so leave the source's resolved_url untouched.
+      await this.updateSourceAfterCrawl(source, true, evidence ? resolvedUrl : undefined);
     }
     return { run, candidates, evidence, routedToManualCapture };
   }
@@ -250,14 +255,21 @@ export class CrawlSourceUseCase {
     return { run, candidates: [], evidence: null, routedToManualCapture: false };
   }
 
-  private async updateSourceAfterCrawl(source: Source, success: boolean): Promise<void> {
+  private async updateSourceAfterCrawl(
+    source: Source,
+    success: boolean,
+    resolvedUrl?: string,
+  ): Promise<void> {
     // Reliability decides cadence (plan §7): a flaky source backs off so we stop
     // hammering an unreliable origin and wasting budget on it. The same shared
-    // policy drives the monitor loop, so the two lanes can't diverge.
+    // policy drives the monitor loop, so the two lanes can't diverge. On success we
+    // also pin the post-redirect resolved_url so monitor can match its source-scoped
+    // lookups on the URL deals are keyed by (Prereq A for unattended scheduling).
     const { source: updated, reliabilityLow } = applyCrawlOutcome(
       source,
       success,
       this.clock.now(),
+      resolvedUrl,
     );
 
     // Surface a persistently-failing source so a human notices (ops signal). The

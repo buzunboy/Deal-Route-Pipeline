@@ -85,6 +85,11 @@ export class MonitorSourceUseCase {
     // the back-off next_due the re-crawl just wrote). `scheduledByRecrawl` guards it.
     let disposition: MonitorDisposition = 'neutral';
     let scheduledByRecrawl = false;
+    // The post-redirect URL from a SUCCESSFUL fetch — pinned onto the source as
+    // resolved_url so future passes match deals by the URL they're keyed by
+    // (Prereq A). Left undefined on a failed/blocked/robots pass (no trustworthy
+    // final URL), so the prior resolved_url stands.
+    let resolvedUrl: string | undefined;
     try {
       const fetched = await this.fetcher.fetch(source.url, {
         timeoutMs: this.fetchTimeoutMs,
@@ -113,6 +118,10 @@ export class MonitorSourceUseCase {
       // content_changed re-crawled (which set reliability + next_due); unchanged did
       // not. Either way the source responded → success disposition.
       disposition = 'success';
+      // Record the post-redirect URL so the schedule advance pins it as resolved_url.
+      // (If the re-crawl owned the schedule update, IT already pinned resolved_url via
+      // its own success path — see crawl-source — so advanceSchedule is skipped below.)
+      resolvedUrl = fetched.finalUrl;
       scheduledByRecrawl = result.reQueued;
       return result;
     } catch (err) {
@@ -129,7 +138,7 @@ export class MonitorSourceUseCase {
     } finally {
       // Advance reliability + cadence on every pass EXCEPT when a re-crawl already
       // owned the update (else we'd clobber its back-off next_due with a stale one).
-      if (!scheduledByRecrawl) await this.advanceSchedule(source, disposition);
+      if (!scheduledByRecrawl) await this.advanceSchedule(source, disposition, resolvedUrl);
     }
   }
 
@@ -145,12 +154,17 @@ export class MonitorSourceUseCase {
    *    `next_due` off the back-off curve at the CURRENT reliability so the source
    *    isn't perpetually due, without rewarding or penalising the pass.
    */
-  private async advanceSchedule(source: Source, disposition: MonitorDisposition): Promise<void> {
+  private async advanceSchedule(
+    source: Source,
+    disposition: MonitorDisposition,
+    resolvedUrl?: string,
+  ): Promise<void> {
     try {
       let updated: Source;
       if (disposition === 'neutral') {
         // `last_seen` is deliberately left untouched — a wall/decline is not a
         // sighting of the offer. Selection is by `next_due`, so this is safe.
+        // resolved_url is also untouched (a wall/decline saw no final URL).
         updated = {
           ...source,
           next_due: nextDueWithBackoffIso(
@@ -160,7 +174,12 @@ export class MonitorSourceUseCase {
           ),
         };
       } else {
-        const outcome = applyCrawlOutcome(source, disposition === 'success', this.clock.now());
+        const outcome = applyCrawlOutcome(
+          source,
+          disposition === 'success',
+          this.clock.now(),
+          resolvedUrl,
+        );
         updated = outcome.source;
         if (outcome.reliabilityLow) {
           this.logger.warn('monitor: source reliability low — backing off cadence', {
@@ -248,7 +267,9 @@ export class MonitorSourceUseCase {
   private async expirePublishedForSource(source: Source): Promise<number> {
     // Source-scoped, single-statement expiry — deterministic regardless of how
     // many published deals exist globally (no fetch-N-then-filter scaling cliff).
-    return this.db.deals.expirePublishedBySourceUrl(source.url, this.clock.nowIso());
+    // Match on the resolved (post-redirect) URL deals are keyed by — see
+    // `dealMatchUrl` (Prereq A: a redirecting source's deals must still match).
+    return this.db.deals.expirePublishedBySourceUrl(dealMatchUrl(source), this.clock.nowIso());
   }
 
   /** Count the trailing run of `disappeared` changes (newest first) for a source. */
@@ -271,7 +292,7 @@ export class MonitorSourceUseCase {
     // so a flagged candidate still anchors the baseline (else every check looks
     // like a first sight). Deterministic regardless of total table size.
     const deals = await this.db.deals.listBySourceUrl(
-      source.url,
+      dealMatchUrl(source),
       [DealStatus.enum.published, DealStatus.enum.candidate, DealStatus.enum.in_review],
       SCAN_LIMIT,
     );
@@ -340,4 +361,16 @@ function manualCaptureReason(fetched: FetchResult): ManualCaptureReason {
 
 function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/**
+ * The URL monitor matches a source's deals by. Deals pin `source_url =
+ * fetched.finalUrl` (post-redirect), so once a successful crawl/monitor pass has
+ * recorded the source's `resolved_url`, match on THAT; fall back to the configured
+ * `url` until first seen (or for a source that doesn't redirect). Prereq A: without
+ * this, a redirecting source's expiry/diff-baseline lookups never match its own
+ * deals (published deals never auto-expire under unattended scheduling).
+ */
+function dealMatchUrl(source: Source): string {
+  return source.resolved_url ?? source.url;
 }

@@ -118,7 +118,11 @@ each have one. The Postgres contract runs only when `DATABASE_URL_TEST` is set.
    surface as permanently free without a human confirming the steady-state cost.
 7. **Monitoring never silently retracts a verified deal.** A login/captcha/anti-bot wall routes
    to manual capture (not expiry); auto-expiry fires only after N **consecutive** unreachable
-   checks, so a single transient failure can't expire a published deal.
+   checks, so a single transient failure can't expire a published deal. Monitor matches a
+   source's deals (for expiry + the diff baseline) on the source's resolved (post-redirect) URL —
+   `source.resolved_url ?? source.url`, where `resolved_url` is pinned on the first successful
+   crawl/monitor pass (= `fetched.finalUrl`, the URL deals are keyed by). So a source whose
+   configured URL redirects still expires its OWN deals correctly — and only those (Step 4).
 
 ## HTTP surface: two routers, one port
 
@@ -222,3 +226,18 @@ CLI renders both (`--runs`). Beyond the per-run `AgentBudget` cap, a `DailyBudge
 (`DAILY_BUDGET_EUR`, 0 = off) across a discovery batch: it reads spend-so-far-today
 from the run ledger and stops before a run would push past the ceiling, clamping the
 per-run cap to the remaining headroom so one run can't overshoot either.
+
+## Scheduling / unattended running (Step 4 — external cron)
+
+The pipeline is a **CLI, not a self-running daemon**. The `Queue` (pg-boss) port exists but is
+**intentionally unwired** from the composition root; v1 runs each lane as a scheduled invocation
+of the published container image (the entrypoint applies idempotent migrations, then runs the
+given CLI command). `deploy/` holds the templates: `deploy/k8s/cronjobs.yaml` (one CronJob per
+lane — `crawl --due` / `monitor --due` / `ingest --community-due` / `discover --broad`, with
+Tier-4 discover `suspend: true` by default) and a guarded opt-in `.github/workflows/scheduled.yml`;
+`deploy/README.md` documents the cadence, env/secrets, and trust posture. Scheduling changes
+**no** invariant: nothing auto-publishes, every lane is bounded, defaults keep the agentic lanes
+dark, and `concurrencyPolicy: Forbid` keeps a lane from overlapping itself (a source-level
+advisory lock + a bounded pg-boss pool are the prerequisites recorded in `docs/KNOWN_ISSUES.md`
+for the day pg-boss is wired). Under any scheduler `EVIDENCE_STORE=s3` is required (a CronJob
+pod's filesystem is ephemeral; `local` would discard evidence).

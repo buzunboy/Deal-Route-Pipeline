@@ -73,6 +73,21 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect(ids).not.toContain(disabled.id);
     });
 
+    it('sources: resolved_url round-trips — a set value and a null both survive (Prereq A)', async () => {
+      const db = await makeDb();
+      const resolved = makeSource({ resolved_url: 'https://www.telekom.de/final' });
+      const unresolved = makeSource({ resolved_url: null });
+      await db.sources.upsert(resolved);
+      await db.sources.upsert(unresolved);
+      expect((await db.sources.getById(resolved.id))!.resolved_url).toBe(
+        'https://www.telekom.de/final',
+      );
+      expect((await db.sources.getById(unresolved.id))!.resolved_url).toBeNull();
+      // update() also persists a newly-set resolved_url (the crawl/monitor write path).
+      await db.sources.update({ ...unresolved, resolved_url: 'https://www.x.de/r' });
+      expect((await db.sources.getById(unresolved.id))!.resolved_url).toBe('https://www.x.de/r');
+    });
+
     it('deals: insert, getById, listByStatus, updateStatus', async () => {
       const db = await makeDb();
       const deal = dealRecord();

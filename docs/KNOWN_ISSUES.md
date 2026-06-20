@@ -317,24 +317,22 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   exported `EvidenceStoreError`) both adapters throw.
 - **Logged**: 2026-06-20
 
-### Monitor source-scoped lookups key off `source.url`, not the resolved `finalUrl`
-- **Severity**: medium (trust-relevant for cross-domain-redirecting sources)
-- **Area**: monitor / db
-- **Location**: `src/application/monitor/monitor-source.ts` (`expirePublishedBySourceUrl(source.url, …)`
-  and `listBySourceUrl(source.url, …)` in `lastHashForSource`); the deals carry
-  `source_url = fetched.finalUrl` (pinned by CandidateSink).
-- **What**: Monitor finds/expires a source's deals by exact-string match of `source.url` against
-  the persisted `deal.source_url`. But deals pin `source_url` to `fetched.finalUrl` (post-redirect).
-  If a source's canonical URL redirects to a **different** URL/domain, monitor's lookups never match
-  its own deals → every monitor pass looks like a first observation (needless re-crawl each cycle),
-  and `expirePublishedBySourceUrl` never matches so those published deals can't auto-expire.
-  Pre-existing (evidence pinned `finalUrl` before split-by-source too); surfaced by the P1 review.
-  NOT the same as the crawl-source extract-key bug, which IS fixed (see Resolved below).
-- **Why deferred**: only bites sources whose canonical URL redirects across the matched URL; the
-  proper fix means tracking the resolved/final URL on the `sources` row (or matching by registrable
-  domain), a separate behavioural change with its own schema touch + tests.
-- **Fix-when**: before unattended Lane-A monitoring of sources known to redirect; track the
-  resolved URL on the source (set on first successful crawl) and have monitor match on it.
+### Scheduler templates require the S3_* secrets before being armed (EVIDENCE_STORE=s3, fail-closed)
+- **Severity**: low (template/ops, not runtime — no composition change)
+- **Area**: api / deployment
+- **Location**: `deploy/k8s/cronjobs.yaml` (ConfigMap `EVIDENCE_STORE: 's3'` + commented `S3_*`
+  Secret placeholders); `deploy/README.md`; `.github/workflows/scheduled.yml`.
+- **What**: the scheduler templates default `EVIDENCE_STORE=s3` (because a CronJob pod's
+  filesystem is ephemeral, so `local` would silently discard evidence). The `S3_*` secrets are
+  left as commented placeholders. An operator who arms the CronJobs (un-suspends discover /
+  uncomments the cron) WITHOUT first setting the `S3_*` secrets gets a hard runtime failure on
+  the first crawl. This is the SAFE direction — fail-closed (error), not silent evidence loss —
+  and it's documented inline + in `deploy/README.md`, but it's a setup footgun.
+- **Why deferred**: a template/setup concern, not a code path; the inline comments + README call
+  it out, and fail-closed is the correct posture (better a loud error than a dangling evidence_id).
+- **Fix-when**: when actually arming the scheduler in an environment — set the `S3_*` secrets (and
+  scope the CDN per `ARCHITECTURE.md`) before un-suspending any lane. Optionally add a startup
+  preflight that asserts the S3 creds are present when `EVIDENCE_STORE=s3`.
 - **Logged**: 2026-06-20
 
 ### Public landing page must NOT launch off `/v1/` without GDPR/affiliate-disclosure fields
@@ -395,6 +393,26 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 ---
 
 ## Resolved
+
+### Monitor source-scoped lookups keyed off `source.url`, not the resolved `finalUrl` — RESOLVED 2026-06-20 (Step 4 / Prereq A)
+- **Was**: medium (trust-relevant for cross-domain-redirecting sources), monitor / db,
+  `src/application/monitor/monitor-source.ts`.
+- **Problem**: monitor found/expired a source's deals by exact-string match of `source.url`, but
+  deals pin `source_url = fetched.finalUrl` (post-redirect). A source whose canonical URL
+  redirected to a different URL/domain → monitor's lookups never matched its own deals → every
+  pass looked like a first observation, and `expirePublishedBySourceUrl` never matched, so those
+  published deals could not auto-expire. A real trust gap once unattended scheduling lands.
+- **Resolution** (Step 4 prerequisite): added a nullable `resolved_url` to the Source (schema +
+  migration `0011`, additive/backfill-safe), set on the first successful crawl/monitor pass
+  (= `fetched.finalUrl`) via the shared pure `applyCrawlOutcome(source, true, now, resolvedUrl)`
+  (success-only; never overwritten with undefined; a failed/blocked/robots pass leaves it
+  untouched). Monitor now matches its expiry + diff-baseline on `dealMatchUrl(source) =
+  source.resolved_url ?? source.url`. Existing rows are `NULL` → fall back to `url`, self-healing
+  on the next crawl. Unit (crawl sets it / failed pass preserves it / `applyCrawlOutcome`
+  permutations / monitor expires a redirecting source / non-redirecting url fallback) +
+  integration (real Container+Postgres end-to-end: a redirecting source's published deal DOES
+  expire) + contract round-trip. code-reviewer APPROVED + a 4-angle adversarial-verify returned
+  SAFE-TO-MERGE (no live deal wrongly expired; `resolved_url` never corrupted). 607 unit tests green.
 
 ### Firecrawl adapters on `/v1` while the guideline documents `/v2` — RESOLVED 2026-06-20
 - **Was**: low (forward-compat), search/fetcher, the two Firecrawl adapters.

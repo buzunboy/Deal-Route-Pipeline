@@ -69,6 +69,42 @@ suite('Phase A pipeline (Container + Postgres)', () => {
     expect(await container.db.manualCapture.listOpen(10)).toHaveLength(1);
   });
 
+  it('Prereq A: a REDIRECTING source’s published deal auto-expires (monitor matches resolved_url, not source.url)', async () => {
+    // The configured source.url redirects to a different finalUrl; evidence + deals
+    // pin source_url = finalUrl. End-to-end through real Postgres: crawl records
+    // resolved_url, approve publishes, then the page disappears → after the debounce
+    // the published deal expires — which only works if monitor matched on the
+    // resolved (finalUrl) URL, NOT the configured source.url.
+    const configuredUrl = 'https://telekom.de/redirects-here';
+    const finalUrl = 'https://www.telekom.de/magenta-final'; // post-redirect, different host
+    const source = makeSource({ url: configuredUrl, resolved_url: null });
+    const fetcher = new ScriptedFetcher({ [configuredUrl]: { text: PAGE, finalUrl } });
+    container = makeContainer({
+      fetcher,
+      llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [makeLlmDeal()] }) }),
+    });
+    await container.db.sources.upsert(source);
+
+    // CRAWL: candidate persisted, evidence + deal pinned to finalUrl; resolved_url set.
+    await container.crawlSource.execute({ sourceId: source.id });
+    expect((await container.db.sources.getById(source.id))!.resolved_url).toBe(finalUrl);
+    const candidate = (await container.db.deals.listByStatus('candidate', 10))[0]!;
+    expect(candidate.source_url).toBe(finalUrl); // deal is keyed by the redirect target
+
+    // APPROVE → published.
+    await container.review.approve(candidate.id, 'reviewer@dealroute');
+    expect((await container.db.deals.getById(candidate.id))!.status).toBe('published');
+
+    // The page now disappears. Two consecutive disappearances must expire the
+    // published deal — matched by resolved_url (finalUrl), not the configured url.
+    fetcher.setResultFor(configuredUrl, { outcome: 'error', text: '', html: '' });
+    await container.monitor.execute({ sourceId: source.id }); // 1st: debounced
+    expect((await container.db.deals.getById(candidate.id))!.status).toBe('published');
+    const second = await container.monitor.execute({ sourceId: source.id }); // 2nd: expires
+    expect(second.expired).toBe(1);
+    expect((await container.db.deals.getById(candidate.id))!.status).toBe('expired');
+  });
+
   it('monitor detects a changed price/terms region and re-queues a fresh candidate', async () => {
     const source = makeSource({ url: 'https://www.telekom.de/magenta-disney' });
     const fetcher = new ScriptedFetcher({ [source.url]: { text: PAGE, html: '<html></html>' } });

@@ -78,6 +78,13 @@
       "when": 1781978034920,
       "tag": "0010_orange_mac_gargan",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781991276051,
+      "tag": "0011_ordinary_barracuda",
+      "breakpoints": true
     }
   ]
 }

@@ -114,4 +114,30 @@ describe('applyCrawlOutcome (shared crawl + monitor policy)', () => {
     applyCrawlOutcome(src, false, now);
     expect(src).toEqual(before);
   });
+
+  // Prereq A: pin the post-redirect resolved_url on a successful pass so monitor
+  // can match deals by the URL they're keyed by (source_url = finalUrl).
+  it('on success: pins the supplied resolvedUrl onto resolved_url', () => {
+    const src = makeSource({ url: 'https://telekom.de/x', resolved_url: null });
+    const { source } = applyCrawlOutcome(src, true, now, 'https://www.telekom.de/final');
+    expect(source.resolved_url).toBe('https://www.telekom.de/final');
+  });
+
+  it('on success with NO resolvedUrl supplied: leaves the prior resolved_url untouched', () => {
+    const src = makeSource({ resolved_url: 'https://prior.de/r' });
+    const { source } = applyCrawlOutcome(src, true, now); // resolvedUrl omitted
+    expect(source.resolved_url).toBe('https://prior.de/r');
+  });
+
+  it('on FAILURE: never overwrites resolved_url (a failed pass saw no final URL)', () => {
+    const src = makeSource({ resolved_url: 'https://prior.de/r' });
+    const { source } = applyCrawlOutcome(src, false, now, 'https://ignored.de/x');
+    expect(source.resolved_url).toBe('https://prior.de/r');
+  });
+
+  it('on success: a fresh source (resolved_url=null) with no resolvedUrl stays null', () => {
+    const src = makeSource({ resolved_url: null });
+    const { source } = applyCrawlOutcome(src, true, now);
+    expect(source.resolved_url).toBeNull();
+  });
 });

@@ -172,6 +172,53 @@ describe('MonitorSourceUseCase', () => {
     expect((await env.db.deals.getById(deal.id))!.status).toBe('expired');
   });
 
+  // ── Prereq A: a redirecting source must still match (expire) its own deals ──
+  // The configured source.url redirects to a different finalUrl; deals pin
+  // source_url = finalUrl. Without resolved_url tracking, monitor's source-scoped
+  // expiry keys off source.url and never matches → published deals never expire.
+
+  it('expires a REDIRECTING source’s published deals (keyed by finalUrl) via resolved_url', async () => {
+    const configuredUrl = 'https://src.de/offer';
+    const finalUrl = 'https://www.final.de/offer'; // post-redirect; deals are keyed here
+    // First pass: a successful fetch (resolves to finalUrl) records resolved_url.
+    const fetcher = new FakeFetcher({ text: PAGE_TEXT, finalUrl });
+    const env = build(fetcher);
+    const redirecting = makeSource({ url: configuredUrl, resolved_url: null });
+    await env.db.sources.upsert(redirecting);
+    // The deal is pinned to the finalUrl (as CandidateSink does in production).
+    const deal = await seedPublishedDeal(env.db, env.evidenceStore, finalUrl, sha256(PAGE_TEXT));
+
+    // Pass 1 (content matches): records resolved_url = finalUrl, no expiry.
+    await env.monitor.execute({ sourceId: redirecting.id });
+    const afterPass1 = await env.db.sources.getById(redirecting.id);
+    expect(afterPass1!.resolved_url).toBe(finalUrl);
+    expect((await env.db.deals.getById(deal.id))!.status).toBe('published');
+
+    // Now the page disappears → two consecutive disappearances must expire the deal,
+    // matching on resolved_url (finalUrl) — NOT the configured source.url.
+    fetcher.setResult({ outcome: 'error', text: '' });
+    await env.monitor.execute({ sourceId: redirecting.id }); // 1st disappearance: debounced
+    expect((await env.db.deals.getById(deal.id))!.status).toBe('published');
+    const second = await env.monitor.execute({ sourceId: redirecting.id }); // 2nd: expires
+    expect(second.expired).toBe(1);
+    expect((await env.db.deals.getById(deal.id))!.status).toBe('expired');
+  });
+
+  it('falls back to source.url for expiry when resolved_url is still null (non-redirecting / first-seen)', async () => {
+    // A source that doesn't redirect (finalUrl === url) and whose resolved_url is
+    // null still expires correctly via the source.url fallback.
+    const fetcher = new FakeFetcher({ outcome: 'error', text: '' });
+    const env = build(fetcher);
+    const src = makeSource({ resolved_url: null });
+    await env.db.sources.upsert(src);
+    const deal = await seedPublishedDeal(env.db, env.evidenceStore, src.url, sha256(PAGE_TEXT));
+
+    await env.monitor.execute({ sourceId: src.id }); // 1st: debounced
+    const second = await env.monitor.execute({ sourceId: src.id }); // 2nd: expires
+    expect(second.expired).toBe(1);
+    expect((await env.db.deals.getById(deal.id))!.status).toBe('expired');
+  });
+
   it('routes a blocked page to manual capture without expiring published deals', async () => {
     const fetcher = new FakeFetcher({ outcome: 'blocked', text: '' });
     const env = build(fetcher);

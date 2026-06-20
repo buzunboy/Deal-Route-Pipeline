@@ -1,0 +1,124 @@
+name: Scheduled lanes
+
+# DealRoute — unattended scheduling via a scheduled GitHub Action (Step 4).
+#
+# ⚠️ TEMPLATE / OPT-IN — this is the GitHub-Actions ALTERNATIVE to the K8s CronJobs
+# in deploy/k8s/cronjobs.yaml. Use it when you don't run K8s/ECS and want the
+# simplest possible scheduler: GitHub fires the cron, this workflow runs the
+# published GHCR image with each lane's `--due` command against your production DB.
+#
+# It is GUARDED so it never runs by accident:
+#   - the cron triggers are commented out by default (uncomment to enable);
+#   - every job is gated on `vars.SCHEDULED_LANES_ENABLED == 'true'` (a repo
+#     variable you set deliberately) AND the `production` Environment (add required
+#     reviewers / environment secrets there);
+#   - it still needs the DB reachable from GitHub's runners + the secrets below.
+#
+# Nothing auto-publishes; lanes are bounded (per-run caps + DAILY_BUDGET_EUR). The
+# container entrypoint applies idempotent migrations before each command.
+#
+# Required (repo Settings → Secrets and variables → Actions, on the `production` Environment):
+#   secrets:  DATABASE_URL, ANTHROPIC_API_KEY  (+ SEARCH_API_KEY / S3_* only if used)
+#   vars:     SCHEDULED_LANES_ENABLED = 'true'  to arm the schedule
+#
+# NB GitHub cron is best-effort (can be delayed under load) and only runs on the
+# default branch — for tight SLAs prefer the K8s CronJobs. `--due` selectors make a
+# slightly-late or skipped run self-correcting (it just picks up whatever is due).
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: 'Lane to run on demand'
+        required: true
+        default: monitor
+        type: choice
+        options: [crawl, monitor, ingest, discover]
+      image_tag:
+        description: 'GHCR image tag to run'
+        required: true
+        default: edge
+  # schedule:  # TODO: uncomment to arm (UTC). Offsets avoid same-minute collisions.
+  #   - cron: '0 */6 * * *'   # crawl  — every 6h
+  #   - cron: '30 */3 * * *'  # monitor — every 3h
+  #   - cron: '15 * * * *'    # ingest — hourly
+  #   - cron: '0 2 * * *'     # discover — daily 02:00 (Tier-4; keep disabled unless armed)
+
+permissions:
+  contents: read
+  packages: read # pull the GHCR image
+
+concurrency:
+  # Never overlap a scheduled run with itself (no source-level lock yet — KNOWN_ISSUES).
+  group: scheduled-lanes
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  run-lane:
+    # Armed only when the repo variable is set true; the Environment adds approval.
+    if: ${{ vars.SCHEDULED_LANES_ENABLED == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 60
+    steps:
+      - name: Resolve the lane command
+        id: lane
+        shell: bash
+        run: |
+          set -euo pipefail
+          # On a schedule, map the firing cron → its lane. On manual dispatch, use the input.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            LANE="${{ github.event.inputs.lane }}"
+            TAG="${{ github.event.inputs.image_tag }}"
+          else
+            TAG="edge"
+            case "${{ github.event.schedule }}" in
+              "0 */6 * * *")  LANE="crawl" ;;
+              "30 */3 * * *") LANE="monitor" ;;
+              "15 * * * *")   LANE="ingest" ;;
+              "0 2 * * *")    LANE="discover" ;;
+              *) echo "::error::unmapped schedule '${{ github.event.schedule }}'"; exit 1 ;;
+            esac
+          fi
+          case "$LANE" in
+            crawl)    ARGS="crawl --due" ;;
+            monitor)  ARGS="monitor --due" ;;
+            ingest)   ARGS="ingest --community-due" ;;
+            discover) ARGS="discover --broad" ;;
+            *) echo "::error::unknown lane '$LANE'"; exit 1 ;;
+          esac
+          echo "lane=$LANE"  >> "$GITHUB_OUTPUT"
+          echo "args=$ARGS"  >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"    >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run lane (${{ steps.lane.outputs.lane }})
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Tier-4 stays dark unless this is the discover lane; enable per-lane only.
+          # SEARCH_PROVIDER=api uses Brave + needs SEARCH_API_KEY (set it as a secret).
+          AGENT: ${{ steps.lane.outputs.lane == 'discover' && 'search' || 'noop' }}
+          SEARCH_PROVIDER: ${{ steps.lane.outputs.lane == 'discover' && 'api' || 'stub' }}
+          SEARCH_API_KEY: ${{ secrets.SEARCH_API_KEY }}
+          DAILY_BUDGET_EUR: '10.00'
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_NAME}:${{ steps.lane.outputs.tag }}"
+          docker pull "$IMAGE"
+          # The entrypoint applies migrations, then runs the CLI command.
+          docker run --rm \
+            -e DATABASE_URL -e ANTHROPIC_API_KEY -e AGENT -e SEARCH_PROVIDER -e SEARCH_API_KEY \
+            -e DAILY_BUDGET_EUR -e NODE_ENV=production \
+            "$IMAGE" ${{ steps.lane.outputs.args }}

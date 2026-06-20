@@ -44,5 +44,15 @@ export const SourceSchema = z.object({
   last_seen: z.string().nullable().default(null),
   /** ISO-8601 timestamp of the next due crawl. */
   next_due: z.string().nullable().default(null),
+  /**
+   * The POST-REDIRECT final URL this source actually resolves to, captured on the
+   * first successful crawl/monitor pass (= `fetched.finalUrl`). Null until first
+   * seen. Deals pin `source_url = fetched.finalUrl`, so MONITOR matches its
+   * source-scoped expiry/diff-baseline lookups on `resolved_url ?? url` — without
+   * it, a source whose `url` redirects to a different URL never matches its own
+   * deals (every pass looks like a first sight; published deals never auto-expire).
+   * Additive + nullable so existing rows parse unchanged and self-heal on next crawl.
+   */
+  resolved_url: z.string().url().nullable().default(null),
 });
 export type Source = z.infer<typeof SourceSchema>;

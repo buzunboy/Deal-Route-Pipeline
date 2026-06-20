@@ -798,6 +798,7 @@ function toSourceRow(s: Source): typeof schema.sources.$inferInsert {
     status: s.status,
     lastSeen: s.last_seen,
     nextDue: s.next_due,
+    resolvedUrl: s.resolved_url,
   };
 }
 function fromSourceRow(r: typeof schema.sources.$inferSelect): Source {
@@ -813,6 +814,7 @@ function fromSourceRow(r: typeof schema.sources.$inferSelect): Source {
     status: r.status as Source['status'],
     last_seen: isoTimestampOrNull(r.lastSeen),
     next_due: isoTimestampOrNull(r.nextDue),
+    resolved_url: r.resolvedUrl,
   };
 }
 function toRunRow(r: CrawlRun): typeof schema.crawlRuns.$inferInsert {
