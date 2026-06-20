@@ -149,6 +149,27 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Fix-when**: a scheduler/worker introduces real concurrency on the same source.
 - **Logged**: 2026-06-20
 
+### Postgres `Database` contract suite isn't isolated per-test and isn't run in CI
+- **Severity**: medium
+- **Area**: ci / db / testing
+- **Location**: `src/adapters/db/postgres/postgres-db.test.ts`, `test/contracts/database-contract.ts`, `vitest.integration.config.ts`
+- **What**: Two linked gaps. (1) The shared `databaseContract` gives each test a fresh store
+  for the in-memory adapter, but for Postgres `makeDb()` just reconnects to the same DB with
+  no per-test truncation — so count/global-list tests (`fieldProposals` repeat-sighting,
+  `expirePublishedBySourceUrl`, `findByDedupeKey` canonical) collide and fail when the file
+  is run as a whole. (2) The suite only runs under the default vitest config and self-skips
+  without `DATABASE_URL_TEST`; the integration config includes only `test/integration/**`, and
+  the CI `check` job has no DB — so the Postgres adapter contract effectively **never runs in
+  CI** (contradicting the testing-rules claim that it runs in the integration tier).
+- **Why deferred**: not gating anything today (it skips in CI) and the adapter is covered
+  end-to-end by `test/integration/**` (all green). Fixing isolation means giving the contract
+  a per-test reset hook (truncate for Postgres / fresh map for in-memory) and wiring the file
+  into the integration tier — a focused test-harness change, not a product fix.
+- **Fix-when**: before relying on the contract suite as the substitutability gate, or when
+  wiring the Postgres contract into the integration run — add a `resetBetweenTests` hook to
+  `databaseContract` and include the file in `vitest.integration.config.ts`.
+- **Logged**: 2026-06-20
+
 ### Monitor source-scoped lookups key off `source.url`, not the resolved `finalUrl`
 - **Severity**: medium (trust-relevant for cross-domain-redirecting sources)
 - **Area**: monitor / db

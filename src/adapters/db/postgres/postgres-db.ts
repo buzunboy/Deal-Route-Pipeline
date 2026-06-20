@@ -41,7 +41,7 @@ import type {
 } from '../../../domain/index.js';
 import type { Logger } from '../../../application/ports/index.js';
 import * as schema from './schema.js';
-import { dealToRow, rowToDeal } from './mappers.js';
+import { dealToRow, rowToDeal, isoTimestamp, isoTimestampOrNull } from './mappers.js';
 import { newId } from '../../../application/shared/id.js';
 import { DbRetrier, type DbRetryConfig } from './db-resilience.js';
 
@@ -411,7 +411,13 @@ class PgCrawlRunRepo extends PgRepo implements CrawlRunRepository {
           })
           .from(schema.crawlRuns)
           .where(where)
-          .groupBy(sourceBucketExpr),
+          // Group by the bare column, not the coalesce expression: the sentinel
+          // bucket is functionally determined by source_id (NULL is its own
+          // group, mapped to the sentinel only in the projection), so this is
+          // semantically identical while avoiding Postgres's "must appear in
+          // GROUP BY" error — Drizzle renders the inline-param coalesce expr
+          // differently in SELECT vs GROUP BY, so the two never textually match.
+          .groupBy(schema.crawlRuns.sourceId),
       ]);
 
       const totals = totalsRows[0] ?? { micros: 0, count: 0 };
@@ -476,7 +482,7 @@ class PgManualCaptureRepo extends PgRepo implements ManualCaptureRepository {
       source_id: r.sourceId,
       source_url: r.sourceUrl,
       reason: r.reason as ManualCaptureTask['reason'],
-      created_at: r.createdAt,
+      created_at: isoTimestamp(r.createdAt),
       status: r.status as ManualCaptureTask['status'],
       note: r.note,
     }));
@@ -529,8 +535,8 @@ class PgFieldProposalRepo extends PgRepo implements FieldProposalRepository {
       example_quote: r.exampleQuote,
       count: r.count,
       status: r.status as FieldProposalRecord['status'],
-      first_seen_at: r.firstSeenAt,
-      last_seen_at: r.lastSeenAt,
+      first_seen_at: isoTimestamp(r.firstSeenAt),
+      last_seen_at: isoTimestamp(r.lastSeenAt),
     }));
   }
 }
@@ -577,7 +583,7 @@ function rowToChange(r: typeof schema.changes.$inferSelect): Change {
     kind: r.kind,
     previous_hash: r.previousHash,
     current_hash: r.currentHash,
-    detected_at: r.detectedAt,
+    detected_at: isoTimestamp(r.detectedAt),
   });
 }
 
@@ -614,7 +620,7 @@ class PgReviewRepo extends PgRepo implements ReviewRepository {
         action: r.action,
         approver: r.approver,
         reason: r.reason,
-        decided_at: r.decidedAt,
+        decided_at: isoTimestamp(r.decidedAt),
       }),
     );
   }
@@ -652,7 +658,7 @@ class PgSourceReviewRepo extends PgRepo implements SourceReviewRepository {
         action: r.action,
         approver: r.approver,
         reason: r.reason,
-        decided_at: r.decidedAt,
+        decided_at: isoTimestamp(r.decidedAt),
       }),
     );
   }
@@ -727,8 +733,8 @@ function fromSourceRow(r: typeof schema.sources.$inferSelect): Source {
     cadence_days: r.cadenceDays,
     reliability_score: r.reliabilityScore,
     status: r.status as Source['status'],
-    last_seen: r.lastSeen,
-    next_due: r.nextDue,
+    last_seen: isoTimestampOrNull(r.lastSeen),
+    next_due: isoTimestampOrNull(r.nextDue),
   };
 }
 function toRunRow(r: CrawlRun): typeof schema.crawlRuns.$inferInsert {
@@ -754,23 +760,16 @@ function fromRunRow(r: typeof schema.crawlRuns.$inferSelect): CrawlRun {
     source_id: r.sourceId,
     run_kind: r.runKind,
     status: r.status,
-    // Postgres returns a `timestamptz` (mode:'string') in libpq text form
-    // ('2026-06-19 00:00:00+00' — space, '+00', no millis/'Z'), NOT the canonical
-    // ISO-Z the caller wrote. Normalize so this adapter emits byte-identical
-    // started_at/finished_at to the in-memory adapter (LSP): recentRuns exposes the
-    // raw string to CLI/ledger consumers, so the two adapters must agree exactly.
-    started_at: isoOf(r.startedAt),
-    finished_at: r.finishedAt === null ? null : isoOf(r.finishedAt),
+    // Normalize timestamptz text → ISO-Z so recentRuns is byte-identical to the
+    // in-memory adapter (see isoTimestamp).
+    started_at: isoTimestamp(r.startedAt),
+    finished_at: isoTimestampOrNull(r.finishedAt),
     candidates_produced: r.candidatesProduced,
     proposals_produced: r.proposalsProduced,
     cost_eur: r.costEur,
     stopped_reason: r.stoppedReason,
     error: r.error,
   });
-}
-/** Canonical ISO-8601 (UTC, 'Z') for a Postgres timestamptz text value. */
-function isoOf(ts: string): string {
-  return new Date(ts).toISOString();
 }
 function toEvidenceRow(e: Evidence): typeof schema.evidence.$inferInsert {
   return {
@@ -790,7 +789,7 @@ function fromEvidenceRow(r: typeof schema.evidence.$inferSelect): Evidence {
     screenshot_ref: r.screenshotRef,
     html_ref: r.htmlRef,
     terms_ref: r.termsRef,
-    captured_at: r.capturedAt,
+    captured_at: isoTimestamp(r.capturedAt),
     content_hash: r.contentHash,
   };
 }

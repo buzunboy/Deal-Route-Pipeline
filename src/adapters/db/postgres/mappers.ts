@@ -59,6 +59,25 @@ export function dealToRow(d: DealRecord): DealRow {
  * trust stored data blindly either: a row that no longer parses (e.g. after a bad
  * manual edit) fails loudly rather than leaking a malformed record.
  */
+/**
+ * Canonical ISO-8601 (UTC, 'Z') for a Postgres `timestamptz` text value.
+ *
+ * node-postgres returns a `timestamptz` (mode:'string') column in libpq text form
+ * ('2026-06-19 00:00:00+00' — space separator, '+00', no millis/'Z'), NOT the
+ * canonical ISO-Z string the caller wrote. Every read mapper normalizes through
+ * this so the Postgres adapter emits byte-identical timestamps to the in-memory
+ * adapter (LSP) — domain objects and their consumers (CLI/ledger/scheduler) only
+ * ever see ISO-Z. Round-trip-safe: all writers persist ISO already.
+ */
+export function isoTimestamp(ts: string): string {
+  return new Date(ts).toISOString();
+}
+
+/** As {@link isoTimestamp}, but passes a null `timestamptz` through unchanged. */
+export function isoTimestampOrNull(ts: string | null): string | null {
+  return ts === null ? null : isoTimestamp(ts);
+}
+
 export function rowToDeal(r: DealSelect): DealRecord {
   const candidate = {
     id: r.id,
@@ -95,7 +114,7 @@ export function rowToDeal(r: DealSelect): DealRecord {
     confidence: r.confidence,
     status: r.status,
     verified_by: r.verifiedBy,
-    verified_at: r.verifiedAt,
+    verified_at: isoTimestampOrNull(r.verifiedAt),
   };
   return DealRecordSchema.parse(candidate);
 }

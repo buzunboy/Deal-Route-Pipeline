@@ -27,7 +27,7 @@
     "db:migrate": "tsx src/adapters/db/migrate.ts",
     "seed:import": "tsx src/adapters/cli/main.ts seed-import",
     "dry-run-extract": "tsx src/adapters/cli/main.ts dry-run-extract",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

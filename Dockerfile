@@ -3,6 +3,10 @@
 FROM mcr.microsoft.com/playwright:v1.49.1-jammy AS base
 WORKDIR /app
 ENV NODE_ENV=production
+# Git hooks (husky) are a dev-only concern; disable them in the image so the
+# `prepare` lifecycle script never tries to install hooks during `npm ci`
+# (no .git here, and husky isn't present in the prod-only `--omit=dev` install).
+ENV HUSKY=0
 
 # ── deps ─────────────────────────────────────────────────────────────────────
 FROM base AS deps
