@@ -10,6 +10,26 @@ function env(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { LLM_PROVIDER: 'stub', ...overrides };
 }
 
+describe('loadConfig — fetcher backend selection', () => {
+  it('defaults the fetcher to playwright', () => {
+    expect(loadConfig(env()).fetcher.kind).toBe('playwright');
+  });
+
+  it('accepts the C-2 browser + hosted-browser kinds', () => {
+    expect(loadConfig(env({ FETCHER: 'browser' })).fetcher.kind).toBe('browser');
+    expect(loadConfig(env({ FETCHER: 'hosted-browser' })).fetcher.kind).toBe('hosted-browser');
+  });
+
+  it('rejects an unknown FETCHER value', () => {
+    expect(() => loadConfig(env({ FETCHER: 'selenium' }))).toThrow();
+  });
+
+  it('reads BROWSER_API_KEY (empty → undefined)', () => {
+    expect(loadConfig(env({ BROWSER_API_KEY: 'k' })).fetcher.browserApiKey).toBe('k');
+    expect(loadConfig(env({ BROWSER_API_KEY: '  ' })).fetcher.browserApiKey).toBeUndefined();
+  });
+});
+
 describe('loadConfig — search backend selection', () => {
   it('defaults to the offline stub when no SEARCH_API_KEY is set', () => {
     const cfg = loadConfig(env());

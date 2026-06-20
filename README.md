@@ -33,7 +33,8 @@ All config + secrets come from the environment; nothing is hard-coded. Key vars 
 | `LLM_PROVIDER` | `anthropic` \| `openai` \| `stub` |
 | `LLM_EXTRACTION_MODEL` / `LLM_DISCOVERY_MODEL` | cheap extractor + stronger discovery model |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | whichever provider you chose |
-| `FETCHER` | `playwright` (default) \| `firecrawl` |
+| `FETCHER` | `playwright` (default) \| `browser` (local Playwright JS-render for JS-heavy SPAs, C-2) \| `firecrawl` \| `hosted-browser` (C-2 hosted-vendor scaffold) |
+| `BROWSER_API_KEY` | hosted-browser vendor key (only when `FETCHER=hosted-browser`) |
 | `AGENT` | Tier-4 broad-discovery agent: `noop` (default off-switch) \| `search` |
 | `SEARCH_PROVIDER` | `stub` (default off-switch) \| `api` (Brave) \| `firecrawl`; defaults to `api` when `SEARCH_API_KEY` is set |
 | `SEARCH_API_KEY` | Brave Search API key (only when `SEARCH_PROVIDER=api`) |

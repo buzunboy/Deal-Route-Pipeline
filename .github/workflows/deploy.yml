@@ -24,6 +24,10 @@ on:
         description: 'Image tag to deploy (e.g. edge, v1.2.3, sha-abc1234)'
         required: true
         default: edge
+  # NB: this fires after EVERY successful Release on master (i.e. every merge),
+  # deploying the rolling `edge` image — gated by the `production` Environment's
+  # required reviewer. If you'd rather deploy only on tagged releases, drop this
+  # `workflow_run` trigger and deploy via `workflow_dispatch` with the version tag.
   workflow_run:
     workflows: ['Release image']
     types: [completed]

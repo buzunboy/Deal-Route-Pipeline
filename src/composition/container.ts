@@ -29,7 +29,9 @@ import { AnthropicLlm } from '../adapters/llm/anthropic-llm.js';
 import { OpenAiLlm } from '../adapters/llm/openai-llm.js';
 import { StubLlm } from '../adapters/llm/stub-llm.js';
 import { PlaywrightFetcher } from '../adapters/fetcher/playwright-fetcher.js';
+import { BrowserRenderFetcher } from '../adapters/fetcher/browser-render-fetcher.js';
 import { FirecrawlFetcher } from '../adapters/fetcher/firecrawl-fetcher.js';
+import { HostedBrowserFetcher } from '../adapters/fetcher/hosted-browser-fetcher.js';
 import { PoliteFetcher } from '../adapters/fetcher/polite-fetcher.js';
 import { StubSearchProvider } from '../adapters/search/stub-search-provider.js';
 import { BraveSearchProvider } from '../adapters/search/brave-search-provider.js';
@@ -182,26 +184,52 @@ export class Container {
   }
 
   private buildFetcher(config: Config): Fetcher {
-    let inner: Fetcher;
-    if (config.fetcher.kind === 'firecrawl') {
-      if (!config.fetcher.firecrawlApiKey) {
-        throw new Error('FETCHER=firecrawl requires FIRECRAWL_API_KEY.');
-      }
-      inner = new FirecrawlFetcher(config.fetcher.firecrawlApiKey, config.fetcher.timeoutMs);
-    } else {
-      const playwright = new PlaywrightFetcher(config.fetcher.timeoutMs);
-      this.closables.push(playwright);
-      inner = playwright;
-    }
+    const inner = this.buildInnerFetcher(config);
     // Wrap with the politeness decorator so robots.txt + per-domain rate limiting
     // are actually enforced (the config promised them). Behind the Fetcher port,
-    // so the crawl use-case and concrete fetchers are unchanged.
+    // so the crawl use-case and concrete fetchers are unchanged. EVERY inner
+    // fetcher — incl. the C-2 browser/hosted-browser ones — is wrapped, so the
+    // public-only guardrails apply uniformly (no lane bypasses robots/rate-limit).
     return new PoliteFetcher(inner, {
       respectRobotsTxt: config.crawl.respectRobotsTxt,
       minIntervalMs: config.crawl.perDomainRateLimitMs,
       userAgent: config.fetcher.userAgent,
       logger: this.logger,
     });
+  }
+
+  /** The concrete fetch backend, chosen by `FETCHER`. Browser-backed ones are closable. */
+  private buildInnerFetcher(config: Config): Fetcher {
+    const { kind, timeoutMs } = config.fetcher;
+    switch (kind) {
+      case 'firecrawl': {
+        if (!config.fetcher.firecrawlApiKey) {
+          throw new Error('FETCHER=firecrawl requires FIRECRAWL_API_KEY.');
+        }
+        return new FirecrawlFetcher(config.fetcher.firecrawlApiKey, timeoutMs);
+      }
+      case 'browser': {
+        // C-2: local Playwright JS-render (networkidle + scroll) for JS-heavy SPAs.
+        const browser = new BrowserRenderFetcher(timeoutMs);
+        this.closables.push(browser);
+        return browser;
+      }
+      case 'hosted-browser': {
+        // C-2 hosted scaffold — fail loud without a key, throws until implemented.
+        if (!config.fetcher.browserApiKey) {
+          throw new Error('FETCHER=hosted-browser requires BROWSER_API_KEY.');
+        }
+        const hosted = new HostedBrowserFetcher(config.fetcher.browserApiKey, timeoutMs);
+        this.closables.push(hosted);
+        return hosted;
+      }
+      case 'playwright':
+      default: {
+        const playwright = new PlaywrightFetcher(timeoutMs);
+        this.closables.push(playwright);
+        return playwright;
+      }
+    }
   }
 
   private buildSearchProvider(config: Config): SearchProvider {
@@ -281,8 +309,16 @@ export class Container {
   }
 
   async shutdown(): Promise<void> {
-    for (const c of this.closables) {
-      await c.close();
+    // Settle ALL closables independently: a browser close() that hangs/throws must
+    // not strand the others (e.g. leave the Postgres pool open) — sequential await
+    // would abort the rest on the first failure. Log failures; never throw.
+    const results = await Promise.allSettled(this.closables.map((c) => c.close()));
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        this.logger.error('container shutdown: a resource failed to close', {
+          error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+        });
+      }
     }
   }
 }

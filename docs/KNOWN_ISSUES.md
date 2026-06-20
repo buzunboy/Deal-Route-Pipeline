@@ -31,6 +31,43 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### Interactive multi-step BrowserAgent (Phase C-2 "Option B") — not built
+- **Severity**: low (a capability gap, not a defect)
+- **Area**: discovery / fetcher
+- **Location**: `src/adapters/agent/` (would be a new BrowserAgent) — n/a yet
+- **What**: C-2 was delivered as a render-capable `Fetcher` (`BrowserRenderFetcher`,
+  `FETCHER=browser`) driven by the existing `SearchBrowserAgent` — it renders JS-heavy
+  pages but fetches each URL statelessly. It does NOT do *interactive multi-step*
+  navigation (fill a filter form → click "load more" → read several result pages within
+  ONE browser session). That needs a standalone `BrowserAgent` (Browser Use / Stagehand)
+  that owns its browser session.
+- **Why deferred**: most DE provider/bundler pages are server-rendered or lightly hydrated —
+  "render the JS so the offer appears" (now handled) covers the dominant need. The
+  interactive agent bypasses `PoliteFetcher` (robots/rate-limit/size caps would need
+  re-implementing inside it), so it's a real trust-surface increase to take on only when
+  justified. Chosen "Option A now, Option B later" deliberately.
+- **Fix-when**: a real target requires form-driven / click-through multi-step discovery the
+  stateless render fetch can't reach. Build it as a new `BrowserAgent` adapter behind the
+  existing port (no use-case change), and re-secure robots/rate-limit/size inside it.
+- **Logged**: 2026-06-20
+
+
+### Screenshot height-detection failure falls back to fullPage (defeats the height cap)
+- **Severity**: low
+- **Area**: fetcher
+- **Location**: `src/adapters/fetcher/playwright-capture.ts` (`boundedScreenshot`)
+- **What**: `boundedScreenshot` reads `document.body.scrollHeight` via `page.evaluate` with
+  `.catch(() => 0)`. If that evaluate throws (wedged JS), height becomes `0`, so the code
+  takes the `fullPage: true` branch — the unbounded path the cap exists to prevent — for
+  exactly the hostile page that wedged JS. Low risk (Playwright's `fullPage` shot still has
+  `timeout: timeoutMs`), and behavior is unchanged from before C-2; flagged because the code
+  is now shared by both Playwright-backed fetchers.
+- **Why deferred**: pre-existing, low-risk (the screenshot timeout backstops it); the HTML
+  size cap already contained the worst OOM path.
+- **Fix-when**: touching `boundedScreenshot` — default `height` to `MAX_SCREENSHOT_HEIGHT + 1`
+  on detection failure so an undeterminable page is CLIPPED, not shot full.
+- **Logged**: 2026-06-20
+
 ### Charset / content-type guard missing in fetchers
 - **Severity**: low
 - **Area**: fetcher

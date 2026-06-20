@@ -129,12 +129,17 @@ it safe and actually useful, and some are trust-critical regardless of Phase C.
    behind the same port) is the next stage.** See §4.
 5. **Post-C — product-completeness toward the goal.** See §5.
 
-**Pre-C-1/2/3 and Phase C C-1 are now done** (merged to `master` at `3ad51bc`).
-Next: a **leftover-hardening batch** closes the still-open medium/low audit gaps
-below so the agentic lane can run unattended safely (monitor daily-budget guard,
-LLM-truncation detection, Firecrawl size caps, robots-fetch hardening, charset
-guard) — see `docs/DealRoute_Hardening_Plan.md`. Phase C **C-2** (a hosted-browser
-`BrowserAgent`) is the stage after that.
+**Pre-C-1/2/3, Phase C C-1, the leftover-hardening batch, AND Phase C C-2 are now
+done + merged.** C-2 shipped as a render-capable `Fetcher` (Option A): a
+`BrowserRenderFetcher` (`FETCHER=browser`, local Playwright JS-render — networkidle
++ scroll) for JS-heavy SPAs, plus a `HostedBrowserFetcher` vendor scaffold behind
+the same port — the existing `SearchBrowserAgent` drives it and `PoliteFetcher`
+keeps wrapping it (no guardrail bypass). CI/CD also landed: fixed CI trigger +
+migrate gate, a GHCR release-image workflow, and a scaffolded deploy workflow.
+**Next:** the post-C product-completeness track (§5) — published-deals read API,
+GDPR/affiliate disclosure at publish, reliability-driven ranking, multi-country.
+The interactive multi-step `BrowserAgent` ("Option B") is a recorded future
+extension (`docs/KNOWN_ISSUES.md`), to pick up only when a site needs it.
 
 ---
 

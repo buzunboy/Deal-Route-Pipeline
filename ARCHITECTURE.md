@@ -38,12 +38,12 @@ humans approve — nothing auto-publishes in v1.**
 
 | Port (`application/ports`) | Default adapter | Alternatives |
 |---|---|---|
-| `Fetcher` | `PlaywrightFetcher` | `FirecrawlFetcher` (`FETCHER=firecrawl`) |
+| `Fetcher` | `PlaywrightFetcher` | `BrowserRenderFetcher` (`FETCHER=browser`, C-2 JS-render), `FirecrawlFetcher` (`FETCHER=firecrawl`), `HostedBrowserFetcher` (`FETCHER=hosted-browser`, C-2 scaffold) |
 | `Llm` | `AnthropicLlm` | `OpenAiLlm`, `StubLlm` (`LLM_PROVIDER=…`) |
 | `EvidenceStore` | `LocalFsEvidenceStore` | S3/R2 (extension point) |
 | `Database` | `PostgresDb` | `InMemoryDb` (no Postgres; dry-run/tests) |
 | `Queue` | `PgBossQueue` | `InMemoryQueue` |
-| `BrowserAgent` | `NoopBrowserAgent` (off-switch) | `SearchBrowserAgent` (`AGENT=search`, Phase C C-1); real-browser agent in C-2 |
+| `BrowserAgent` | `NoopBrowserAgent` (off-switch) | `SearchBrowserAgent` (`AGENT=search`, C-1; also drives the C-2 render Fetcher); a future interactive multi-step agent (Option B) |
 | `SearchProvider` | `StubSearchProvider` (off-switch) | `BraveSearchProvider` (`SEARCH_PROVIDER=api`), `FirecrawlSearchProvider` (`SEARCH_PROVIDER=firecrawl`) |
 | `Clock`, `Logger` | `SystemClock`, `ConsoleLogger` | fakes in tests |
 
@@ -79,8 +79,12 @@ each have one. The Postgres contract runs only when `DATABASE_URL_TEST` is set.
   aggregator noise before fetching/proposing; login/blocked pages → manual capture. Capped by
   steps/queries/€/time **and** the aggregate daily €-guard; nothing auto-publishes, no
   discovered domain is auto-crawled. The default `AGENT=noop`/`SEARCH_PROVIDER=stub` keep the
-  lane dark until explicitly enabled. (C-2 — a real-browser agent for JS-heavy pages — slots
-  in behind the same `BrowserAgent` port without editing callers.)
+  lane dark until explicitly enabled. **C-2 (JS-heavy pages)** is delivered as a render-capable
+  `Fetcher` behind the existing port — `BrowserRenderFetcher` (`FETCHER=browser`, local
+  Playwright: networkidle + scroll) and a `HostedBrowserFetcher` scaffold — so the same
+  `SearchBrowserAgent` drives it and `PoliteFetcher` keeps wrapping it (robots/rate-limit/size
+  caps preserved); no agent change. A future interactive multi-step `BrowserAgent` (form-fill /
+  click-through in one session) is recorded as a follow-up (see `docs/KNOWN_ISSUES.md`).
 - **Lane B — community ingestion (Tier 3):** `IngestCommunityUseCase` (`ingest --source <id>`)
   reads a community source's **RSS/Atom feed** (the `FeedReader` port) as a stream of *leads*,
   applies a cheap catalog-keyword pre-filter, runs a per-item **LLM triage** (relevant
