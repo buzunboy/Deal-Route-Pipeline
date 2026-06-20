@@ -119,11 +119,18 @@ it safe and actually useful, and some are trust-critical regardless of Phase C.
      overshooting by one extraction) and a bounded discovery frontier (`FRONTIER_HEADROOM`).
    - **Pre-C-3 is now COMPLETE** — the cost & observability spine is in place; Phase C
      can run on a schedule against the open web with cost bounded per-run AND per-day.
-4. **Phase C — agentic broad discovery (Tier 4).** See §4.
+4. **Phase C — agentic broad discovery (Tier 4). ✅ C-1 DONE.** Search-API-first
+   lane shipped: `SearchProvider` port (stub/Brave/Firecrawl), a thin
+   `SearchBrowserAgent` behind the `BrowserAgent` port, `DiscoverBroadUseCase`
+   (`discover --broad`), a domain deny-list, and the `discover_broad` run-kind —
+   all bounded by `AgentBudget` + the daily €-guard, nothing auto-publishes, no
+   discovered domain auto-crawled. Defaults (`AGENT=noop`/`SEARCH_PROVIDER=stub`)
+   keep it dark until enabled. **C-2 (a real-browser agent for JS-heavy pages,
+   behind the same port) is the next stage.** See §4.
 5. **Post-C — product-completeness toward the goal.** See §5.
 
-**Pre-C-1 is now done**, so the loop closes — the next gate is Pre-C-2/3, which can
-overlap with C but should land before C runs on a schedule against the open web.
+**Pre-C-1/2/3 and Phase C C-1 are now done.** The next gate is Phase C C-2 (a
+hosted-browser `BrowserAgent`) once C-1 proves the loop against the open web.
 
 ---
 

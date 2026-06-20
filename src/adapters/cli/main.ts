@@ -7,6 +7,7 @@ import { monitor } from './commands/monitor.js';
 import { review } from './commands/review.js';
 import { serve } from './commands/serve.js';
 import { discover } from './commands/discover.js';
+import { discoverBroad } from './commands/discover-broad.js';
 import { ingest } from './commands/ingest.js';
 import { stats } from './commands/stats.js';
 
@@ -38,6 +39,10 @@ Commands:
   serve                               Start the review API + thin test page (durable admin contract)
   discover <url> [--max-pages N]      Lane B: bounded same-site discovery → candidates + proposed
           [--dry-run]                 novel domains (capped by pages/€/time; nothing auto-publishes)
+  discover --broad [query]            Tier-4: agentic broad discovery (search → fetch → extract →
+          [--max-steps N]             propose). Catalog-driven, or one explicit query. Needs
+          [--max-queries N]           AGENT=search + a search backend. Capped by steps/queries/€/
+          [--dry-run]                 time + the daily budget; nothing auto-publishes/auto-crawls
   ingest --source <id>                Lane B (Tier 3): read a community RSS feed → triage →
           | --community-due           extract relevant leads → candidates + proposed sources
           [--max-items N] [--dry-run]
@@ -94,6 +99,23 @@ async function main(): Promise<void> {
       break;
     }
     case 'discover': {
+      // `discover --broad` is the Tier-4 agentic lane; otherwise same-site Lane B.
+      if (rest.includes('--broad')) {
+        const maxSteps = parsePositiveIntFlag(rest, '--max-steps');
+        if (maxSteps === false) return;
+        const maxQueries = parsePositiveIntFlag(rest, '--max-queries');
+        if (maxQueries === false) return;
+        await discoverBroad(config, {
+          // The optional positional is the explicit query (e.g.
+          // `discover --broad "Disney+ im Bundle"`). Exclude the values consumed by
+          // --max-steps/--max-queries so they aren't mistaken for the query.
+          query: positionals(rest, ['--max-steps', '--max-queries'])[0],
+          maxSteps,
+          maxQueries,
+          dryRun: rest.includes('--dry-run'),
+        });
+        break;
+      }
       const maxPagesRaw = flag(rest, '--max-pages');
       const maxPages = maxPagesRaw !== undefined ? Number(maxPagesRaw) : undefined;
       if (maxPages !== undefined && (!Number.isInteger(maxPages) || maxPages <= 0)) {
@@ -184,6 +206,40 @@ async function runReview(config: Parameters<typeof review>[0], rest: string[]): 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+/**
+ * Positional (non-flag) args, with the VALUES consumed by the given value-taking
+ * flags removed — so `discover --broad "q" --max-steps 3` yields `["q"]`, not
+ * `["q", "3"]`. `--broad`/`--dry-run` are valueless and excluded as flags already.
+ */
+function positionals(args: string[], valueFlags: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a.startsWith('--')) {
+      if (valueFlags.includes(a)) i++; // skip this flag's value
+      continue;
+    }
+    out.push(a);
+  }
+  return out;
+}
+
+/**
+ * Parse an optional positive-integer flag. Returns `undefined` when absent, the
+ * number when valid, or `false` when present-but-invalid (after reporting via
+ * `fail()` — the caller bails).
+ */
+function parsePositiveIntFlag(args: string[], name: string): number | undefined | false {
+  const raw = flag(args, name);
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    fail(`${name} must be a positive integer.`);
+    return false;
+  }
+  return n;
 }
 
 const DATE_FLAG_RE = /^\d{4}-\d{2}-\d{2}$/;

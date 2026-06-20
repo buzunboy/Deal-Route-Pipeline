@@ -34,6 +34,11 @@ All config + secrets come from the environment; nothing is hard-coded. Key vars 
 | `LLM_EXTRACTION_MODEL` / `LLM_DISCOVERY_MODEL` | cheap extractor + stronger discovery model |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | whichever provider you chose |
 | `FETCHER` | `playwright` (default) \| `firecrawl` |
+| `AGENT` | Tier-4 broad-discovery agent: `noop` (default off-switch) \| `search` |
+| `SEARCH_PROVIDER` | `stub` (default off-switch) \| `api` (Brave) \| `firecrawl`; defaults to `api` when `SEARCH_API_KEY` is set |
+| `SEARCH_API_KEY` | Brave Search API key (only when `SEARCH_PROVIDER=api`) |
+| `DISCOVERY_DENY_DOMAINS` | extra deny-list domains for broad discovery (comma/space-separated) on top of the defaults |
+| `DAILY_BUDGET_EUR` | aggregate €/UTC-day ceiling across all agentic runs (default 10.00; 0 disables) |
 | `EVIDENCE_STORE` | `local` (default) \| `s3` |
 | `DATABASE_URL` | Postgres connection string (persisted runs only; dry-run/tests need none) |
 | `DEFAULT_RECRAWL_DAYS` | re-crawl cadence (default 3) |
@@ -106,6 +111,13 @@ serve                        Review API + thin test page
 discover <url> [--max-pages N] [--dry-run]
                              Lane B: bounded same-site discovery → candidates + proposed
                              novel domains (capped by pages/€/time; nothing auto-publishes)
+discover --broad [query] [--max-steps N] [--max-queries N] [--dry-run]
+                             Tier 4 (Phase C, C-1): agentic broad discovery — search → fetch
+                             public results → extract → propose novel domains. Catalog-driven
+                             or one explicit query. Needs AGENT=search + a search backend
+                             (SEARCH_API_KEY for Brave, or SEARCH_PROVIDER=firecrawl); default
+                             AGENT=noop runs nothing. Capped by steps/queries/€/time + the
+                             daily budget; nothing auto-publishes / auto-crawls.
 ingest --source <id> | --community-due [--max-items N] [--dry-run]
                              Lane B (Tier 3): community RSS feed → triage → extract relevant
                              leads → candidates + proposed merchant sources

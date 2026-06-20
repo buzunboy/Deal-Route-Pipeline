@@ -43,12 +43,13 @@ humans approve — nothing auto-publishes in v1.**
 | `EvidenceStore` | `LocalFsEvidenceStore` | S3/R2 (extension point) |
 | `Database` | `PostgresDb` | `InMemoryDb` (no Postgres; dry-run/tests) |
 | `Queue` | `PgBossQueue` | `InMemoryQueue` |
-| `BrowserAgent` | `NoopBrowserAgent` (Phase A) | real agent in Phase B/C |
+| `BrowserAgent` | `NoopBrowserAgent` (off-switch) | `SearchBrowserAgent` (`AGENT=search`, Phase C C-1); real-browser agent in C-2 |
+| `SearchProvider` | `StubSearchProvider` (off-switch) | `BraveSearchProvider` (`SEARCH_PROVIDER=api`), `FirecrawlSearchProvider` (`SEARCH_PROVIDER=firecrawl`) |
 | `Clock`, `Logger` | `SystemClock`, `ConsoleLogger` | fakes in tests |
 
 Every adapter is substitutable behind its port (LSP) and verified by a **shared contract
-suite** (`test/contracts/*`): `EvidenceStore` and `Database` each have one. The Postgres
-contract runs only when `DATABASE_URL_TEST` is set.
+suite** (`test/contracts/*`): `EvidenceStore`, `Database`, `SearchProvider`, and `BrowserAgent`
+each have one. The Postgres contract runs only when `DATABASE_URL_TEST` is set.
 
 ## The two lanes → one pipeline
 
@@ -65,8 +66,21 @@ contract runs only when `DATABASE_URL_TEST` is set.
   decisions logged to `source_reviews`). Runs are CAPPED by pages **and** € **and** wall-clock and stop
   at the first cap; login/captcha/anti-bot pages route to manual capture; the frontier is
   ordered by a domain-agnostic "likely-offer-page" score so a small budget reaches deal pages
-  before navigation chrome. A `NoopBrowserAgent` still backs the `BrowserAgent` port for the
-  fully-agentic Phase C lane (search-driven discovery), droppable in without editing callers.
+  before navigation chrome.
+- **Lane C — broad discovery (Tier 4, Phase C / C-1):** `DiscoverBroadUseCase`
+  (`discover --broad`) builds a bounded query set (catalog services × registered provider/
+  bundler domains, or one explicit query) and runs the `BrowserAgent` per query within a
+  shared `AgentBudget`. The C-1 agent (`SearchBrowserAgent`, `AGENT=search`) is **thin**:
+  it searches via the `SearchProvider` port and fetches the top public results through the
+  same polite `Fetcher` (robots + rate-limit), returning page **material** — it does NOT
+  extract. Extraction stays in `ExtractUseCase` + `CandidateSink` (the same boundary as every
+  lane), so the LLM does extraction only and the same trust gate applies. Novel domains →
+  `pending_approval` (the same source-promotion loop); a domain **deny-list** drops social/
+  aggregator noise before fetching/proposing; login/blocked pages → manual capture. Capped by
+  steps/queries/€/time **and** the aggregate daily €-guard; nothing auto-publishes, no
+  discovered domain is auto-crawled. The default `AGENT=noop`/`SEARCH_PROVIDER=stub` keep the
+  lane dark until explicitly enabled. (C-2 — a real-browser agent for JS-heavy pages — slots
+  in behind the same `BrowserAgent` port without editing callers.)
 - **Lane B — community ingestion (Tier 3):** `IngestCommunityUseCase` (`ingest --source <id>`)
   reads a community source's **RSS/Atom feed** (the `FeedReader` port) as a stream of *leads*,
   applies a cheap catalog-keyword pre-filter, runs a per-item **LLM triage** (relevant
