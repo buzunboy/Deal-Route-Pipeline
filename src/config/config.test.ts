@@ -84,3 +84,58 @@ describe('loadConfig — browser agent selection', () => {
     expect(() => loadConfig(env({ AGENT: 'browseruse' }))).toThrow();
   });
 });
+
+describe('loadConfig — S3 evidence store block', () => {
+  it('defaults the evidence store to local with no S3 block', () => {
+    const cfg = loadConfig(env());
+    expect(cfg.evidence.kind).toBe('local');
+    expect(cfg.evidence.s3).toBeUndefined();
+  });
+
+  it('builds the S3 block when S3_BUCKET is set', () => {
+    const cfg = loadConfig(
+      env({
+        EVIDENCE_STORE: 's3',
+        S3_BUCKET: 'dealroute-evidence',
+        S3_REGION: 'eu-central-1',
+        S3_ACCESS_KEY_ID: 'AK',
+        S3_SECRET_ACCESS_KEY: 'SK',
+      }),
+    );
+    expect(cfg.evidence.kind).toBe('s3');
+    expect(cfg.evidence.s3).toMatchObject({ bucket: 'dealroute-evidence', region: 'eu-central-1' });
+  });
+
+  it('rejects a partial S3 block (bucket set, creds missing) — fail loud at config load', () => {
+    expect(() =>
+      loadConfig(env({ EVIDENCE_STORE: 's3', S3_BUCKET: 'b', S3_REGION: 'r' })),
+    ).toThrow();
+  });
+
+  it('rejects a non-URL S3_CDN_BASE_URL', () => {
+    expect(() =>
+      loadConfig(
+        env({
+          S3_BUCKET: 'b',
+          S3_REGION: 'r',
+          S3_ACCESS_KEY_ID: 'AK',
+          S3_SECRET_ACCESS_KEY: 'SK',
+          S3_CDN_BASE_URL: 'not-a-url',
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it('accepts a valid S3_CDN_BASE_URL', () => {
+    const cfg = loadConfig(
+      env({
+        S3_BUCKET: 'b',
+        S3_REGION: 'r',
+        S3_ACCESS_KEY_ID: 'AK',
+        S3_SECRET_ACCESS_KEY: 'SK',
+        S3_CDN_BASE_URL: 'https://cdn.dealroute.example',
+      }),
+    );
+    expect(cfg.evidence.s3?.cdnBaseUrl).toBe('https://cdn.dealroute.example');
+  });
+});

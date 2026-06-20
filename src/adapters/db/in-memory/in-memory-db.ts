@@ -111,7 +111,7 @@ class InMemoryDealRepo implements DealRepository {
     // across adapters (LSP) and a low-confidence row can't shadow the canonical.
     let best: DealRecord | null = null;
     for (const d of this.store.values()) {
-      if (d.status === 'rejected' || dedupeKey(d) !== key) continue;
+      if (d.status === 'rejected' || dedupeKey(d, d.source_url) !== key) continue;
       if (best === null || d.confidence > best.confidence) best = d;
     }
     return best ? { ...best } : null;
@@ -119,7 +119,7 @@ class InMemoryDealRepo implements DealRepository {
   async findActiveByDedupeKeyAndHash(key: string, contentHash: string): Promise<DealRecord | null> {
     for (const d of this.store.values()) {
       if (d.status !== 'candidate' && d.status !== 'in_review') continue;
-      if (dedupeKey(d) !== key) continue;
+      if (dedupeKey(d, d.source_url) !== key) continue;
       const ev = await this.evidence.getById(d.evidence_id);
       if (ev && ev.content_hash === contentHash) return { ...d };
     }

@@ -97,11 +97,15 @@ export class FakeLlm implements Llm {
 
 /** Llm fake that returns a different scripted response per role (triage vs extract). */
 export class RoleAwareFakeLlm implements Llm {
-  constructor(private readonly byRole: Partial<Record<LlmRole, string>>) {}
+  constructor(
+    private readonly byRole: Partial<Record<LlmRole, string>>,
+    /** Per-call cost in EUR (default sub-cent; raise it to exercise cent-rounding). */
+    private readonly costEur = 0.001,
+  ) {}
   async complete(request: LlmRequest): Promise<LlmResponse> {
     return {
       text: this.byRole[request.role] ?? '{}',
-      usage: { inputTokens: 100, outputTokens: 50, costEur: 0.001 },
+      usage: { inputTokens: 100, outputTokens: 50, costEur: this.costEur },
       model: 'fake-model',
       truncated: false,
     };

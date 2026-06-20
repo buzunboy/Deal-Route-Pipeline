@@ -108,7 +108,9 @@ export class ExtractUseCase {
     try {
       // Boundary: raw model text → typed deals (throws BoundaryValidationError on bad shape).
       const rawDeals = parseLlmDeals(response.text);
-      candidates = rawDeals.map((deal) => this.processDeal(deal, input.pageText, input.vocabulary));
+      candidates = rawDeals.map((deal) =>
+        this.processDeal(deal, input.pageText, input.vocabulary, input.sourceUrl),
+      );
     } catch (err) {
       // Re-throw carrying the already-spent cost so the run/daily budget still sees it.
       throw new ExtractionFailedError(costEur, { cause: err });
@@ -128,6 +130,7 @@ export class ExtractUseCase {
     rawDeal: LlmExtractedDeal,
     pageText: string,
     vocabulary: Vocabulary,
+    sourceUrl: string,
   ): ExtractedCandidate {
     // Canonicalise long-tail conditions; collect proposals for unknown ones.
     const eligibilityMapped = mapConditions(rawDeal.eligibility.conditions, vocabulary);
@@ -158,7 +161,11 @@ export class ExtractUseCase {
     return {
       deal: { ...deal, confidence: adjusted },
       trueCostMonthly: trueCostMonthly(deal.price),
-      dedupeKey: dedupeKey(deal),
+      // Use the TRUSTED fetched source URL (input.sourceUrl), not the LLM-supplied
+      // deal.source_url — the key's source-origin segment must come from provenance
+      // we control. CandidateSink pins the persisted deal.source_url to this same
+      // fetched URL, so the recompute-from-row key matches this extract-time key.
+      dedupeKey: dedupeKey(deal, sourceUrl),
       schemaVersion: CURRENT_SCHEMA_VERSION,
       adjustedConfidence: adjusted,
       mustReview: review,

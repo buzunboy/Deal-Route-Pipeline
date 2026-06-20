@@ -96,21 +96,6 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   then tighten (consider a repair-retry or a stricter parser). Don't build a full JSON parser.
 - **Logged**: 2026-06-20
 
-### Dedupe-key omits source/origin (provenance)
-- **Severity**: medium (trust-relevant)
-- **Area**: domain / schema
-- **Location**: `src/domain/rules/dedupe-key.ts` (`service + provider + route_type + country`)
-- **What**: Two sources reporting the same route collapse to (or churn) the same dedupe key,
-  producing duplicate `in_review` candidates. It's unclear whether that's the intended
-  canonicalization (one offer regardless of who reports it) or should split by source.
-- **Why deferred**: It's a **schema-owner decision** that affects the trust model — must be
-  confirmed with the owner before changing, not decided unilaterally (roadmap §6.3).
-- **Fix-when**: Tier-4 churn makes duplicates a real review-queue problem, OR the public
-  read API ships (post-C Step 1) — the public DTO's `source_url` + evidence link depend on
-  "which source's record is the canonical one shown", so resolve this BEFORE the public feed
-  goes live. See `docs/DealRoute_PostC_Handoff.md` §3. Schema-owner call.
-- **Logged**: 2026-06-20
-
 ### pg-boss queue pool not bounded
 - **Severity**: low
 - **Area**: db / queue
@@ -164,23 +149,101 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Fix-when**: a scheduler/worker introduces real concurrency on the same source.
 - **Logged**: 2026-06-20
 
-### Lane A provenance URL aligned to `finalUrl` — closes a latent dedupe divergence (RESOLVED)
-- **Severity**: low (consistency; latent, not a present-tense bug)
-- **Area**: crawl / extraction
-- **Location**: `src/application/crawl/crawl-source.ts` (`extract.execute` call)
-- **What**: Lane A previously extracted against the configured `source.url` while the evidence
-  bundle and `CandidateSink` pin `source_url` to `fetched.finalUrl` (the post-redirect
-  location). The discover/ingest lanes already pass `fetched.finalUrl` into extract
-  (`lane-b-support.ts`, `discover-broad.ts`, `discover-site.ts`, `ingest-community.ts`).
-  Lane A now matches them, so extract + evidence + persist share ONE provenance URL.
-- **Why this was latent, not a live bug**: the dedupe key today is
-  `service + provider + route_type + country` (`dedupe-key.ts`) with **no URL/domain
-  segment** — so the extract-time key and the persisted/recomputed key already agreed on a
-  cross-domain redirect (both ignore the URL). The divergence would only have become real
-  IF the "split-by-source" / domain-folding change to the dedupe key (see *"Dedupe-key omits
-  source/origin (provenance)"* above) were built without first unifying the provenance URL.
-  Aligning the URL now removes that trap ahead of that schema-owner decision.
-- **Fix-when**: n/a (done). Keep the lanes consistent — any future provenance-URL change must
-  stay identical across crawl/discover/ingest. Covered by the crawl-source unit test
-  *"cross-domain redirect: one provenance URL across extract+evidence+persist"*.
+### Postgres `Database` contract suite isn't isolated per-test and isn't run in CI
+- **Severity**: medium
+- **Area**: ci / db / testing
+- **Location**: `src/adapters/db/postgres/postgres-db.test.ts`, `test/contracts/database-contract.ts`, `vitest.integration.config.ts`
+- **What**: Two linked gaps. (1) The shared `databaseContract` gives each test a fresh store
+  for the in-memory adapter, but for Postgres `makeDb()` just reconnects to the same DB with
+  no per-test truncation — so count/global-list tests (`fieldProposals` repeat-sighting,
+  `expirePublishedBySourceUrl`, `findByDedupeKey` canonical) collide and fail when the file
+  is run as a whole. (2) The suite only runs under the default vitest config and self-skips
+  without `DATABASE_URL_TEST`; the integration config includes only `test/integration/**`, and
+  the CI `check` job has no DB — so the Postgres adapter contract effectively **never runs in
+  CI** (contradicting the testing-rules claim that it runs in the integration tier).
+- **Why deferred**: not gating anything today (it skips in CI) and the adapter is covered
+  end-to-end by `test/integration/**` (all green). Fixing isolation means giving the contract
+  a per-test reset hook (truncate for Postgres / fresh map for in-memory) and wiring the file
+  into the integration tier — a focused test-harness change, not a product fix.
+- **Fix-when**: before relying on the contract suite as the substitutability gate, or when
+  wiring the Postgres contract into the integration run — add a `resetBetweenTests` hook to
+  `databaseContract` and include the file in `vitest.integration.config.ts`.
 - **Logged**: 2026-06-20
+
+### `cdnBaseUrl` config parsed but not yet consumed
+- **Severity**: low
+- **Area**: api / config
+- **Location**: `src/config/config.ts` (`evidence.s3.cdnBaseUrl`, env `S3_CDN_BASE_URL`).
+- **What**: Added in P2 (S3 adapter) for the upcoming public read API to turn an evidence ref
+  into `${cdnBaseUrl}/${ref}`, but nothing reads it yet (no public API exists).
+- **Why deferred**: P3 (public `/v1/` read API) is the consumer — it lands next.
+- **Fix-when**: P3 — the public DTO resolves evidence URLs via `cdnBaseUrl`. If P3 is dropped,
+  remove the field rather than leave it dead.
+- **Logged**: 2026-06-20
+
+### Two differently-named EvidenceStore error classes
+- **Severity**: low
+- **Area**: evidence-store
+- **Location**: `EvidenceStoreError` (`local-fs-evidence-store.ts`) vs `S3EvidenceStoreError`
+  (`s3-evidence-store.ts`).
+- **What**: Each adapter throws its own error class. The port contract only requires `rejects`,
+  so substitutability (LSP) holds and the contract suite passes both — but a caller that
+  pattern-matches on one error type won't catch the other.
+- **Why deferred**: no caller currently type-matches EvidenceStore errors; purely a consistency nit.
+- **Fix-when**: if error-type-based handling is ever added — extract a shared base class (or one
+  exported `EvidenceStoreError`) both adapters throw.
+- **Logged**: 2026-06-20
+
+### Monitor source-scoped lookups key off `source.url`, not the resolved `finalUrl`
+- **Severity**: medium (trust-relevant for cross-domain-redirecting sources)
+- **Area**: monitor / db
+- **Location**: `src/application/monitor/monitor-source.ts` (`expirePublishedBySourceUrl(source.url, …)`
+  and `listBySourceUrl(source.url, …)` in `lastHashForSource`); the deals carry
+  `source_url = fetched.finalUrl` (pinned by CandidateSink).
+- **What**: Monitor finds/expires a source's deals by exact-string match of `source.url` against
+  the persisted `deal.source_url`. But deals pin `source_url` to `fetched.finalUrl` (post-redirect).
+  If a source's canonical URL redirects to a **different** URL/domain, monitor's lookups never match
+  its own deals → every monitor pass looks like a first observation (needless re-crawl each cycle),
+  and `expirePublishedBySourceUrl` never matches so those published deals can't auto-expire.
+  Pre-existing (evidence pinned `finalUrl` before split-by-source too); surfaced by the P1 review.
+  NOT the same as the crawl-source extract-key bug, which IS fixed (see Resolved below).
+- **Why deferred**: only bites sources whose canonical URL redirects across the matched URL; the
+  proper fix means tracking the resolved/final URL on the `sources` row (or matching by registrable
+  domain), a separate behavioural change with its own schema touch + tests.
+- **Fix-when**: before unattended Lane-A monitoring of sources known to redirect; track the
+  resolved URL on the source (set on first successful crawl) and have monitor match on it.
+- **Logged**: 2026-06-20
+
+---
+
+## Resolved
+
+### Dedupe-key omits source/origin (provenance) — RESOLVED 2026-06-20
+- **Was**: medium (trust-relevant), domain / schema, `src/domain/rules/dedupe-key.ts`.
+- **Problem**: the key was `service + provider + route_type + country`, so two sources
+  reporting the same route collapsed to (or churned) the same key.
+- **Resolution**: schema-owner decision was **split-by-source**. `dedupeKey` now takes the
+  trusted fetched source URL and folds `registrableDomain(sourceUrl)` (sentinel
+  `unknown-source` when unparseable) as a 5th key segment after country. Each source's report
+  of a route is its own record, preserving per-source evidence/confidence/terms. The
+  registrable domain (not the full URL) is the discriminator, so `www.`/bare-host, trailing
+  slash, and path/query variants on the same site still collapse (re-crawl idempotency holds).
+  Consistency invariant: the extract-time key and the recompute-from-row key are identical
+  because `CandidateSink` pins `deal.source_url = evidence.source_url` (the same fetched
+  finalUrl extract received), and every recompute site passes `dedupeKey(d, d.source_url)`.
+  Greenfield — no data migration; the `(dedupe_key, evidence_id)` unique index +
+  `deals_dedupe_idx` are unchanged (they index whatever the key is).
+
+### Lane-A extract-key used `source.url` instead of `fetched.finalUrl` — RESOLVED 2026-06-20
+- **Was**: medium (trust), `src/application/crawl/crawl-source.ts`. Caught by the P1
+  adversarial-verify pass.
+- **Problem**: with split-by-source live, the dedupe key folds in the source's registrable
+  domain. Lane A called `extract.execute({ sourceUrl: source.url })` while evidence pinned
+  `source_url = fetched.finalUrl`. A source redirecting to a different registrable domain made
+  the extract-time key (from `source.url`) differ from the recompute-from-row key (from
+  `finalUrl`), so `findByDedupeKey` missed the prior row → silent duplicate every re-crawl.
+- **Resolution**: Lane A now passes `fetched.finalUrl` to `extract.execute` (matching the Lane-B
+  paths + the evidence pin), so extract-time and recompute-from-row keys are identical. Pinned by
+  a crawl-source regression test (cross-domain redirect → dedupes to one record; proven to fail
+  without the fix). NB: monitor's source-scoped lookups have a RELATED but distinct gap, still
+  open above ("Monitor source-scoped lookups key off `source.url`…").

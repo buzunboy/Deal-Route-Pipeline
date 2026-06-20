@@ -110,9 +110,9 @@ describe('CrawlSourceUseCase', () => {
     // persisted record must all agree on ONE provenance URL — `fetched.finalUrl`,
     // the post-redirect location — exactly as the discover/ingest lanes do. If
     // extract derived its dedupe key from `source.url` while the persisted key is
-    // recomputed from the (finalUrl-pinned) `source_url`, a same-domain-folding
-    // dedupe key could diverge and a re-crawl would fail to collapse. Pinning one
-    // URL makes that impossible regardless of what the key folds.
+    // recomputed from the (finalUrl-pinned) `source_url`, the now domain-folding
+    // dedupe key would diverge and a re-crawl would fail to collapse. Pinning one
+    // URL keeps extract-time and persist-time keys identical.
     const SOURCE_URL = 'https://www.telekom.de/magenta-disney';
     const FINAL_URL = 'https://offers.magenta-redirect.example/disney'; // different registrable domain
     const fetcher = new FakeFetcher({ text: PAGE_TEXT, finalUrl: FINAL_URL });
@@ -133,14 +133,16 @@ describe('CrawlSourceUseCase', () => {
     const ev = await env.db.evidence.getById(persisted.evidence_id);
     expect(ev!.source_url).toBe(FINAL_URL);
 
-    // (b) The persisted dedupe key (the one the postgres mapper writes / the
-    // in-memory adapter recomputes from the stored record) equals the deal-derived
-    // key — and is URL-independent: identical whether derived from finalUrl or the
-    // configured source.url. Proves extract and persist can never disagree on it.
-    expect(dealToRow(persisted).dedupeKey).toBe(dedupeKey(persisted));
-    expect(dedupeKey({ ...persisted, source_url: SOURCE_URL })).toBe(
-      dedupeKey({ ...persisted, source_url: FINAL_URL }),
-    );
+    // (b) The persisted dedupe key (the one the postgres mapper writes from the
+    // stored record) equals the key recomputed from the deal's own `source_url`,
+    // so extract-time and persist-time keys agree. Because the split-by-source key
+    // folds the registrable domain, it folds the POST-REDIRECT domain (finalUrl),
+    // NOT the configured source.url's — which is exactly why aligning extract to
+    // finalUrl matters: deriving the key from source.url would have produced a
+    // DIFFERENT key that never matched its own persisted row.
+    expect(dealToRow(persisted).dedupeKey).toBe(dedupeKey(persisted, persisted.source_url));
+    expect(dealToRow(persisted).dedupeKey).toBe(dedupeKey(persisted, FINAL_URL));
+    expect(dedupeKey(persisted, SOURCE_URL)).not.toBe(dedupeKey(persisted, FINAL_URL));
   });
 
   it('changed content on the same route → fresh in_review candidate, original untouched', async () => {
@@ -191,6 +193,33 @@ describe('CrawlSourceUseCase', () => {
       (await env.db.deals.listByStatus('candidate', 10)).length +
       (await env.db.deals.listByStatus('in_review', 10)).length;
     expect(total).toBe(1);
+  });
+
+  it('a cross-domain-redirecting source still dedupes on re-crawl (extract key uses finalUrl)', async () => {
+    // Trust-critical (split-by-source): the dedupe key folds in the registrable
+    // domain of the SOURCE. The configured source.url redirects to a DIFFERENT
+    // domain, so the extract-time key MUST use fetched.finalUrl (the URL evidence
+    // pins as source_url) — not source.url — or the second crawl's lookup misses
+    // its own prior row and inserts a duplicate. Regression for the Lane-A
+    // key-consistency bug the adversarial verify pass caught.
+    const fetcher = new FakeFetcher({
+      text: PAGE_TEXT,
+      finalUrl: 'https://www.telekom.de/magenta-disney', // post-redirect, different domain
+    });
+    const localEnv = build({ fetcher });
+    const source = makeSource({ url: 'https://magenta-tv.de/disney' }); // configured (pre-redirect)
+    await localEnv.db.sources.upsert(source);
+
+    await localEnv.uc.execute({ sourceId: source.id });
+    await localEnv.uc.execute({ sourceId: source.id });
+
+    const total =
+      (await localEnv.db.deals.listByStatus('candidate', 10)).length +
+      (await localEnv.db.deals.listByStatus('in_review', 10)).length;
+    expect(total).toBe(1); // deduped — would be 2 if extract used source.url
+    // And the persisted key's source segment is the final (redirected) domain.
+    const persisted = (await localEnv.db.deals.listByStatus('candidate', 10))[0]!;
+    expect(persisted.source_url).toBe('https://www.telekom.de/magenta-disney');
   });
 
   it('records field proposals for unknown conditions', async () => {

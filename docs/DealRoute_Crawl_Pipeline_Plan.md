@@ -65,7 +65,7 @@ Two lanes feed one shared pipeline:
 - **Seed registry** starts hand-curated (provider + bundler URLs for the 25 subscriptions). Each source has: type, tier, crawl cadence, reliability score, last_seen.
 - **Community ingestion (Tier 3):** pull mydealz/Reddit by keywords (your services × "Bundle / inklusive / gratis / Aktion"); the agent triages relevance; hits become candidates **and** propose a source.
 - **Broad discovery (Tier 4):** scheduled agentic search on intent queries; novel offers → candidates; **novel domains → *proposed* sources that a human approves** before they enter deterministic crawling (controls cost + quality).
-- **Dedupe:** canonical key = service + provider + route_type + country; near-duplicate merge keeps the best evidence.
+- **Dedupe:** canonical key = service + provider + route_type + country + source origin (registrable domain of the source URL — **split-by-source**, so each source's report of a route is its own record); the same source re-crawling the same route still collapses to one, keeping the best evidence.
 
 ## 7. Monitoring & re-verification
 - Each published deal gets a **recheck cadence by tier** (provider pages ~weekly; promos more often; community deals near their expiry).

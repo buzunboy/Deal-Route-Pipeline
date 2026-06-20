@@ -127,10 +127,16 @@ suite('Pre-C-3 cost aggregation (Container + Postgres)', () => {
           },
         ],
       }),
-      llm: new RoleAwareFakeLlm({
-        discovery: JSON.stringify({ relevant: true, service: 'Disney+', reason: 'bundle' }),
-        extraction: JSON.stringify({ deals: [makeLlmDeal()] }),
-      }),
+      // €0.01/call so the run's total cost (triage + extract) survives the
+      // cent-rounding in spentSince/costSummary — a sub-cent cost would round to
+      // €0.00 and make the "cost is visible" assertions below vacuous.
+      llm: new RoleAwareFakeLlm(
+        {
+          discovery: JSON.stringify({ relevant: true, service: 'Disney+', reason: 'bundle' }),
+          extraction: JSON.stringify({ deals: [makeLlmDeal()] }),
+        },
+        0.01,
+      ),
       fetcher: new ScriptedFetcher({ [DEAL_PAGE]: { text: PAGE, html: '<html></html>' } }),
     });
     const source = makeSource({ url: FEED, type: 'community', tier: 3 });

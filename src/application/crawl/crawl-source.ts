@@ -122,13 +122,11 @@ export class CrawlSourceUseCase {
       const evidence = await this.captureEvidence(fetched, input.dryRun ?? false);
       const extraction = await this.extract.execute({
         pageText: fetched.text,
-        // Extract against the URL the page actually lives at (post-redirect), the
-        // SAME provenance URL the evidence bundle and CandidateSink pin to
-        // (`fetched.finalUrl`) — not the configured `source.url`, which may differ
-        // after a redirect. Keeping one provenance URL across extract + evidence +
-        // persist matches the discover/ingest lanes and means the dedupe key the
-        // extractor derives can never disagree with the one persisted/recomputed
-        // from `source_url`, should that key ever fold the source domain.
+        // Use the POST-REDIRECT final URL (what evidence pins as source_url), NOT the
+        // configured source.url — so the extract-time dedupe key folds in the SAME
+        // registrable domain the recompute-from-row sites use. A configured URL that
+        // redirects cross-domain would otherwise produce a key that never matches its
+        // own persisted row (silent duplicate every re-crawl). Matches the Lane B paths.
         sourceUrl: fetched.finalUrl,
         targetService: source.subscription_service,
         vocabulary: this.vocabulary,
