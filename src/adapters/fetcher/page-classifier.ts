@@ -1,10 +1,16 @@
-import type { FetchOutcome } from '../../application/ports/index.js';
+import type { FetchOutcome, FetchSignal } from '../../application/ports/index.js';
 
 /**
  * Heuristic classification of a fetched page into a fetch outcome. Pure and
- * unit-tested so the (untestable) browser adapter stays thin. Login walls,
- * captchas, and anti-bot blocks are detected here and routed to manual capture —
- * we never automate logins (public-only v1).
+ * unit-tested so the (untestable) browser adapter stays thin.
+ *
+ * **Best-effort-read policy (2026-06-21):** when a usable body came back, a login
+ * wall or a soft anti-bot page is classified `ok` with a `signal` (`login_wall` /
+ * `soft_block`) so the extractor still runs (best-effort) and a human still reviews —
+ * we no longer divert these to manual capture. The two exceptions, where the body is
+ * NOT offer content, stay non-`ok`: a `captcha` challenge page (→ manual capture) and
+ * soft-404 / maintenance / expired interstitials (→ `error`, the stale-content guard).
+ * We still never automate logins (no credential system yet).
  */
 
 const LOGIN_SIGNALS = [
@@ -67,25 +73,54 @@ export interface ClassifyInput {
   hasPasswordField: boolean;
 }
 
-export function classifyPage(input: ClassifyInput): FetchOutcome {
-  if (input.httpStatus === 401 || input.httpStatus === 403) {
-    // Distinguish a true block from a login wall where we can.
-    if (containsAny(input.text, CAPTCHA_SIGNALS)) return 'captcha';
-    if (input.hasPasswordField || containsAny(input.text, LOGIN_SIGNALS)) return 'login_required';
-    return 'blocked';
-  }
-  if (input.httpStatus === 429 || input.httpStatus >= 500) return 'error';
+/**
+ * The classifier verdict. `outcome` drives routing; `signal` (best-effort-read)
+ * marks an `ok` page that looked like a login wall / soft block but yielded a body —
+ * the caller carries the body and extracts anyway, tagging the result low-trust.
+ */
+export interface PageClassification {
+  outcome: FetchOutcome;
+  signal?: FetchSignal;
+}
 
+export function classifyPage(input: ClassifyInput): PageClassification {
+  // Lowercase once — every signal list is lowercase and `containsAny` does no folding.
+  // (Pre-2026-06-21 the 401/403 branch matched raw-cased text, so an uppercase
+  // "CAPTCHA"/"Login" slipped through; that miss is now trust-relevant because captcha
+  // must still divert to manual capture, so the branch uses `lower` too.)
   const lower = input.text.toLowerCase();
-  if (containsAny(lower, CAPTCHA_SIGNALS)) return 'captcha';
-  if (containsAny(lower, BLOCK_SIGNALS)) return 'blocked';
-  // A password field on an otherwise-OK page = a login-gated offer.
-  if (input.hasPasswordField && isThinPage(input.text)) return 'login_required';
-  // Soft-404 / maintenance / expired interstitial at HTTP 200. Guarded by a thin
+
+  if (input.httpStatus === 401 || input.httpStatus === 403) {
+    // A captcha challenge has no offer content → still route to manual capture.
+    if (containsAny(lower, CAPTCHA_SIGNALS)) return { outcome: 'captcha' };
+    // Best-effort-read: a 401/403 login wall or block still gave us a body — read it
+    // anyway (best-effort), flagged low-trust via the signal. Login takes precedence
+    // over a generic block when we can tell (password field / login copy).
+    if (input.hasPasswordField || containsAny(lower, LOGIN_SIGNALS)) {
+      return { outcome: 'ok', signal: 'login_wall' };
+    }
+    return { outcome: 'ok', signal: 'soft_block' };
+  }
+  // 429 / 5xx are genuine non-fetches (no trustworthy body) → contained failure.
+  if (input.httpStatus === 429 || input.httpStatus >= 500) return { outcome: 'error' };
+
+  // Captcha challenge page: body is the challenge, not an offer → manual capture.
+  if (containsAny(lower, CAPTCHA_SIGNALS)) return { outcome: 'captcha' };
+  // Soft anti-bot interstitial (Cloudflare etc.) at HTTP 200 — best-effort read it,
+  // flagged low-trust; the extractor + human reviewer judge whether it's usable.
+  if (containsAny(lower, BLOCK_SIGNALS)) return { outcome: 'ok', signal: 'soft_block' };
+  // A password field on an otherwise-OK thin page = a login-gated offer — read best-effort.
+  if (input.hasPasswordField && isThinPage(input.text)) {
+    return { outcome: 'ok', signal: 'login_wall' };
+  }
+  // Soft-404 / maintenance / expired interstitial at HTTP 200. KEPT as `error` (the
+  // stale-content guard — NOT a politeness rule): extracting a "page not found" /
+  // "offer expired" body would manufacture a stale or wrong deal. Guarded by a thin
   // body so a real offer page that merely mentions "maintenance"/"404" in prose
   // isn't misclassified — these interstitials carry little other content.
-  if (isThinPage(input.text) && containsAny(lower, NON_CONTENT_SIGNALS)) return 'error';
-  return 'ok';
+  if (isThinPage(input.text) && containsAny(lower, NON_CONTENT_SIGNALS))
+    return { outcome: 'error' };
+  return { outcome: 'ok' };
 }
 
 function containsAny(haystackLower: string, needles: string[]): boolean {

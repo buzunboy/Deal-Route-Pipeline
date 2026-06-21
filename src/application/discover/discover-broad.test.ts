@@ -30,11 +30,16 @@ function okPage(url: string, text = 'Disney+ im Bundle bei diesem Anbieter'): Fe
   return { sourceUrl: url, fetched };
 }
 
-function blockedPage(url: string): FetchedPage {
+/**
+ * A captcha challenge page — the one wall still diverted to manual capture under the
+ * best-effort-read policy (no offer content in the body). Login walls / soft blocks
+ * now arrive `ok` and are extracted best-effort.
+ */
+function captchaPage(url: string): FetchedPage {
   return {
     sourceUrl: url,
     fetched: {
-      outcome: 'login_required',
+      outcome: 'captcha',
       url,
       finalUrl: url,
       text: '',
@@ -159,8 +164,8 @@ describe('DiscoverBroadUseCase', () => {
     expect(result.candidatesFound).toBe(0);
   });
 
-  it('routes a blocked page to manual capture instead of extracting it', async () => {
-    const agent = new FakeAgent({}, { pages: [blockedPage('https://wall.de/login')] });
+  it('routes a CAPTCHA page to manual capture instead of extracting it', async () => {
+    const agent = new FakeAgent({}, { pages: [captchaPage('https://wall.de/challenge')] });
     const { uc, db } = build(agent);
     await seedCatalog(db);
     const result = await uc.execute({ query: 'q', maxQueries: 1, budget: BUDGET });

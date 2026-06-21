@@ -43,7 +43,11 @@ function build(opts: {
   triage?: string;
   pages?: Record<
     string,
-    { html?: string; text?: string; outcome?: 'ok' | 'blocked' | 'robots_disallowed' | 'error' }
+    {
+      html?: string;
+      text?: string;
+      outcome?: 'ok' | 'captcha' | 'blocked' | 'robots_disallowed' | 'error';
+    }
   >;
 }) {
   const db = new InMemoryDb();
@@ -156,16 +160,28 @@ describe('IngestCommunityUseCase', () => {
     expect(result.stoppedReason).toBe('item_cap');
   });
 
-  it('routes a blocked lead page to manual capture', async () => {
+  it('routes a CAPTCHA lead page to manual capture (best-effort-read still diverts captcha)', async () => {
     const env = build({
       items: [feedItem({})],
-      pages: { [DEAL_LINK]: { outcome: 'blocked', text: '' } },
+      pages: { [DEAL_LINK]: { outcome: 'captcha', text: '' } },
     });
     const sourceId = await seedCommunitySource(env.db);
 
     const result = await env.uc.execute({ sourceId, maxItems: 50, budget: BUDGET });
     expect(result.routedToManualCapture).toBe(1);
     expect(await env.db.manualCapture.listOpen(10)).toHaveLength(1);
+  });
+
+  it('best-effort-read: extracts a login-wall lead (ok + fetchSignal) instead of diverting it', async () => {
+    const env = build({
+      items: [feedItem({})],
+      pages: { [DEAL_LINK]: { outcome: 'ok', text: 'Disney+ im Bundle gratis', html: '<p>x</p>' } },
+    });
+    const sourceId = await seedCommunitySource(env.db);
+
+    const result = await env.uc.execute({ sourceId, maxItems: 50, budget: BUDGET });
+    expect(result.routedToManualCapture).toBe(0);
+    expect(await env.db.manualCapture.listOpen(10)).toHaveLength(0);
   });
 
   it('dry-run writes nothing', async () => {

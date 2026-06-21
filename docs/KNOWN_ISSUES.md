@@ -31,6 +31,40 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### Real authenticated access (login automation) — deferred "later" work behind the best-effort-read policy
+- **Severity**: medium (a capability gap the new policy exposes; not a defect)
+- **Area**: fetcher / discovery / legal
+- **Location**: `src/adapters/fetcher/*` (no credential handling anywhere); `page-classifier.ts`
+  (login walls now read best-effort); the `Fetcher` port (`fetch` never logs in).
+- **What**: the **best-effort-read** policy (2026-06-21, see `CLAUDE.md`) reads login-walled pages
+  best-effort, but there is **no credential system** — a login wall yields the login page, not the
+  member-area offer. So "best-effort read a login-gated offer" today extracts a login screen
+  (low-confidence, must-review, usually rejected). The owner accepted this for now ("we'll work on
+  auth later").
+- **What real auth needs (the deferred build)**: a `CredentialStore` port + per-source credential
+  config (env/secret-manager, never in the DB), a login-form-fill step in the browser fetchers
+  (Playwright can; Firecrawl can't easily), session/cookie persistence, and a hard policy/legal gate
+  (automated authenticated access breaches many ToS — a bigger legal exposure than ignoring robots).
+- **Why deferred**: owner decision — ship the read-any-public-or-walled-page capability now; build
+  credentialed capture only when the value justifies the legal + engineering cost.
+- **Fix-when**: when a high-value login-gated source (e.g. a bank/telco member area) is worth it —
+  start with the `CredentialStore` port + one source, behind an explicit per-source opt-in.
+- **Logged**: 2026-06-21
+
+### robots.txt is now OFF by default — legal/ToS exposure is a standing business decision
+- **Severity**: low (informational — a deliberate policy, logged so it isn't forgotten)
+- **Area**: legal / fetcher policy
+- **Location**: `src/config/config.ts` (`RESPECT_ROBOTS_TXT` defaults false); `CLAUDE.md` invariant.
+- **What**: the best-effort-read policy makes `RESPECT_ROBOTS_TXT` default `false` — the crawler
+  fetches robots-disallowed pages. For a Germany-v1 product this materially changes legal exposure
+  (UWG/competition law, database rights, ToS breach). The per-domain rate-limit still always applies
+  (good-citizen on load), and nothing auto-publishes, so the change is read-side only.
+- **Why deferred**: the owner made this call deliberately to maximise read coverage. Flagged so the
+  posture is revisited before/with any production launch + legal sign-off.
+- **Fix-when**: at launch / legal review — decide whether production runs with robots off, or flips
+  `RESPECT_ROBOTS_TXT=true` for the production deployment while keeping it off for research runs.
+- **Logged**: 2026-06-21
+
 ### Enabling a real 2nd country (the Step-6 foundation is built; the data/launch work isn't)
 - **Severity**: low (a feature-enablement task, not a defect — DE v1 is complete)
 - **Area**: discovery / catalog / config
@@ -180,12 +214,37 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   Tier-4 broad discovery that extracted with `mustReview:0` (passed the gate). Tier-4 is open-web,
   so non-DE sources can appear. Country is hard-coded `DE` in the schema but extraction doesn't
   reject a deal whose source/offer is plainly non-DE.
+- **Reproduced + sharpened 2026-06-21**: a `.at` (Austria) source `magenta.at/tv/disney-plus`
+  surfaced via Tier-4 with **2 deals stamped `country: DE`** (both must-review this run). The
+  important wrinkle: the `currency_matches_country` guard **cannot** catch an Austrian source
+  because **AT also uses EUR** — so for EUR-ccTLD neighbours (AT, and the EU generally) only a
+  **source-ccTLD/country-of-origin check** discriminates; the currency rule is sufficient only
+  for non-EUR cases (the original `.ch`/CHF). The deal is also silently mislabeled `country: DE`
+  rather than flagged, because the active market is hard-coded.
 - **Why deferred**: not a trust breach — nothing auto-publishes, and a human reviews the proposed
   domain before it ever enters deterministic crawling. It's a relevance/curation matter.
 - **Fix-when**: when curating Tier-4 output / building multi-country — add non-DE domains to the
-  deny-list and/or a country sanity rule that flags a deal whose source registrable domain is a
-  non-DE ccTLD for a DE-only catalog. Overlaps the multi-country generalization work.
-- **Logged**: 2026-06-20
+  deny-list and/or a country sanity rule that flags a deal whose **source registrable domain is a
+  non-DE ccTLD** for a DE-only catalog (note: this must key on the source ccTLD, NOT currency,
+  since EUR-ccTLD neighbours pass the currency guard). Overlaps the multi-country generalization work.
+- **Logged**: 2026-06-20 (reproduced + sharpened with the `.at`/EUR case 2026-06-21)
+
+### Tier-3 mydealz seed RSS URL is dead (HTTP 404) — seed-list curation
+- **Severity**: low (curation; not a code defect — `parseFeed` handled it correctly)
+- **Area**: ingest / seed list
+- **Location**: seed list (`docs/DealRoute_Seed_List_DE.md` §D — mydealz row); ingest
+  community-feed config.
+- **What**: the 2026-06-21 live test ran the seed feed `mydealz.de/rss/alle` through `parseFeed`
+  and got **HTTP 404** (the URL returns an HTML error page, not RSS). `parseFeed` correctly
+  returned `[]` (the B1 boundary held — no crash, no garbage trusted), so the lane degrades
+  gracefully, but the source contributes no leads. The DealDoktor feed (`dealdoktor.de/feed/`)
+  was healthy (10 items, all passed `FeedItemSchema`).
+- **Why deferred**: not a bug — the pipeline behaves correctly on a dead feed. It's seed-data
+  freshness: mydealz changed/retired the `/rss/alle` path.
+- **Fix-when**: when curating the real seed list / wiring Tier-3 community sources — replace with
+  a live mydealz feed or per-keyword search endpoint, and add a periodic feed-health check so a
+  silently-dead community source surfaces (it currently just yields 0 leads).
+- **Logged**: 2026-06-21
 
 ### Tier-4 inline-scrape robots gate keys on `result.url`, no field for a Firecrawl-side redirect
 - **Severity**: low (watch-item; not exploitable in the current data model)
@@ -237,7 +296,13 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   mark JS-heavy ones to use `FETCHER=browser`; for sites that hang/anti-bot the headless browser,
   route to the hosted-browser fetcher or the manual-capture queue. Re-test extraction per source
   once a funded LLM key is available.
-- **Logged**: 2026-06-20
+- **Confirmed 2026-06-21 (funded key)**: re-ran NordVPN `/de/` on BOTH fetchers — `playwright` 0
+  deals, `FETCHER=browser` rendered 256,864 chars of JS content but STILL 0 deals (the `/de/`
+  landing is a marketing splash, not a pricing page). ChatGPT pricing (`chatgpt.com/pricing`,
+  650k chars) needed the bounded re-ask to parse, then returned 4 plans all at €0/unknown — SPA
+  prices weren't in static text; the model honestly returned unknown rather than hallucinating.
+  Confirms the finding is seed-URL-quality + per-source fetcher selection, not a code defect.
+- **Logged**: 2026-06-20 (confirmed with a funded key 2026-06-21)
 
 ### No golden fixture for a prepaid offer
 - **Severity**: low (coverage gap, not a defect)

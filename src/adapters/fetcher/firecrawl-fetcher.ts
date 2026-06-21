@@ -104,7 +104,11 @@ export class FirecrawlFetcher implements Fetcher {
       const text = data.markdown ?? '';
       const html = data.html ?? '';
 
-      const outcome = classifyPage({ httpStatus: 200, text, hasPasswordField: false });
+      // Firecrawl returns no HTTP status for the target page, so the password-field
+      // heuristic can't run here; classification keys off body signals. A login-wall /
+      // soft-block body now classifies `ok` with a `signal` (best-effort-read); only
+      // captcha / soft-404 stay non-`ok`.
+      const { outcome, signal } = classifyPage({ httpStatus: 200, text, hasPasswordField: false });
       if (outcome !== 'ok') return { ...empty, outcome, finalUrl: data.url ?? url };
 
       // Evidence is REQUIRED before any candidate (a candidate is pinned to a
@@ -121,7 +125,15 @@ export class FirecrawlFetcher implements Fetcher {
         };
       }
 
-      return { outcome: 'ok', url, finalUrl: data.url ?? url, text, html, screenshot };
+      return {
+        outcome: 'ok',
+        url,
+        finalUrl: data.url ?? url,
+        text,
+        html,
+        screenshot,
+        ...(signal ? { fetchSignal: signal } : {}),
+      };
     } catch (err) {
       return {
         ...empty,

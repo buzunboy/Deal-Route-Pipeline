@@ -47,11 +47,17 @@ export class LaneBSupport {
     return evidence;
   }
 
-  /** True for a login/captcha/anti-bot wall (route to manual capture, never expire/crawl). */
+  /**
+   * True for a wall we still divert to manual capture. Best-effort-read (2026-06-21):
+   * only `captcha` qualifies — its body is a challenge, with no offer content to read.
+   * Login walls / soft blocks now arrive `ok` (with `fetchSignal`) and are extracted
+   * best-effort, so they are NOT blocked outcomes. `login_required`/`blocked` stay in
+   * the predicate defensively, in case a fetcher ever surfaces them directly.
+   */
   isBlockedOutcome(fetched: FetchResult): boolean {
     return (
-      fetched.outcome === 'login_required' ||
       fetched.outcome === 'captcha' ||
+      fetched.outcome === 'login_required' ||
       fetched.outcome === 'blocked'
     );
   }

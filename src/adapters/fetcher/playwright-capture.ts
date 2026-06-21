@@ -63,7 +63,10 @@ export async function capturePage(
   );
   const text = turndown.turndown(html);
 
-  const outcome = classifyPage({ httpStatus, text: bodyText, hasPasswordField });
+  const { outcome, signal } = classifyPage({ httpStatus, text: bodyText, hasPasswordField });
+  // Non-`ok` (captcha / soft-404 / 5xx) carries no usable body — return empty so no
+  // candidate or evidence is built from it. A login-wall / soft-block now classifies
+  // `ok` with a `signal` under best-effort-read, so its body flows through normally.
   if (outcome !== 'ok') return { ...empty, outcome };
 
   return {
@@ -73,6 +76,7 @@ export async function capturePage(
     text,
     html,
     screenshot: new Uint8Array(screenshot),
+    ...(signal ? { fetchSignal: signal } : {}),
   };
 }
 

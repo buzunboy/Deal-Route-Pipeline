@@ -30,8 +30,9 @@ scaffolded SSH deploy). **467 unit tests green; lint + typecheck clean.** Defaul
 the agentic lane dark: `AGENT=noop`, `SEARCH_PROVIDER=stub`, `FETCHER=playwright`.
 
 **The non-negotiable invariants still hold** (audited): LLM proposes / humans approve /
-**nothing auto-publishes**; evidence required before any candidate; public-only via
-PoliteFetcher; every boundary zod-validated. Do not regress these in any post-C work.
+**nothing auto-publishes**; evidence required before any candidate; ~~public-only via
+PoliteFetcher~~ (the "public pages only" invariant was **reversed 2026-06-21** → best-effort
+read any page; see `CLAUDE.md`); every boundary zod-validated. Do not regress these in any post-C work.
 
 ---
 

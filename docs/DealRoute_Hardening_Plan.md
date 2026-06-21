@@ -102,6 +102,10 @@ binding `CLAUDE.md` + `.claude/rules/`._
 
 ### Slice 4 — robots.txt fetch hardening (size cap + 4xx/5xx nuance + redirect origin) — ✅ DONE
 
+> **NB (2026-06-21):** robots.txt is now **opt-in** (`RESPECT_ROBOTS_TXT` defaults off under the
+> best-effort-read policy — see `CLAUDE.md`). This hardening still applies when robots is turned on;
+> the robots engine was kept, just disabled by default.
+
 - **Gap**: `polite-fetcher.ts` `loadRobots` — `res.text()` has no size cap; 4xx and
   5xx both fail-open identically; the underlying fetch follows redirects without
   validating the final origin.

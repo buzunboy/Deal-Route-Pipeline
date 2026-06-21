@@ -105,6 +105,11 @@ const ConfigSchema = z.object({
   crawl: z.object({
     defaultRecrawlDays: z.coerce.number().int().positive(),
     perDomainRateLimitMs: z.coerce.number().int().nonnegative(),
+    // Best-effort-read policy (2026-06-21): DEFAULT false — the pipeline reads any
+    // page, robots-disallowed or not. The robots gate (PoliteFetcher) is kept and
+    // still honoured when this is set true (`RESPECT_ROBOTS_TXT=true`), so the old
+    // polite behaviour remains a one-env-var opt-in. The per-domain rate-limit is
+    // independent and always applies.
     respectRobotsTxt: boolish,
   }),
   agent: z.object({
@@ -119,10 +124,12 @@ const ConfigSchema = z.object({
     searchCostEur: z.coerce.number().nonnegative(),
     /**
      * Tier-4: reuse the search provider's inline page scrape (Firecrawl v2) instead
-     * of a second full fetch. OFF by default. When on, the agent still gates each
-     * URL through OUR robots/rate-limit (PoliteFetcher.checkAccess) before using the
-     * inline content, so the public-only invariant holds. Only effective with a
-     * provider that supports search-time scraping (Firecrawl).
+     * of a second full fetch. OFF by default. When on, the agent still routes each
+     * URL through OUR rate-limit (and robots, IF `RESPECT_ROBOTS_TXT=true`) via
+     * PoliteFetcher.checkAccess before using the inline content — so the same access
+     * policy applies whether we fetched or reused the scrape. Under the default
+     * best-effort-read policy (robots off) checkAccess only throttles. Only effective
+     * with a provider that supports search-time scraping (Firecrawl).
      */
     inlineScrape: boolish,
     // Aggregate €/UTC-day ceiling across ALL agentic/discovery runs (Pre-C-3),
@@ -229,7 +236,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     crawl: {
       defaultRecrawlDays: env.DEFAULT_RECRAWL_DAYS ?? '3',
       perDomainRateLimitMs: env.PER_DOMAIN_RATE_LIMIT_MS ?? '2000',
-      respectRobotsTxt: env.RESPECT_ROBOTS_TXT ?? 'true',
+      respectRobotsTxt: env.RESPECT_ROBOTS_TXT ?? 'false',
     },
     agent: {
       // Default off: Tier-4 stays dark until AGENT=search is explicitly set.

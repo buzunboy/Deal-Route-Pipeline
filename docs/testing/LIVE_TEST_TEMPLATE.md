@@ -58,7 +58,7 @@ Mark ✅/❌ and cite the evidence. A ❌ on any of these is a release blocker.
 
 - [ ] **Nothing auto-published** — every deal is `must-review`; no `published` written.
 - [ ] **Evidence required** — every persisted candidate has screenshot+html+terms (or, in dry-run, the evidence step ran without a hollow-bundle error).
-- [ ] **Public-only** — robots respected (note any `robots_disallowed`); login/blocked → manual-capture; Tier-4 inline-scrape (if on) still passed our robots/rate-limit gate.
+- [ ] **Best-effort read** (2026-06-21; replaces "Public-only") — `RESPECT_ROBOTS_TXT` defaults OFF (note if you set `=true`); login-wall / soft-block pages are read best-effort (note any `fetchSignal` reads + confirm they stayed must-review); a `captcha` page still → manual-capture; soft-404/maintenance/expired still skip (`error`). The **per-domain rate-limit still applies**; Tier-4 inline-scrape (if on) still routes through `checkAccess` (rate-limit always + robots only when on).
 - [ ] **Boundary validation** — no crash from raw LLM/scraped/feed data; malformed → handled (skipped/flagged), not trusted.
 - [ ] **No invented columns** — unknown conditions → `field_proposals`, never new top-level fields.
 - [ ] **Hallucination guard** — note any `grounding_quote_in_source` failures (the guard firing is GOOD).
@@ -146,3 +146,8 @@ AGENT=search SEARCH_PROVIDER=firecrawl AGENT_INLINE_SCRAPE=true \
   evidence, trust-invariant checklist). Added `prepaid`/`prepaid_months`,
   `extraction_input_truncated`, and Tier-4 inline-scrape fields reflecting features
   shipped to date.
+- **2026-06-21** — **best-effort-read policy** (replaces the "Public-only" trust-checklist
+  item with "Best-effort read"): record `RESPECT_ROBOTS_TXT` (now default OFF), any
+  `fetchSignal` (`login_wall`/`soft_block`) best-effort reads (and that they stayed
+  must-review), and that captcha still routes to manual-capture / soft-404 still skips.
+  Note the per-domain rate-limit still applies.

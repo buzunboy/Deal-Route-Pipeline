@@ -6,8 +6,9 @@ import { capturePage } from './playwright-capture.js';
 /**
  * Playwright fetcher — the local dev default. Loads a public page in a headless
  * browser (wait: `domcontentloaded` — the cheap, server-rendered path), then
- * captures HTML + markdown text + a bounded screenshot and classifies
- * login/captcha/block outcomes (never logs in: public-only v1). For JS-heavy SPAs
+ * captures HTML + markdown text + a bounded screenshot and classifies the outcome
+ * (best-effort-read: login/soft-block → `ok`+`fetchSignal`; captcha → manual capture;
+ * never logs in — no credential system yet). For JS-heavy SPAs
  * whose offers only appear after client-side render, use the `BrowserRenderFetcher`
  * (`FETCHER=browser`), which shares the same capture path but waits for the network
  * to settle.

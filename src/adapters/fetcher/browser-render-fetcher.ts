@@ -12,9 +12,9 @@ import { capturePage } from './playwright-capture.js';
  * login/captcha/block classification as the plain fetcher — no drift).
  *
  * Selected via `FETCHER=browser`. Because it sits behind the `Fetcher` port, the
- * composition root still wraps it in `PoliteFetcher`, so robots + per-domain
- * rate-limit + evidence size caps all keep applying — this is C-2 WITHOUT bypassing
- * any public-only guardrail. A future hosted-browser vendor (Browserbase/Steel)
+ * composition root still wraps it in `PoliteFetcher`, so the per-domain rate-limit
+ * (always) + robots (opt-in) + evidence size caps all keep applying — this is C-2
+ * WITHOUT bypassing any access guardrail. A future hosted-browser vendor (Browserbase/Steel)
  * slots in as another Fetcher behind the same port (see HostedBrowserFetcher).
  *
  * Browser launched lazily + reused; `close()` at shutdown. Never throws on a

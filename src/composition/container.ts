@@ -212,11 +212,12 @@ export class Container {
 
   private buildFetcher(config: Config): Fetcher {
     const inner = this.buildInnerFetcher(config);
-    // Wrap with the politeness decorator so robots.txt + per-domain rate limiting
-    // are actually enforced (the config promised them). Behind the Fetcher port,
-    // so the crawl use-case and concrete fetchers are unchanged. EVERY inner
-    // fetcher — incl. the C-2 browser/hosted-browser ones — is wrapped, so the
-    // public-only guardrails apply uniformly (no lane bypasses robots/rate-limit).
+    // Wrap with the politeness decorator so the per-domain rate-limit (always) and
+    // robots.txt (opt-in via RESPECT_ROBOTS_TXT, default off under best-effort-read)
+    // are actually enforced. Behind the Fetcher port, so the crawl use-case and
+    // concrete fetchers are unchanged. EVERY inner fetcher — incl. the C-2 browser/
+    // hosted-browser ones — is wrapped, so the access policy applies uniformly (no
+    // lane bypasses the rate-limit).
     return new PoliteFetcher(inner, {
       respectRobotsTxt: config.crawl.respectRobotsTxt,
       minIntervalMs: config.crawl.perDomainRateLimitMs,

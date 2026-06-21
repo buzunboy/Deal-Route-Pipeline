@@ -165,3 +165,20 @@ describe('loadConfig — alerting backend selection (Step 5)', () => {
     expect(() => loadConfig(env({ ALERT_WEBHOOK_URL: 'not-a-url' }))).toThrow();
   });
 });
+
+describe('loadConfig — robots.txt policy (best-effort-read)', () => {
+  it('DEFAULTS respectRobotsTxt to false (best-effort read any page)', () => {
+    // Trust-weighty default: the 2026-06-21 policy reads robots-disallowed pages by
+    // default. Pinned so a future edit can't silently re-flip it back to polite-only.
+    expect(loadConfig(env()).crawl.respectRobotsTxt).toBe(false);
+  });
+
+  it('honours RESPECT_ROBOTS_TXT=true to restore polite (robots-respecting) behaviour', () => {
+    expect(loadConfig(env({ RESPECT_ROBOTS_TXT: 'true' })).crawl.respectRobotsTxt).toBe(true);
+    expect(loadConfig(env({ RESPECT_ROBOTS_TXT: '1' })).crawl.respectRobotsTxt).toBe(true);
+  });
+
+  it('honours an explicit RESPECT_ROBOTS_TXT=false', () => {
+    expect(loadConfig(env({ RESPECT_ROBOTS_TXT: 'false' })).crawl.respectRobotsTxt).toBe(false);
+  });
+});

@@ -242,8 +242,9 @@ browsing into cheap Lane-A crawling.
 - **Domain allow/deny + new-domain approval**: novel domains are `pending_approval`
   only, never auto-crawled — depends on **Pre-C-1** (the promotion loop) to be
   actionable. Add an explicit deny-list for known-bad/irrelevant domains.
-- **Public-only**: login/captcha/anti-bot → manual capture; respect robots
-  (route agent fetches through the `PoliteFetcher`); rate-limit per domain.
+- **Best-effort read** (2026-06-21; was "Public-only"): `captcha` → manual capture, login/
+  soft-block read best-effort; robots is opt-in (`RESPECT_ROBOTS_TXT`, default off); rate-limit
+  per domain still always applies (route agent fetches through the `PoliteFetcher`). See `CLAUDE.md`.
 - **LLM = extraction/navigation only; nothing auto-publishes**; grounding +
   validation gate the queue exactly as today.
 - **Cost logged per run** on `crawl_runs`; per-domain concurrency limits.

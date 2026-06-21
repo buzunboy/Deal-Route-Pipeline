@@ -55,9 +55,10 @@ export interface DiscoverBroadResult {
  *
  * Guardrails: bounded by `AgentBudget` (steps/seconds/€) AND the aggregate daily
  * guard (applied by the CLI); a domain DENY-LIST drops obvious noise before
- * fetching/proposing; public-only fetches go through the agent's polite Fetcher;
- * login/captcha/blocked pages route to manual capture; the LLM does extraction
- * only; nothing auto-publishes. Per-query/per-page failures are contained so one
+ * fetching/proposing; fetches go through the agent's polite Fetcher (rate-limit always,
+ * robots opt-in); captcha pages route to manual capture while login/soft-block are read
+ * best-effort; the LLM does extraction only; nothing auto-publishes. Per-query/per-page
+ * failures are contained so one
  * bad query never crashes the run, and the run row never dangles.
  */
 export class DiscoverBroadUseCase {

@@ -77,16 +77,31 @@ describe('capturePage — bounded evidence', () => {
     expect(screenshotCalls[0]).toMatchObject({ fullPage: true });
   });
 
-  it('returns a non-ok outcome (empty evidence) when the page classifies as a login wall', async () => {
-    // A password field + login-ish text → classifyPage returns login_required.
+  it('best-effort: a login-wall page is read anyway — ok, body carried, fetchSignal=login_wall', async () => {
+    // A password field + login-ish thin text → classifyPage now returns ok+login_wall,
+    // so the body flows through (best-effort-read) instead of being discarded.
     const { page } = stubPage({
       passwordFields: 1,
       bodyText: 'Bitte einloggen / Passwort vergessen? Anmelden',
       html: '<html><body>login</body></html>',
     });
     const r = await capturePage(page, 'https://t.de/login', 200, 5000);
-    expect(r.outcome).not.toBe('ok');
+    expect(r.outcome).toBe('ok');
+    expect(r.fetchSignal).toBe('login_wall');
+    expect(r.html).toContain('login');
+    expect(r.text.length).toBeGreaterThan(0);
+    expect(r.screenshot.byteLength).toBeGreaterThan(0);
+  });
+
+  it('captcha STAYS non-ok with empty evidence (no offer content to read → manual capture)', async () => {
+    const { page } = stubPage({
+      bodyText: 'Please complete the captcha to continue',
+      html: '<html><body>captcha</body></html>',
+    });
+    const r = await capturePage(page, 'https://t.de/x', 200, 5000);
+    expect(r.outcome).toBe('captcha');
     expect(r.text).toBe('');
     expect(r.html).toBe('');
+    expect(r.fetchSignal).toBeUndefined();
   });
 });

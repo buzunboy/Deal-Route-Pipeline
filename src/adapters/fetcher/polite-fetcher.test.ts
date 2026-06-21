@@ -176,8 +176,9 @@ describe('PoliteFetcher robots.txt runtime (injected RobotsClient)', () => {
   });
 
   // checkAccess() is the body-less gate used by the Tier-4 inline-scrape path:
-  // it applies OUR robots policy without fetching the page, so a caller holding
-  // page content from elsewhere still honours the public-only invariant.
+  // it applies OUR access policy (rate-limit always + robots when enabled) without
+  // fetching the page, so a caller holding page content from elsewhere is gated the
+  // same way a real fetch would be. (Constructed here with respectRobotsTxt: true.)
   it('checkAccess returns robots_disallowed for a forbidden path, never calling inner.fetch', async () => {
     const robots = scriptedRobots({ 'https://host.de/robots.txt': 'User-agent: *\nDisallow: /' });
     const inner = countingInner();

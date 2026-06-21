@@ -6,6 +6,10 @@
 > The Firecrawl search backend has since been refactored to **v2** (see
 > `docs/Firecrawl_Integration_Reference.md`). Kept as the historical build/design
 > record. **NOT pending work.** For current next-steps read `docs/DealRoute_PostP3_Handoff.md`.
+>
+> **NB (policy reversed 2026-06-21):** this doc's "public-only via PoliteFetcher; blocked/login
+> → manual capture" framing predates the **best-effort-read** policy — robots now defaults off and
+> login/soft-block pages are read best-effort (captcha still → manual). See `CLAUDE.md`.
 
 _Standalone build prompt for a fresh Claude Code session. Phase A (Tiers 1–2),
 Phase B (Tier 3), Pre-C-1/2/3, and the post-audit monitor-reliability fix are all

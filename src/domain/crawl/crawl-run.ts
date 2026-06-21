@@ -73,9 +73,10 @@ export const CrawlRunSchema = z.object({
 export type CrawlRun = z.infer<typeof CrawlRunSchema>;
 
 /**
- * A task for a human to capture a login-gated / blocked offer by hand. Such
- * offers are NEVER silently dropped (acceptance criterion) and NEVER auto-logged
- * into (public-only v1).
+ * A task for a human to capture a captcha-gated offer by hand. Under best-effort-read
+ * a captcha page is the one wall still diverted here (no offer content to read); such
+ * offers are NEVER silently dropped (acceptance criterion) and NEVER auto-logged into
+ * (no credential system yet).
  */
 export const ManualCaptureTaskSchema = z.object({
   id: z.string().uuid(),

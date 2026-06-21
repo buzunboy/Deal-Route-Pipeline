@@ -73,8 +73,10 @@ describe('CrawlSourceUseCase', () => {
     expect(evidence!.screenshot_ref).toMatch(/screenshot/);
   });
 
-  it('routes a login-gated page to manual capture and writes NO candidate', async () => {
-    env = build({ fetcher: new FakeFetcher({ outcome: 'login_required' }) });
+  it('routes a CAPTCHA page to manual capture and writes NO candidate (no readable offer content)', async () => {
+    // Best-effort-read: captcha is the one wall we still divert — its body is a
+    // challenge, not an offer. (Login walls / soft blocks are read best-effort below.)
+    env = build({ fetcher: new FakeFetcher({ outcome: 'captcha' }) });
     const source = makeSource();
     await env.db.sources.upsert(source);
 
@@ -83,8 +85,24 @@ describe('CrawlSourceUseCase', () => {
 
     const tasks = await env.db.manualCapture.listOpen(10);
     expect(tasks).toHaveLength(1);
-    expect(tasks[0]!.reason).toBe('login_required');
+    expect(tasks[0]!.reason).toBe('captcha');
     expect(await env.db.deals.listByStatus('candidate', 10)).toHaveLength(0);
+  });
+
+  it('best-effort-read: extracts from a login-wall page (ok + fetchSignal) — candidate, NOT manual capture', async () => {
+    // The real fetcher now remaps a login wall to `ok` with a fetchSignal (the body
+    // was captured). Best-effort policy: extract it anyway; the candidate stays
+    // must-review via the confidence rules. No manual-capture row is written.
+    env = build({
+      fetcher: new FakeFetcher({ outcome: 'ok', fetchSignal: 'login_wall', text: PAGE_TEXT }),
+    });
+    const source = makeSource();
+    await env.db.sources.upsert(source);
+
+    const result = await env.uc.execute({ sourceId: source.id });
+    expect(result.routedToManualCapture).toBe(false);
+    expect(await env.db.manualCapture.listOpen(10)).toHaveLength(0);
+    expect(await env.db.deals.listByStatus('candidate', 10)).toHaveLength(1);
   });
 
   it('refuses to crawl a non-active source (pending_approval / rejected) — never auto-bypasses the human gate', async () => {

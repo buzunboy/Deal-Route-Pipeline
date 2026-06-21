@@ -64,19 +64,19 @@ each have one. The Postgres contract runs only when `DATABASE_URL_TEST` is set.
   loop**: `SourceReviewUseCase` + `review sources|approve-source|reject-source` + the
   `/api/sources/*` endpoints; approve→`active`, reject→`rejected` which is never re-proposed;
   decisions logged to `source_reviews`). Runs are CAPPED by pages **and** € **and** wall-clock and stop
-  at the first cap; login/captcha/anti-bot pages route to manual capture; the frontier is
+  at the first cap; captcha pages route to manual capture while login/soft-block pages are read best-effort; the frontier is
   ordered by a domain-agnostic "likely-offer-page" score so a small budget reaches deal pages
   before navigation chrome.
 - **Lane C — broad discovery (Tier 4, Phase C / C-1):** `DiscoverBroadUseCase`
   (`discover --broad`) builds a bounded query set (catalog services × registered provider/
   bundler domains, or one explicit query) and runs the `BrowserAgent` per query within a
   shared `AgentBudget`. The C-1 agent (`SearchBrowserAgent`, `AGENT=search`) is **thin**:
-  it searches via the `SearchProvider` port and fetches the top public results through the
-  same polite `Fetcher` (robots + rate-limit), returning page **material** — it does NOT
+  it searches via the `SearchProvider` port and fetches the top results through the
+  same polite `Fetcher` (rate-limit always + robots opt-in), returning page **material** — it does NOT
   extract. Extraction stays in `ExtractUseCase` + `CandidateSink` (the same boundary as every
   lane), so the LLM does extraction only and the same trust gate applies. Novel domains →
   `pending_approval` (the same source-promotion loop); a domain **deny-list** drops social/
-  aggregator noise before fetching/proposing; login/blocked pages → manual capture. Capped by
+  aggregator noise before fetching/proposing; captcha pages → manual capture, login/soft-block read best-effort. Capped by
   steps/queries/€/time **and** the aggregate daily €-guard; nothing auto-publishes, no
   discovered domain is auto-crawled. The default `AGENT=noop`/`SEARCH_PROVIDER=stub` keep the
   lane dark until explicitly enabled. **C-2 (JS-heavy pages)** is delivered as a render-capable
@@ -105,8 +105,14 @@ each have one. The Postgres contract runs only when `DATABASE_URL_TEST` is set.
    `published`. Tested: anonymous publish rejected; terminal deals can't be re-decided.
 2. **Evidence required before a candidate.** `CrawlSourceUseCase` captures evidence and links
    `evidence_id` before inserting a candidate.
-3. **Public pages only.** The `Fetcher` never logs in; `page-classifier` routes
-   login/captcha/anti-bot pages to the **manual-capture queue**.
+3. **Best-effort read any page** (2026-06-21; supersedes "public pages only"). The pipeline
+   reads any page it can fetch a body from: `RESPECT_ROBOTS_TXT` defaults **off** (the robots
+   gate stays, opt-in via `=true`), and `page-classifier` returns `ok` + a `fetchSignal`
+   (`login_wall`/`soft_block`) for login/soft-block pages so they're extracted best-effort
+   (still must-review). The per-domain **rate-limit always applies**; a `captcha` challenge
+   (no offer content) still routes to the **manual-capture queue**; soft-404/maintenance/
+   expired interstitials still skip as `error` (stale-content guard). The `Fetcher` never logs
+   in — no credential system yet (real auth deferred).
 4. **LLM never invents columns.** Unknown conditions → `conditions[]` with `key:"other"` +
    a `field_proposals` entry; ingestion is never blocked (governed promotion loop).
 5. **Never trust raw LLM/scraped data.** `parseLlmDeals` validates LLM output through the

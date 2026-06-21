@@ -135,9 +135,11 @@ describe('DiscoverSiteUseCase', () => {
     expect(result.pagesFetched).toBeLessThan(3);
   });
 
-  it('routes a blocked page to manual capture without crawling further from it', async () => {
+  it('routes a CAPTCHA page to manual capture without crawling further from it', async () => {
+    // Best-effort-read: captcha is the one wall still diverted (no offer content in a
+    // challenge body). Login walls / soft blocks now come back `ok` and are extracted.
     const env = build({
-      [LISTING]: { outcome: 'blocked', html: '', text: '' },
+      [LISTING]: { outcome: 'captcha', html: '', text: '' },
     });
     const result = await env.uc.execute({ startUrl: LISTING, maxPages: 50, budget: BUDGET });
     expect(result.routedToManualCapture).toBe(1);
@@ -147,7 +149,7 @@ describe('DiscoverSiteUseCase', () => {
     expect((await env.db.manualCapture.listOpen(10))[0]!.source_id).toBeNull();
   });
 
-  it('skips a robots-disallowed page silently (no manual capture, no failure)', async () => {
+  it('skips a robots-disallowed page silently (no manual capture, no failure) — RESPECT_ROBOTS_TXT=true path', async () => {
     const env = build({
       [LISTING]: { html: `<a href="${DEAL_A}">A</a>` },
       [DEAL_A]: { outcome: 'robots_disallowed', html: '', text: '' },

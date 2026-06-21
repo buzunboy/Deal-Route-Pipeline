@@ -17,7 +17,7 @@ Firecrawl from code, behind ports, in exactly two adapters:
 
 1. **`FirecrawlFetcher`** (`src/adapters/fetcher/firecrawl-fetcher.ts`) — a `Fetcher`
    adapter (vendor scrape). Selected by `FETCHER=firecrawl`. Wrapped by `PoliteFetcher`
-   like every other fetcher (robots + rate-limit + size caps still apply).
+   like every other fetcher (rate-limit + size caps always apply; robots only when `RESPECT_ROBOTS_TXT=true` — best-effort-read defaults it off).
 2. **`FirecrawlSearchProvider`** (`src/adapters/search/firecrawl-search-provider.ts`) —
    a `SearchProvider` adapter using Firecrawl `/v2/search` (+ optional inline scrape).
    Selected by `SEARCH_PROVIDER=firecrawl`. Backs the Tier-4 broad-discovery lane
@@ -31,7 +31,8 @@ stays dark by default (`AGENT=noop`, `SEARCH_PROVIDER=stub`).
 `data.{markdown,html,screenshot,metadata}`; both zod-validated at the boundary.
 **Inline search-scrape (v2 value-add):** `/v2/search` with `scrapeOptions:{formats:[...]}` returns
 page content per result. We expose it on `SearchResult.content` and the Tier-4 agent reuses it
-(saving a fetch) ONLY behind our own robots/rate-limit gate (`PoliteFetcher.checkAccess`) — opt-in
+(saving a fetch) ONLY behind our own access gate (`PoliteFetcher.checkAccess` — rate-limit always +
+robots when `RESPECT_ROBOTS_TXT=true`; under the default best-effort-read policy it only throttles) — opt-in
 via `AGENT_INLINE_SCRAPE=true` (default off). **Auth header:** `Authorization: Bearer fc-YOUR_API_KEY`.
 
 ### Tier-4 enablement (Path E, from `.env`)

@@ -111,10 +111,12 @@ suite('Phase A pipeline (Container + Postgres)', () => {
     expect(out.map((d) => d.id)).toEqual([candidate.id, neutral.id]); // 0.9 before 0.5
   });
 
-  it('login-gated page routes to the manual-capture queue (no candidate)', async () => {
+  it('CAPTCHA page routes to the manual-capture queue (no candidate)', async () => {
+    // Best-effort-read: captcha is the one wall still diverted end-to-end (no offer
+    // content). Login walls / soft blocks are read best-effort (next test).
     const source = makeSource({ url: 'https://bank.example/members' });
     container = makeContainer({
-      fetcher: new ScriptedFetcher({ [source.url]: { outcome: 'login_required', text: '' } }),
+      fetcher: new ScriptedFetcher({ [source.url]: { outcome: 'captcha', text: '' } }),
       llm: new RoleAwareFakeLlm({}),
     });
     await container.db.sources.upsert(source);
@@ -123,6 +125,27 @@ suite('Phase A pipeline (Container + Postgres)', () => {
     expect(result.routedToManualCapture).toBe(true);
     expect(await container.db.deals.listByStatus('candidate', 10)).toHaveLength(0);
     expect(await container.db.manualCapture.listOpen(10)).toHaveLength(1);
+  });
+
+  it('best-effort-read: a login-wall page (ok + fetchSignal) yields a candidate, NOT a manual-capture row', async () => {
+    // End-to-end through real Postgres: the fetcher now remaps a login wall to ok with
+    // a fetchSignal (body captured), so the lane extracts it best-effort. The candidate
+    // is still must-review via the confidence rules; no manual-capture row is written.
+    const source = makeSource({ url: 'https://bank.example/perks' });
+    container = makeContainer({
+      fetcher: new ScriptedFetcher({
+        // What the real Playwright/Firecrawl fetcher now produces for a login wall:
+        // ok + a fetchSignal (the classifier remaps it; the body was captured).
+        [source.url]: { outcome: 'ok', fetchSignal: 'login_wall', text: PAGE },
+      }),
+      llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [makeLlmDeal()] }) }),
+    });
+    await container.db.sources.upsert(source);
+
+    const result = await container.crawlSource.execute({ sourceId: source.id });
+    expect(result.routedToManualCapture).toBe(false);
+    expect(await container.db.manualCapture.listOpen(10)).toHaveLength(0);
+    expect(await container.db.deals.listByStatus('candidate', 10)).toHaveLength(1);
   });
 
   it('Prereq A: a REDIRECTING source’s published deal auto-expires (monitor matches resolved_url, not source.url)', async () => {

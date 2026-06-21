@@ -69,9 +69,14 @@ broad-discovery, monitor, review, public API). **4 of 5 hold; 1 has a contained 
   use-case, and not the public API can flip status.
 - **Evidence required before any candidate.** ✅ HOLDS. Both EvidenceStores call
   `assertCaptureComplete()` before any write; every lane captures before persist.
-- **Public pages only.** ✅ HOLDS. `PoliteFetcher` (robots + per-domain rate-limit +
-  size caps) decorates *every* inner fetcher at the composition root; the agentic
-  `SearchBrowserAgent` uses the same polite-wrapped port. No login automation anywhere.
+- **Best-effort read any page** (2026-06-21; ⚠️ REVERSES the former "Public pages only"
+  invariant — owner decision). `RESPECT_ROBOTS_TXT` now defaults **off** (the robots gate
+  in `PoliteFetcher` stays, opt-in via `=true`); login-wall / soft-block pages are read
+  best-effort (`page-classifier` → `ok` + `fetchSignal`, candidate stays must-review). Still
+  holds: `PoliteFetcher` (per-domain rate-limit + size caps) decorates *every* inner fetcher;
+  a `captcha` page still → manual-capture; soft-404/maintenance/expired still skip (`error`);
+  **no login automation anywhere** (no credential system yet — deferred). See `CLAUDE.md` →
+  "Best-effort read any page" for the canonical statement + the legal-exposure note.
 - **No raw external data trusted without zod at the boundary.** ✅ HOLDS (B1 fixed
   2026-06-20). The audit found the RSS feed reader returned regex-built `FeedItem`s with
   no zod parse; `parseFeed` now validates each item through `FeedItemSchema` (http/https

@@ -64,7 +64,10 @@ schema, run one migration Job and set `RUN_MIGRATIONS=false` on the lane contain
 
 Running unattended changes **nothing** about the invariants: **nothing auto-publishes**
 (only a human `review approve` publishes), evidence is captured before any candidate,
-public pages only, and every lane is bounded. The one scheduling-specific fix that
+and every lane is bounded. Reading is **best-effort** (2026-06-21): `RESPECT_ROBOTS_TXT`
+defaults off, login/soft-block pages are read best-effort (captcha still → manual-capture,
+no login automation), and the per-domain rate-limit still always applies — so an unattended
+run is still a good citizen on host load even with robots off. The one scheduling-specific fix that
 landed with this step is **Prereq A**: monitor now tracks each source's resolved
 (post-redirect) URL so a redirecting source's published deals **do** auto-expire — see
 the source's `resolved_url` and `docs/DealRoute_PostP3_Handoff.md` §4.

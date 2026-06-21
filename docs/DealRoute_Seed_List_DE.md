@@ -4,7 +4,7 @@
 > crawls; the discovery lane proposes additions a human approves. Update as sources are
 > added/pruned. (Imported via `seed-import` / the `add-source` skill.)
 
-*Starter sources for the crawl pipeline. **Draft to verify** — the deterministic lane crawls these; the agentic discovery lane expands & maintains the list over time. Default re-crawl cadence: **every 3 days + on-demand**. Public pages only in v1 (login-gated perks → manual capture). Verify exact pricing-page paths at build time; respect each site's robots.txt/ToS.*
+*Starter sources for the crawl pipeline. **Draft to verify** — the deterministic lane crawls these; the agentic discovery lane expands & maintains the list over time. Default re-crawl cadence: **every 3 days + on-demand**. Best-effort-read (2026-06-21): robots-disallowed + login-walled pages are read best-effort (captcha → manual capture; no login automation yet). Verify exact pricing-page paths at build time; `RESPECT_ROBOTS_TXT` defaults off — mind each site's ToS/legal exposure (a deliberate owner decision).*
 
 ---
 
@@ -107,6 +107,6 @@ Handled by the **agentic lane**, not a seed list: scheduled searches like *"[ser
 ### Notes
 - **Cadence:** default re-crawl every 3 days; promos/community more sensitive — allow on-demand and near-expiry rechecks.
 - **Maintenance:** this is a v1 starting point; expect to prune dead links and let discovery add sources. Reliability score per source decides cadence and trust.
-- **Legal/политeness:** public pages only; respect robots.txt/ToS; store our own screenshot + source link rather than republishing full T&C; affiliate disclosure (Omnibus) at publish.
+- **Legal/politeness (best-effort-read, 2026-06-21):** `RESPECT_ROBOTS_TXT` defaults off (read any page); the per-domain rate-limit still always applies; store our own screenshot + source link rather than republishing full T&C; affiliate disclosure (Omnibus) at publish. Ignoring robots/ToS is a deliberate owner decision with EU/DE legal-exposure implications.
 
 *Sources for bundler/community research: telekom.de, o2online.de, vodafone.de, revolut.com, n26.com; mydealz.de, dealdoktor.de, schnaeppchenfuchs.com, mein-deal.com; check24.de, verivox.de, justwatch.com (2026).*

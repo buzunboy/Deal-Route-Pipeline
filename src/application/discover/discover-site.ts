@@ -70,8 +70,8 @@ export interface DiscoverSiteResult {
  * (evidence, manual capture, proposing sources) lives in `LaneBSupport`.
  *
  * The run is CAPPED three ways — max pages, max € (LLM cost), and max wall-clock —
- * and stops at the first cap hit, reporting which. login/captcha/anti-bot pages
- * route to the manual-capture queue (public-only v1).
+ * and stops at the first cap hit, reporting which. Best-effort-read: captcha pages
+ * route to the manual-capture queue; login/soft-block pages are read best-effort.
  */
 export class DiscoverSiteUseCase {
   private readonly sink: CandidateSink;

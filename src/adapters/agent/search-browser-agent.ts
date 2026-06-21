@@ -18,7 +18,7 @@ import { resolveScreenshotBytes } from '../shared/screenshot-download.js';
  * Search-API-first `BrowserAgent` (Phase C, stage C-1). Implements the bounded
  * agentic lane WITHOUT a heavy browser: for a query it runs one search via the
  * injected `SearchProvider`, then fetches the top results through the injected
- * (polite) `Fetcher` — public-only, robots-respecting, rate-limited. It returns
+ * (polite) `Fetcher` — rate-limited always, robots opt-in (best-effort-read). It returns
  * the fetched page material + the novel domains it saw, and consumes no LLM: it
  * is THIN (navigation only). Extraction stays in `ExtractUseCase` in the
  * use-case, so the same trust gate applies and nothing auto-publishes.
@@ -49,9 +49,10 @@ export class SearchBrowserAgent implements BrowserAgent {
       searchCostEur: number;
       /**
        * Ask the search provider for inline page content (Firecrawl v2 search-scrape)
-       * and reuse it instead of a second full fetch — gated by OUR robots/rate-limit
-       * via `fetcher.checkAccess` so the public-only invariant still holds. Off by
-       * default; only providers that support it populate `SearchResult.content`.
+       * and reuse it instead of a second full fetch — routed through OUR access gate
+       * via `fetcher.checkAccess` (rate-limit always + robots when enabled) so the same
+       * policy applies whether or not we fetched. Off by default; only providers that
+       * support it populate `SearchResult.content`.
        */
       inlineScrape?: boolean;
     },
@@ -118,8 +119,9 @@ export class SearchBrowserAgent implements BrowserAgent {
         stepsUsed += 1;
 
         // Carry every fetched page (with its outcome) back; the use-case dispatches
-        // on outcome (ok → extract+evidence; blocked → manual capture; else skip).
-        // robots_disallowed pages carry no content and need no handling, so drop them.
+        // on outcome (ok → extract+evidence, incl. best-effort login/soft-block reads;
+        // captcha → manual capture; else skip). robots_disallowed pages (only when
+        // robots is enabled) carry no content and need no handling, so drop them.
         if (fetched.outcome !== 'robots_disallowed') {
           pages.push({ sourceUrl: fetched.finalUrl, fetched });
         }
@@ -142,9 +144,9 @@ export class SearchBrowserAgent implements BrowserAgent {
    *
    * TRUST-CRITICAL: inline content was fetched by the SEARCH PROVIDER, not our
    * PoliteFetcher — so before using it we apply OUR access gate via
-   * `fetcher.checkAccess` (robots + rate-limit). If our robots policy forbids the
-   * URL we return `robots_disallowed` and discard the inline content (the
-   * public-only invariant holds regardless of who fetched). We also require a
+   * `fetcher.checkAccess` (rate-limit always + robots when enabled). If robots is on
+   * AND forbids the URL we return `robots_disallowed` and discard the inline content
+   * (the same access policy applies regardless of who fetched). We also require a
    * resolvable screenshot → bytes, because evidence is required before any
    * candidate; if the inline screenshot can't be resolved we fall back to a normal
    * fetch (which captures its own screenshot) rather than emit an evidence-less ok page.

@@ -30,11 +30,14 @@ const MAX_ROBOTS_BYTES = 512 * 1024; // 512 KB is far beyond any real robots.txt
 
 /**
  * Politeness decorator around any `Fetcher` (Decorator pattern, behind the port).
- * Enforces the public-crawling guardrails the config promises:
- *  - **robots.txt**: when enabled, fetch + cache each origin's robots.txt and
- *    skip disallowed paths (returns a `blocked` outcome) for our user-agent;
- *  - **per-domain rate limit**: serialise requests to a host so we wait at least
- *    `minIntervalMs` between hits to the same domain.
+ * Two independent guardrails:
+ *  - **robots.txt** (OPT-IN, `respectRobotsTxt`): when enabled, fetch + cache each
+ *    origin's robots.txt and skip disallowed paths (returns a `robots_disallowed`
+ *    outcome) for our user-agent. **Default OFF** under the best-effort-read policy
+ *    (2026-06-21) — the pipeline reads any page unless `RESPECT_ROBOTS_TXT=true`.
+ *  - **per-domain rate limit** (ALWAYS on): serialise requests to a host so we wait
+ *    at least `minIntervalMs` between hits to the same domain. This is courtesy +
+ *    self-protection (not access policy) and applies regardless of the robots flag.
  *
  * Composed in the composition root, so neither the crawl use-case nor the
  * concrete fetcher (Playwright/Firecrawl) changes.
@@ -90,10 +93,11 @@ export class PoliteFetcher implements Fetcher {
   }
 
   /**
-   * Apply the access gate (robots + rate-limit) to `url` without fetching its body.
-   * Used by callers that already hold page content (e.g. a search provider's inline
-   * scrape) so OUR robots/rate-limit policy stays authoritative even when we didn't
-   * do the fetch (the public-only invariant). Mirrors the robots decision in
+   * Apply the access gate to `url` without fetching its body: the rate-limit always,
+   * plus robots IFF `respectRobotsTxt`. Used by callers that already hold page content
+   * (e.g. a search provider's inline scrape) so the SAME access policy applies whether
+   * or not we did the fetch (under best-effort-read this only throttles). Mirrors the
+   * robots decision in
    * `fetch()`; also throttles, since this counts as touching that host.
    */
   async checkAccess(url: string): Promise<'ok' | 'robots_disallowed'> {

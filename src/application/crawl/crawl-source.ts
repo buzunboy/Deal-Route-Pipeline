@@ -122,6 +122,16 @@ export class CrawlSourceUseCase {
         );
       }
 
+      // Best-effort-read: the page looked like a login wall / soft block but yielded a
+      // body. We extract it anyway; log the degraded read so it's visible (candidates
+      // are still must-review via the confidence rules).
+      if (fetched.fetchSignal) {
+        this.logger.info('crawl: best-effort read of a flagged page', {
+          url: fetched.finalUrl,
+          signal: fetched.fetchSignal,
+        });
+      }
+
       const evidence = await this.captureEvidence(fetched, input.dryRun ?? false);
       const extraction = await this.extract.execute({
         pageText: fetched.text,
@@ -177,11 +187,16 @@ export class CrawlSourceUseCase {
     fetched: FetchResult,
     dryRun: boolean,
   ): Promise<boolean> {
+    // Best-effort-read (2026-06-21): only a `captcha` challenge still routes to manual
+    // capture — its body is the challenge, with no offer content to read. Login walls
+    // and soft blocks now come back `ok` (with `fetchSignal`) from the fetcher and are
+    // extracted best-effort, so they never reach here. The `login_required`/`blocked`
+    // values remain handled defensively in case a fetcher ever surfaces them directly.
     const reason =
-      fetched.outcome === 'login_required'
-        ? 'login_required'
-        : fetched.outcome === 'captcha'
-          ? 'captcha'
+      fetched.outcome === 'captcha'
+        ? 'captcha'
+        : fetched.outcome === 'login_required'
+          ? 'login_required'
           : fetched.outcome === 'blocked'
             ? 'anti_bot_blocked'
             : null;

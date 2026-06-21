@@ -83,9 +83,10 @@ Two lanes feed one shared pipeline:
 Full-page **screenshot** + raw **HTML** + extracted **T&C/offer text** + **source URL** + **timestamp**, stored immutably (R2/S3); optionally also an independent archive (archive.org "Save Page Now"). Each deal record links its `evidence_id`; the review console and the public deal page both show it.
 
 ## 9. Hard cases & policy
-- **Login-gated / member-area offers (v1 default):** do **not** automate logins. Crawl public pages only; when a login-only/blocked offer is detected, create a **manual-capture task** for a human (screenshot + terms). Revisit credentialed access later only if the value justifies it.
-- **Anti-bot / JS-heavy:** use stealth fetch or a real hosted browser (Stagehand/Browserbase) for the few that need it; **captcha → skip + flag** for manual.
-- **Politeness & legality:** respect robots.txt where appropriate, rate-limit per domain, identify sensibly; store *our own* screenshot + a source link rather than republishing full copyrighted T&C; add affiliate disclosure (EU Omnibus) at publish; never scrape personal data (GDPR).
+> **POLICY CHANGE (2026-06-21):** the original "public pages only" default was **reversed** by the owner — the pipeline now **best-effort reads any page** it can fetch a body from (robots-disallowed + login-walled included). The bullets below are reframed to that policy; see `CLAUDE.md` → "Best-effort read any page" for the canonical statement.
+- **Login-gated / member-area offers:** still **do not automate logins** (no credential system yet — deferred "later" work). But a login-wall / soft-block page is now **read best-effort**: the fetcher returns `ok` + a `fetchSignal` and the body is extracted (candidate stays must-review). Only a **`captcha`** challenge (no offer content) still becomes a **manual-capture task** for a human.
+- **Anti-bot / JS-heavy:** use stealth fetch or a real hosted browser (Stagehand/Browserbase) for the few that need it; a soft anti-bot interstitial is read best-effort, **captcha → manual-capture**.
+- **Politeness & legality:** `RESPECT_ROBOTS_TXT` now defaults **off** (opt-in via `=true`); the **per-domain rate-limit still always applies** (robots-off ≠ hammering hosts); identify sensibly; store *our own* screenshot + a source link rather than republishing full copyrighted T&C; add affiliate disclosure (EU Omnibus) at publish; never scrape personal data (GDPR). **Legal note:** ignoring robots.txt/ToS materially changes EU/DE legal exposure — a deliberate owner decision.
 - **Cost control:** cap agentic runs (max steps, time, €); promote discovered domains into deterministic crawling; cheap model by default; cache fetches.
 
 ## 10. Orchestration & scheduling
@@ -105,7 +106,7 @@ LLM proposes → humans approve (nothing auto-publishes in v1) · grounding snip
 2. **Models:** cheap extraction model + stronger discovery model — or let Claude Code choose.
 3. **Crawl cadences** per tier (e.g. provider weekly, promos every few days).
 4. **Seed list:** the 25 subscriptions + their provider/bundler URLs — will you supply it, or should we generate a first draft?
-5. **Confirm** the public-only-v1 default for login-gated offers.
+5. ~~**Confirm** the public-only-v1 default for login-gated offers.~~ **Resolved 2026-06-21:** reversed to best-effort-read (robots default-off; login/soft-block read best-effort; captcha → manual; no login automation yet). See §9.
 
 ---
 *Companion: `Delas_Verification_Pipeline_and_MVP_Stack.md` (the broader pipeline + stack) and `Delas_Prototype.html` (the verification console this feeds). Tool landscape per 2026 web-extraction comparisons (Firecrawl, Crawl4AI, Browser Use, Stagehand) — confirm current capabilities at build time.*
