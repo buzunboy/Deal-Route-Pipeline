@@ -1,5 +1,15 @@
 # Deploying & scheduling DealRoute (v1 — external cron)
 
+> **Two distinct deployables — don't conflate them:**
+> - **The always-on API** (`serve` — gated `/api/*` for the admin panel + public `/v1/*`
+>   feed). A long-running HTTP service. **Cloud setup: [`fly/README.md`](fly/README.md)**
+>   (Fly.io, with the full S3 / Postgres / GHCR / secrets walkthrough). Local setup:
+>   [`../docs/LOCAL_DEV.md`](../docs/LOCAL_DEV.md).
+> - **The cron lanes** (`crawl` / `monitor` / `ingest` / `discover`) — short-lived
+>   `--due` runs that exit. That's what the rest of THIS file is about.
+>
+> Both run the same image; the lanes set `LLM_PROVIDER=anthropic`, the API doesn't need it.
+
 DealRoute is a **CLI, not a self-running daemon**. The `Queue` (pg-boss) port exists
 in the tree but is **intentionally unwired** from the composition root — v1 runs each
 lane as a **scheduled invocation of the published container image**. This directory
