@@ -34,6 +34,15 @@ export interface ReviewApiOptions {
    * (localhost / private) — see ARCHITECTURE.md. Read endpoints are never gated.
    */
   authToken?: string;
+  /**
+   * `Access-Control-Allow-Origin` for the browser admin panel that consumes this
+   * API cross-origin. UNSET ⇒ no CORS headers are emitted (same-origin / server-to-
+   * server callers only) — the safe default. When set it is echoed verbatim and the
+   * preflight advertises the `Authorization` header + the state-changing methods, so
+   * a browser can send the bearer. Deliberately NOT wildcardable here: this surface
+   * is credentialed and state-changing, so the caller pins it to the panel's origin.
+   */
+  corsAllowOrigin?: string;
 }
 
 /**
@@ -67,6 +76,7 @@ export class ReviewApi {
   private server: Server | null = null;
   private readonly staticPageHtml?: string;
   private readonly authToken?: string;
+  private readonly corsAllowOrigin?: string;
 
   constructor(
     private readonly review: ReviewUseCase,
@@ -76,6 +86,7 @@ export class ReviewApi {
   ) {
     this.staticPageHtml = options.staticPageHtml;
     this.authToken = options.authToken;
+    this.corsAllowOrigin = options.corsAllowOrigin;
   }
 
   listen(port: number): Promise<void> {
@@ -107,6 +118,19 @@ export class ReviewApi {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
     const method = req.method ?? 'GET';
+
+    // Apply CORS up front (when an admin-panel origin is configured) so EVERY
+    // downstream response — including 401/404/500 from the helpers below — carries
+    // the headers a browser needs. Setting them on `res` now (not per-send) means
+    // the eventual writeHead merges them in; a missing config emits nothing.
+    this.applyCors(res);
+    // Preflight: the browser sends OPTIONS before a PATCH/POST with Authorization.
+    // Answer it 204 here (auth is NOT checked on a preflight — it carries no bearer).
+    if (method === 'OPTIONS') {
+      res.writeHead(this.corsAllowOrigin ? 204 : 405);
+      res.end();
+      return;
+    }
 
     if (method === 'GET' && path === '/') return this.servePage(res);
     if (method === 'GET' && path === '/api/health') return sendJson(res, 200, { ok: true });
@@ -281,6 +305,23 @@ export class ReviewApi {
     }
 
     sendError(res, 404, `Not found: ${method} ${path}`);
+  }
+
+  /**
+   * Set the CORS response headers when an admin-panel origin is configured (no-op
+   * otherwise). Echoes the exact configured origin (never `*` — this surface is
+   * credentialed) and advertises the methods + the `Authorization`/`Content-Type`
+   * headers the panel needs to send the bearer. Called once per request before any
+   * write so all response paths (success and error) include them.
+   */
+  private applyCors(res: ServerResponse): void {
+    if (this.corsAllowOrigin === undefined) return;
+    res.setHeader('access-control-allow-origin', this.corsAllowOrigin);
+    res.setHeader('access-control-allow-methods', 'GET, POST, PATCH, OPTIONS');
+    res.setHeader('access-control-allow-headers', 'Authorization, Content-Type');
+    // The origin is pinned (not `*`), so the response varies by Origin — let caches
+    // key on it rather than serving one origin's headers to another.
+    res.setHeader('vary', 'Origin');
   }
 
   /** True when no token is configured (open, trusted-network mode) or the bearer matches. */

@@ -18,6 +18,7 @@ export async function serve(config: Config): Promise<void> {
   const reviewApi = new ReviewApi(container.review, container.sourceReview, container.logger, {
     staticPageHtml: REVIEW_TEST_PAGE,
     authToken: config.reviewApi.authToken,
+    corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin,
   });
   const publicApi = new PublicApi(container.db.deals, container.clock, container.logger, {
     cdnBaseUrl: config.evidence.s3?.cdnBaseUrl,

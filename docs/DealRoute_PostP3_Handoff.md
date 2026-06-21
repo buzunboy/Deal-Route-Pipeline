@@ -407,6 +407,23 @@ country wired, per the owner decision). Three parts:_
   screenshot to a separate public prefix/bucket. Already logged in KNOWN_ISSUES + documented
   next to the env var.
 
+**Deploying the admin API (`serve`) for the production admin panel:**
+- The admin panel consumes the gated `/api/*` router; `serve` (`src/adapters/cli/commands/serve.ts`)
+  is ONE long-running process mounting `/api/*` (Bearer-gated writes) + `/v1/*` (public feed) +
+  the test page on `REVIEW_API_PORT`. This is a **persistent service**, not a cron lane — give it a
+  stable HTTPS URL behind a reverse proxy/ingress (`serve` speaks plain HTTP, binds `0.0.0.0`).
+- **Browser-panel CORS on `/api/*` (added 2026-06-21).** The admin router now emits CORS headers +
+  answers the `OPTIONS` preflight when `ADMIN_CORS_ORIGIN` is set (the panel's exact origin; NOT
+  `*` — the surface is credentialed). Unset ⇒ no CORS headers (same-origin / server-to-server
+  default). Preflight is not auth-gated (it carries no bearer); CORS headers ride every response
+  incl. 401/404 so the browser can read the real status. Mirrors the public router's
+  `PUBLIC_CORS_ORIGIN`. Without this a cross-origin browser panel could not call `/api/*` at all.
+- **Runtime env the API needs:** `REVIEW_API_TOKEN` (mandatory once publicly reachable — the panel
+  sends `Authorization: Bearer <token>`; unset = open writes), `ADMIN_CORS_ORIGIN`, `DATABASE_URL`
+  (same prod PG), and `EVIDENCE_STORE=s3` + `S3_*` (+ `S3_CDN_BASE_URL` for screenshot URLs) so the
+  panel's evidence views + manual-capture resolve refs. Per-user/SSO auth is still deferred (no
+  credential system); v1 is the shared static bearer.
+
 **MEDIUM — promote when their trigger nears (currently deferred):**
 - **Postgres `Database` contract suite never runs in CI + not isolated** (`postgres-db.test.ts`,
   `vitest.integration.config.ts`). The LSP gate the testing rules *claim* runs server-side is in
