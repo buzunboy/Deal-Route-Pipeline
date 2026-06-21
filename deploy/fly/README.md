@@ -65,6 +65,18 @@ The evidence bundles (screenshot + HTML + terms + metadata) live in S3. The publ
 feed turns a screenshot ref into a URL; the panel reads evidence by reference. This is
 the credentials-heavy part, so here it is click by click.
 
+> **Shortcut — do all of §2.1–§2.3 with one script.** `deploy/aws/setup-evidence-s3.sh`
+> creates the bucket (public access blocked), the least-privilege policy
+> ([`deploy/aws/evidence-bucket-policy.json`](../aws/evidence-bucket-policy.json)),
+> the IAM user, attaches it, and mints an access key — idempotent, and it prints the
+> `fly secrets set` line for you. Run it with an **admin** AWS profile (not the app user):
+> ```sh
+> CREATE_ACCESS_KEY=1 deploy/aws/setup-evidence-s3.sh
+> # override defaults if needed: BUCKET=... REGION=... USER_NAME=... CREATE_ACCESS_KEY=1 deploy/aws/setup-evidence-s3.sh
+> ```
+> Prefer the manual console steps below if you'd rather click through it / can't run
+> the script. (CloudFront for public screenshots, §2.4, is manual either way.)
+
 ### 2.1 Create the bucket
 Console → **S3 → Create bucket**:
 - **Name:** `dealroute-evidence-prod` (globally unique → your `S3_BUCKET`)
@@ -113,15 +125,17 @@ Then **Create access key** → use case **"Application running outside AWS"** �
 > The app injects these credentials explicitly (no ambient AWS credential chain), so
 > both are required. Prefer rotating them periodically.
 
-CLI equivalent:
+CLI equivalent (the policy JSON is committed at `deploy/aws/evidence-bucket-policy.json`):
 ```sh
 aws iam create-policy --policy-name dealroute-evidence-rw \
-  --policy-document file://policy.json            # the JSON above
+  --policy-document file://deploy/aws/evidence-bucket-policy.json
 aws iam create-user --user-name dealroute-pipeline
 aws iam attach-user-policy --user-name dealroute-pipeline \
   --policy-arn arn:aws:iam::<ACCOUNT_ID>:policy/dealroute-evidence-rw
 aws iam create-access-key --user-name dealroute-pipeline   # prints the key pair ONCE
 ```
+> If you change the bucket name, update the `Resource` ARN in
+> `deploy/aws/evidence-bucket-policy.json` to match (the setup script enforces this).
 
 ### 2.4 (Optional) Public screenshot URLs via CloudFront → `S3_CDN_BASE_URL`
 `S3_CDN_BASE_URL` is **optional**. Leave it UNSET and the public feed exposes no
