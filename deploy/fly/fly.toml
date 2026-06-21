@@ -1,0 +1,69 @@
+# DealRoute API — Fly.io app definition (the always-on `serve` process).
+#
+# This deploys the LONG-RUNNING HTTP API (gated /api/* for the admin panel +
+# public /v1/* feed), NOT the cron lanes. The lanes are separate short-lived
+# invocations (see deploy/k8s/cronjobs.yaml or run them as Fly Machines `run`).
+#
+# Deploy:  fly deploy -c deploy/fly/fly.toml
+# Secrets: set via `fly secrets set ...` (NEVER put secrets in this file — it's
+#          committed). See deploy/fly/README.md for the full first-time setup.
+#
+# The image is the same GHCR artifact release.yml builds; we override the command
+# to `serve`. (You can instead build from the Dockerfile with `[build] dockerfile`.)
+
+app = "dealroute-api"            # TODO: must be globally unique; `fly apps create` picks/validates it
+primary_region = "fra"           # Frankfurt — near the eu-central-1 evidence bucket / DE data
+
+[build]
+  # Pull the prebuilt multi-stage image from GHCR (lowercase path — GHCR requires it).
+  # TODO: pin to a released tag (e.g. v1.0.0 / sha-xxxxxxx) in prod instead of :edge.
+  image = "ghcr.io/buzunboy/deal-route-pipeline:edge"
+  # Alternative — build on Fly from source instead of pulling GHCR:
+  # [build]
+  #   dockerfile = "Dockerfile"
+  #   build-target = "runtime"
+
+# Run the API. The image ENTRYPOINT applies DB migrations first, then runs this.
+[processes]
+  app = "serve"
+
+[env]
+  # Non-secret config. Secrets (DATABASE_URL, REVIEW_API_TOKEN, S3_*, ANTHROPIC_API_KEY)
+  # are set with `fly secrets set` and injected as env at runtime — keep them OUT of here.
+  NODE_ENV = "production"
+  REVIEW_API_PORT = "8080"       # must match internal_port below
+  # The API itself never calls the LLM (only crawl/extract do). `stub` keeps the
+  # container from requiring an Anthropic key just to serve. If you run crawl lanes
+  # from this same app/image, set LLM_PROVIDER=anthropic + the key there instead.
+  LLM_PROVIDER = "stub"
+  # Evidence: the public feed resolves screenshot URLs from S3 and the panel reads
+  # evidence by reference, so use the real bucket (a Fly Machine FS is ephemeral).
+  EVIDENCE_STORE = "s3"
+  # ADMIN_CORS_ORIGIN / PUBLIC_CORS_ORIGIN: set per-environment as secrets OR here once
+  # the panel/landing origins are known. ADMIN must be the EXACT panel origin (not *).
+  # ADMIN_CORS_ORIGIN  = "https://admin.dealroute.example"
+  # PUBLIC_CORS_ORIGIN = "https://dealroute.example"
+
+[http_service]
+  internal_port = 8080           # the container listens here (REVIEW_API_PORT above)
+  force_https = true             # managed TLS — the panel (HTTPS) can call it without mixed-content
+  auto_stop_machines = "off"     # keep it always-on so the panel never hits a cold start
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  # Liveness/readiness — the public health endpoint needs no auth and no DB write.
+  [[http_service.checks]]
+    method = "get"
+    path = "/v1/health"
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"               # the Playwright base image is large on disk; RAM for serve is light

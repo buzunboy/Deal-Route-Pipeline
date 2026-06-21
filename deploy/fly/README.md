@@ -1,0 +1,284 @@
+# Deploying the DealRoute API to the cloud (Fly.io)
+
+This guides you through standing up the **always-on `serve` API** (gated `/api/*`
+for the admin panel + public `/v1/*` feed) on Fly.io, end to end, including the
+exact external services and credentials.
+
+> **Scope.** This deploys the long-running API only. The crawl/monitor/ingest/discover
+> **cron lanes** are separate, short-lived runs — use `deploy/k8s/cronjobs.yaml` (K8s)
+> or schedule `fly machine run ... <lane>` / a host crontab. They share the same image
+> and the same `DATABASE_URL` + `S3_*` secrets.
+
+There are **four services** to provision, in order. Do them top to bottom — each later
+step needs values from an earlier one.
+
+```
+1. Postgres (managed)        → DATABASE_URL
+2. AWS S3 bucket + IAM user  → S3_BUCKET / S3_REGION / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY
+3. GHCR image                → ghcr.io/buzunboy/deal-route-pipeline:<tag>  (already built by CI)
+4. Fly.io app                → ties it all together; injects the secrets; gives you the HTTPS URL
+```
+
+---
+
+## 0. Install the CLIs (one-time, local)
+
+```sh
+brew install flyctl awscli
+fly auth login        # opens a browser
+aws --version         # any v2.x
+```
+
+---
+
+## 1. Postgres (managed) → `DATABASE_URL`
+
+The API needs a real Postgres reachable from Fly. Two clean options:
+
+### Option A — Fly Postgres (simplest; same network as the app)
+```sh
+fly postgres create --name dealroute-db --region fra --vm-size shared-cpu-1x --volume-size 10
+# Note the connection string it prints ONCE (postgres://postgres:<pw>@dealroute-db.flycast:5432).
+```
+After you create the app (step 4) attach it so the secret is injected automatically:
+```sh
+fly postgres attach dealroute-db -a dealroute-api      # sets DATABASE_URL on the app
+```
+> `.flycast` is private to your Fly org — the DB is never exposed to the internet. Good.
+
+### Option B — external managed Postgres (RDS, Supabase, Neon, …)
+Provision a Postgres 16 instance **in eu-central-1 / Frankfurt** for DE data residency.
+Copy its connection string; you'll set it as a secret in step 4:
+```
+DATABASE_URL=postgres://USER:PASS@HOST:5432/dealroute?sslmode=require
+```
+Make sure Fly egress can reach it (allowlist, or keep it public with TLS + a strong password).
+
+**Migrations run automatically** on container start (the image entrypoint runs
+`db:migrate`, idempotent) — you do not run migrations by hand.
+
+---
+
+## 2. AWS S3 — evidence bucket + scoped credentials
+
+The evidence bundles (screenshot + HTML + terms + metadata) live in S3. The public
+feed turns a screenshot ref into a URL; the panel reads evidence by reference. This is
+the credentials-heavy part, so here it is click by click.
+
+### 2.1 Create the bucket
+Console → **S3 → Create bucket**:
+- **Name:** `dealroute-evidence-prod` (globally unique → your `S3_BUCKET`)
+- **Region:** **Europe (Frankfurt) `eu-central-1`** (→ your `S3_REGION`; keeps DE evidence in-region)
+- **Block Public Access:** **leave ALL four boxes CHECKED (fully blocked).** ⚠️ The
+  bundle's `page.html` and `terms.txt` (verbatim, copyrighted terms) must NEVER be
+  public. (Public screenshots, if you want them, are exposed via CloudFront in §2.4 —
+  not by unblocking the bucket.)
+- Versioning: optional (recommended; bundles are write-once anyway).
+- Create.
+
+Or with the CLI:
+```sh
+aws s3api create-bucket --bucket dealroute-evidence-prod \
+  --region eu-central-1 --create-bucket-configuration LocationConstraint=eu-central-1
+aws s3api put-public-access-block --bucket dealroute-evidence-prod \
+  --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+```
+
+### 2.2 Create an IAM policy scoped to JUST this bucket
+The adapter uses exactly three actions: `PutObject`, `GetObject`, `HeadObject`.
+Console → **IAM → Policies → Create policy → JSON**, paste:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DealRouteEvidenceObjectRW",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:HeadObject"],
+      "Resource": "arn:aws:s3:::dealroute-evidence-prod/*"
+    }
+  ]
+}
+```
+Name it `dealroute-evidence-rw`. (No `s3:ListBucket`, no `Delete` — least privilege;
+evidence is write-once and the app never lists or deletes.)
+
+### 2.3 Create a programmatic IAM user and get the access key
+Console → **IAM → Users → Create user** → `dealroute-pipeline` → **do NOT** enable
+console access → attach the `dealroute-evidence-rw` policy → create.
+Then **Create access key** → use case **"Application running outside AWS"** → download:
+- **Access key ID** → your `S3_ACCESS_KEY_ID`
+- **Secret access key** → your `S3_SECRET_ACCESS_KEY` (shown once — copy it now)
+
+> The app injects these credentials explicitly (no ambient AWS credential chain), so
+> both are required. Prefer rotating them periodically.
+
+CLI equivalent:
+```sh
+aws iam create-policy --policy-name dealroute-evidence-rw \
+  --policy-document file://policy.json            # the JSON above
+aws iam create-user --user-name dealroute-pipeline
+aws iam attach-user-policy --user-name dealroute-pipeline \
+  --policy-arn arn:aws:iam::<ACCOUNT_ID>:policy/dealroute-evidence-rw
+aws iam create-access-key --user-name dealroute-pipeline   # prints the key pair ONCE
+```
+
+### 2.4 (Optional) Public screenshot URLs via CloudFront → `S3_CDN_BASE_URL`
+`S3_CDN_BASE_URL` is **optional**. Leave it UNSET and the public feed exposes no
+evidence URL (`evidence_screenshot_url: null`); the panel still sees screenshots via
+the authenticated path. Set it only if the landing page should show screenshots.
+
+If you set it, the **hard rule** (see `ARCHITECTURE.md` "Public read surface"): only
+`*/screenshot.png` may be publicly reachable — `page.html`, `terms.txt`, `evidence.json`
+must stay private. The clean AWS way:
+1. Create a **CloudFront distribution**, origin = the S3 bucket, with **Origin Access
+   Control (OAC)** so only CloudFront can read the bucket.
+2. Restrict the cache behavior / bucket policy to the `*/screenshot.png` key pattern
+   only (a single behavior with a path pattern, or a Lambda@Edge/CloudFront Function
+   that 403s any non-`screenshot.png` path).
+3. Set `S3_CDN_BASE_URL` = the CloudFront domain (e.g. `https://dxxxx.cloudfront.net`).
+
+If you can't scope it tightly, **leave `S3_CDN_BASE_URL` unset.** Safer default.
+
+---
+
+## 3. GHCR image (already built — just make it pullable)
+
+CI (`.github/workflows/release.yml`) builds + pushes the image on every push to master:
+- `ghcr.io/buzunboy/deal-route-pipeline:edge`   (rolling)
+- `ghcr.io/buzunboy/deal-route-pipeline:sha-<short>`  (immutable — pin this in prod)
+
+> ⚠️ **Lowercase.** GHCR paths are lowercase; the repo is `buzunboy/Deal-Route-Pipeline`
+> but the image is `…/deal-route-pipeline`. The `fly.toml` already uses the lowercase form.
+
+**Make it pullable by Fly.** The package is private by default. Two choices:
+- **Easiest:** GitHub → your profile → **Packages → deal-route-pipeline → Package
+  settings → Change visibility → Public.** (The image holds no secrets.) Fly then pulls
+  it with no auth.
+- **Keep it private:** create a GitHub PAT with `read:packages`, then give it to Fly at
+  deploy time:
+  ```sh
+  fly deploy -c deploy/fly/fly.toml \
+    --image ghcr.io/buzunboy/deal-route-pipeline:edge \
+    --build-arg ignored=1 \
+    --depot=false
+  # For a private registry, set the pull secret:
+  fly secrets set FLY_REGISTRY_AUTH="$(echo -n 'USERNAME:GHCR_PAT' | base64)"  # if needed
+  ```
+  (Simplest is public; revisit private only if required.)
+
+---
+
+## 4. Fly.io app — tie it together
+
+### 4.1 Create the app
+```sh
+fly apps create dealroute-api          # or let `fly launch` do it; name must be globally unique
+# If you used Fly Postgres (1A): attach it now (sets DATABASE_URL automatically)
+fly postgres attach dealroute-db -a dealroute-api
+```
+
+### 4.2 Set the secrets
+Everything sensitive goes here (NOT in `fly.toml`). One command:
+```sh
+fly secrets set -a dealroute-api \
+  REVIEW_API_TOKEN="$(openssl rand -hex 32)" \
+  ADMIN_CORS_ORIGIN="https://admin.dealroute.example" \
+  PUBLIC_CORS_ORIGIN="https://dealroute.example" \
+  S3_BUCKET="dealroute-evidence-prod" \
+  S3_REGION="eu-central-1" \
+  S3_ACCESS_KEY_ID="AKIA..." \
+  S3_SECRET_ACCESS_KEY="..." \
+  DATABASE_URL="postgres://USER:PASS@HOST:5432/dealroute?sslmode=require"
+  # ^ OMIT DATABASE_URL if you used `fly postgres attach` (it set it for you)
+  # Add S3_CDN_BASE_URL="https://dxxxx.cloudfront.net" only if you did §2.4
+```
+- **`REVIEW_API_TOKEN`** — the bearer the admin panel sends (`Authorization: Bearer <token>`).
+  Save the generated value; the panel needs it.
+- **`ADMIN_CORS_ORIGIN`** — the panel's EXACT deployed origin (scheme+host, no trailing slash).
+  Must NOT be `*` (the surface is credentialed).
+
+### 4.3 Deploy
+```sh
+fly deploy -c deploy/fly/fly.toml
+```
+The entrypoint migrates the DB, then starts `serve`. Watch logs:
+```sh
+fly logs -a dealroute-api
+# expect:  "entrypoint: applying database migrations..."  then the three serve URLs
+```
+
+### 4.4 Get the URL
+```sh
+fly status -a dealroute-api      # shows the hostname, e.g. https://dealroute-api.fly.dev
+```
+
+---
+
+## 5. Verify (the same checks we ran locally, now against the cloud URL)
+
+```sh
+API=https://dealroute-api.fly.dev
+
+curl -s $API/api/health                 # {"ok":true}
+curl -s $API/v1/health                  # {"ok":true}
+curl -s "$API/v1/deals"                 # {"deals":[],"total":0,...}  (empty until data exists)
+
+# CORS preflight from the panel origin → 204 with the panel origin echoed:
+curl -i -X OPTIONS $API/api/candidates/x/approve \
+  -H "Origin: https://admin.dealroute.example" \
+  -H "Access-Control-Request-Method: POST"
+
+# Auth: write without the token → 401; with it → reaches the handler:
+curl -i -X POST $API/api/candidates/<uuid>/approve \
+  -H "Authorization: Bearer <REVIEW_API_TOKEN>" -H "Content-Type: application/json" \
+  -d '{"approver":"me"}'
+```
+
+---
+
+## 6. Point the admin panel at it
+
+In the admin panel repo's deployed env:
+- API base URL → `https://dealroute-api.fly.dev`
+- Bearer token → the `REVIEW_API_TOKEN` you generated (sent as `Authorization: Bearer <token>`)
+- The panel's deployed origin MUST equal `ADMIN_CORS_ORIGIN`. If it changes, update the
+  secret and redeploy:
+  ```sh
+  fly secrets set -a dealroute-api ADMIN_CORS_ORIGIN="https://new-panel-origin"
+  ```
+
+The contract the panel codes against is `docs/api/openapi.yaml` (+ the Postman
+collection). Set its `baseUrl` variable to the Fly URL and `bearerToken` to the token.
+
+---
+
+## 7. Running the cron lanes in the cloud (when you're ready)
+
+The lanes are NOT part of this always-on app. Cheapest on Fly: scheduled one-off Machines
+that exit. They reuse the SAME image + the DB/S3 secrets, but set `LLM_PROVIDER=anthropic`
+(+ `ANTHROPIC_API_KEY`) since they DO call the model:
+```sh
+fly secrets set -a dealroute-api ANTHROPIC_API_KEY="sk-ant-..."   # lanes need it; serve doesn't
+fly machine run ghcr.io/buzunboy/deal-route-pipeline:edge \
+  -a dealroute-api --region fra --rm \
+  -e LLM_PROVIDER=anthropic -e EVIDENCE_STORE=s3 \
+  monitor --due
+```
+Wire those to a scheduler (GitHub Actions `scheduled.yml`, a Fly scheduled Machine, or
+host cron). Keep Tier-4 (`discover`) dark unless you set `AGENT=search` + a search backend.
+
+---
+
+## Secrets checklist (what the API needs at runtime)
+
+| Secret | Required | From | Notes |
+|---|---|---|---|
+| `DATABASE_URL` | ✅ | §1 | `fly postgres attach` sets it, or set manually |
+| `REVIEW_API_TOKEN` | ✅ (once public) | §4.2 (`openssl rand -hex 32`) | bearer the panel sends; unset = open writes |
+| `ADMIN_CORS_ORIGIN` | ✅ (browser panel) | the panel's deployed origin | exact origin, never `*` |
+| `PUBLIC_CORS_ORIGIN` | optional | landing origin | defaults to `*` |
+| `S3_BUCKET` / `S3_REGION` | ✅ | §2.1 | `dealroute-evidence-prod` / `eu-central-1` |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | ✅ | §2.3 | scoped IAM user key |
+| `S3_CDN_BASE_URL` | optional | §2.4 (CloudFront) | only if exposing public screenshots, scoped to `*/screenshot.png` |
+| `ANTHROPIC_API_KEY` | only for lanes | Anthropic console | `serve` doesn't need it; crawl/extract do |

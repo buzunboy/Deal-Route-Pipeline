@@ -423,6 +423,13 @@ country wired, per the owner decision). Three parts:_
   (same prod PG), and `EVIDENCE_STORE=s3` + `S3_*` (+ `S3_CDN_BASE_URL` for screenshot URLs) so the
   panel's evidence views + manual-capture resolve refs. Per-user/SSO auth is still deferred (no
   credential system); v1 is the shared static bearer.
+- **Cloud deploy artifacts (added 2026-06-21).** `deploy/fly/fly.toml` + `deploy/fly/README.md`
+  deploy the always-on API to Fly.io with a full walkthrough of every service: managed Postgres
+  (`fly postgres` or external), the **AWS S3 bucket + scoped IAM user** (click-by-click creds +
+  least-privilege policy), GHCR image pull (note: image path is **lowercase**
+  `ghcr.io/buzunboy/deal-route-pipeline` even though the repo is mixed-case), and `fly secrets set`
+  for the secrets table. Local counterpart: `docs/LOCAL_DEV.md`. The OpenAPI contract the panel
+  codes against: `docs/api/openapi.yaml` (+ Postman collection) — see `.claude/rules/api-and-openapi.md`.
 
 **MEDIUM — promote when their trigger nears (currently deferred):**
 - **Postgres `Database` contract suite never runs in CI + not isolated** (`postgres-db.test.ts`,
