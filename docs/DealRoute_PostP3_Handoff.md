@@ -2,7 +2,8 @@
 
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`849caee`** (best-effort-read policy, 2026-06-21). **ALL post-C Steps 1–6 are DONE + merged
+**`e22635d`** (review-API edit/promote/manual-capture/filters + schema v5, 2026-06-21;
+was `849caee` at the best-effort-read policy merge). **ALL post-C Steps 1–6 are DONE + merged
 (1 public API, 2 GDPR/affiliate disclosure, 3 reliability ranking, 4 scheduler, 5 observability,
 6 multi-country foundation). The pipeline is post-C FEATURE-COMPLETE for DE v1** — no
 roadmap step remains; what's left is the deferred-findings register (`docs/KNOWN_ISSUES.md`)
@@ -44,8 +45,23 @@ seams). This supersedes
 > `SuffixOracle` — the naive last-two-labels `registrableDomain` is gone; `source_registrable_domain`/
 > `registrable_domain` PINNED at extract/source-create/seed-import so dedupe + the reliability join read
 > a frozen field, schema **v4**, migration **0012**; config-driven `MARKETS` registry → closed
-> `Country`/`Currency` enums + a per-country currency trust rule; DE byte-identical, no dedupe churn).
-> Deal-record `schema_version` is now **4**; latest migration is now **`drizzle/0012`**.
+> `Country`/`Currency` enums + a per-country currency trust rule; DE byte-identical, no dedupe churn)
+> · **Review-API extension** (merge **`e22635d`**, 2026-06-21 — NOT a numbered roadmap step; an admin
+> capability add): four new gated `/api/*` review actions (CLI + HTTP, Bearer-gated writes, audited,
+> none auto-publish) — `PATCH /api/candidates/:id` reviewer edit (pure `applyCandidatePatch` allowlist;
+> identity/provenance/status not editable; re-validates; tags every changed field in `human_edited` so a
+> corrected value is never read as model-grounded; model grounding kept-but-flagged; status stays
+> `candidate`; a later approve publishes the edited record), `POST /api/field-proposals/:key/promote`
+> (→ a `condition_vocabulary` row + proposal resolved; `target:"field"` → 400, deferred),
+> `POST /api/manual-capture-tasks/:id/complete` (evidence REQUIRED by **reference** — screenshot/html/terms
+> refs + inline terms text; source_url pinned from evidence; mints a `candidate`, never publishes),
+> `GET /api/candidates` filters + pagination. New ports: `ConditionVocabularyRepository` (first typed port
+> for the existing table), `FieldProposalRepository.getByKey/markPromoted`, `ManualCaptureRepository.getById/
+> markDone`, `DealRepository.listCandidates(filter)` — LSP-identical in both adapters + contract-parity-tested.
+> Deal-record schema **v5**, migration **`0013`**: additive `human_edited: string[]` (default `[]`, never
+> LLM-proposed, surfaced in the public DTO). 3 deferred items logged in `KNOWN_ISSUES.md` (manual-capture
+> upload channel, `target:"field"` promotion, the keep-grounding stale-quote residual risk).
+> Deal-record `schema_version` is now **5**; latest migration is now **`drizzle/0013`**.
 
 > Binding rules still govern: `CLAUDE.md` + `.claude/rules/`
 > (`architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`).
@@ -59,7 +75,7 @@ seams). This supersedes
 
 1. Read `CLAUDE.md` + the auto-loaded `.claude/rules/` — **binding**.
 2. Green baseline from YOUR OWN worktree: `git rev-parse --abbrev-ref HEAD`, then
-   **`npm install && npm run check && npm run build`**. Expect ~572 unit tests +
+   **`npm install && npm run check && npm run build`**. Expect ~733 unit/contract tests +
    lint + typecheck green. (A fresh worktree has no `node_modules` — `npm install`
    first; `@aws-sdk/client-s3` is a declared dep, its absence means install didn't run.)
    The Postgres integration tier self-skips without `DATABASE_URL_TEST` (CI runs it).
