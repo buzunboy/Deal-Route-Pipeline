@@ -2,13 +2,21 @@
 
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`49a228e`** (Step 6). **ALL post-C Steps 1–6 are DONE + merged (1 public API,
-2 GDPR/affiliate disclosure, 3 reliability ranking, 4 scheduler, 5 observability, 6
-multi-country foundation). The pipeline is post-C FEATURE-COMPLETE for DE v1** — no
+**`849caee`** (best-effort-read policy, 2026-06-21). **ALL post-C Steps 1–6 are DONE + merged
+(1 public API, 2 GDPR/affiliate disclosure, 3 reliability ranking, 4 scheduler, 5 observability,
+6 multi-country foundation). The pipeline is post-C FEATURE-COMPLETE for DE v1** — no
 roadmap step remains; what's left is the deferred-findings register (`docs/KNOWN_ISSUES.md`)
 + (only when expanding) actually enabling a 2nd country (data/config behind the now-extensible
 seams). This supersedes
 `docs/DealRoute_PostC_Handoff.md` (kept, banner-marked). (`NEXT_SESSION_HANDOFF.md` was deleted.)_
+
+> **⚠️ POLICY CHANGE since the audit (`849caee`, 2026-06-21):** the **"public pages only"
+> non-negotiable invariant was REVERSED** to **best-effort read any page** (owner decision).
+> `RESPECT_ROBOTS_TXT` now defaults **off**; login-wall / soft-block pages are read best-effort
+> (must-review); a `captcha` page still → manual-capture; soft-404/maintenance/expired still
+> skip; monitor still neutral on walls; the per-domain rate-limit still always applies; no login
+> automation yet (deferred — see KNOWN_ISSUES). See `CLAUDE.md` → "Best-effort read any page" for
+> the canonical statement + the EU/DE legal-exposure note (revisit at launch/legal review).
 
 > **What shipped since the original audit** (all merged to `master`, in order):
 > B1 RSS-boundary fix · the live-dry-run hardening batch (raised `LLM_MAX_OUTPUT_TOKENS`
