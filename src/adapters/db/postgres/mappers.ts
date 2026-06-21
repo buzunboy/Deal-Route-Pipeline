@@ -57,6 +57,7 @@ export function dealToRow(d: DealRecord): DealRow {
     affiliateDisclosure: d.affiliate_disclosure,
     publishedAt: d.published_at,
     sourceRegistrableDomain: d.source_registrable_domain,
+    humanEdited: d.human_edited,
   };
 }
 
@@ -131,6 +132,7 @@ export function rowToDeal(r: DealSelect): DealRecord {
     // timestamptz → canonical ISO-Z (same normalisation as verified_at).
     published_at: isoTimestampOrNull(r.publishedAt),
     source_registrable_domain: r.sourceRegistrableDomain,
+    human_edited: r.humanEdited as string[],
   };
   return DealRecordSchema.parse(candidate);
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { assertCaptureComplete } from './evidence.js';
+import { assertCaptureComplete, missingReferencedEvidence } from './evidence.js';
 import { InvariantViolation } from '../errors/index.js';
-import type { EvidenceCapture } from './evidence.js';
+import type { EvidenceCapture, ReferencedEvidenceInput } from './evidence.js';
 
 function makeCapture(overrides: Partial<EvidenceCapture> = {}): EvidenceCapture {
   return {
@@ -45,5 +45,44 @@ describe('assertCaptureComplete', () => {
       expect(msg).toContain('html');
       expect(msg).toContain('termsText');
     }
+  });
+});
+
+function makeReferenced(overrides: Partial<ReferencedEvidenceInput> = {}): ReferencedEvidenceInput {
+  return {
+    sourceUrl: 'https://www.telekom.de/magenta-tv',
+    screenshotRef: 'manual/abc/screenshot.png',
+    htmlRef: 'manual/abc/page.html',
+    termsRef: 'manual/abc/terms.txt',
+    termsText: 'Disney+ ist im Tarif enthalten.',
+    capturedAt: '2026-06-19T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('missingReferencedEvidence (manual-capture referenced bundle)', () => {
+  it('returns [] for a complete referenced bundle', () => {
+    expect(missingReferencedEvidence(makeReferenced())).toEqual([]);
+  });
+
+  it('flags a missing screenshot reference', () => {
+    expect(missingReferencedEvidence(makeReferenced({ screenshotRef: '   ' }))).toContain(
+      'screenshot_ref',
+    );
+  });
+
+  it('flags every empty ref / text / url / captured_at', () => {
+    const missing = missingReferencedEvidence(
+      makeReferenced({
+        htmlRef: '',
+        termsRef: '',
+        termsText: '',
+        sourceUrl: '',
+        capturedAt: '',
+      }),
+    );
+    expect(missing.sort()).toEqual(
+      ['captured_at', 'html_ref', 'source_url', 'terms_ref', 'terms_text'].sort(),
+    );
   });
 });

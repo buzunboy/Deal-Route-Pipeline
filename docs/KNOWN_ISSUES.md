@@ -31,6 +31,54 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### Manual-capture screenshot/artifact UPLOAD channel is not built (capture is by-reference only)
+- **Severity**: medium (a capability gap, not a defect; the trust invariant still holds)
+- **Area**: api / evidence
+- **Location**: `src/application/review/review.ts` (`completeManualCapture`); `POST /api/manual-capture-tasks/:id/complete`; `src/domain/evidence/evidence.ts` (`ReferencedEvidenceInput`).
+- **What**: completing a manual-capture task takes the screenshot/HTML/terms as **references** (store
+  keys/URLs) the human uploaded out-of-band, plus inline terms text. There is **no upload endpoint** to
+  produce those refs — a human must place the artifacts in the evidence store/CDN themselves and pass
+  the keys. The owner chose "reference, don't upload" deliberately for v1.
+- **Why deferred**: the admin UI (separate repo) will own the file-upload UX; the pipeline only needs
+  the durable refs. Building an upload channel now (multipart, content-type sniffing, virus scan, store
+  write) is admin-panel work, not pipeline work.
+- **Fix-when**: when the admin panel implements manual capture — add an `EvidenceStore`-backed upload
+  endpoint (or pre-signed S3 URLs) that returns the refs `complete` consumes. Until then, document the
+  manual-upload step in the runbook.
+- **Logged**: 2026-06-21
+
+### Field-proposal promotion to a first-class COLUMN (`target:"field"`) is not supported
+- **Severity**: low
+- **Area**: api / db
+- **Location**: `src/application/review/review.ts` (`promoteFieldProposal` throws `PromotionTargetNotSupportedError`); `POST /api/field-proposals/:key/promote` → 400.
+- **What**: promotion supports `target:"vocabulary"` only (an additive `condition_vocabulary` row).
+  Promoting a recurring proposal to a typed first-class column would let the public feed filter/rank on
+  it, but needs a drizzle migration + schema-version bump + a re-parse of `raw_conditions_text` for
+  historical rows — out of scope for this API change.
+- **Why deferred**: vocabulary promotion covers the common case (canonicalise a long-tail condition);
+  a first-class column is a rare, deliberate schema decision that shouldn't be a one-call API action.
+- **Fix-when**: when a specific proposal recurs often enough that the product wants to filter/rank on
+  it as a typed field — do it as a planned migration (see the `promote-field-proposal` skill's "field"
+  path), not via this endpoint.
+- **Logged**: 2026-06-21
+
+### Reviewer edit KEEPS the model grounding quotes beside a human-corrected value (stale-quote risk)
+- **Severity**: low (mitigated by `human_edited`; an explicit owner trade-off)
+- **Area**: api / extraction / trust
+- **Location**: `src/application/review/review.ts` (`editCandidate` — grounding left unchanged); `src/adapters/http/public-dto.ts` (`PublicDeal.human_edited` IS surfaced).
+- **What**: when a reviewer edits a field (e.g. `price`) via PATCH, the model's original `grounding`
+  quote for that field is left in place — it may no longer back the corrected value. The owner chose
+  "keep grounding, only tag `human_edited`" (lighter than dropping grounding + forcing re-review). The
+  mitigation is DELIVERED: the edited field path is in `human_edited`, which the public DTO exposes
+  (`toPublicDeal` → `PublicDeal.human_edited`), so a consumer can tell the value is human-set and the
+  model quote may not match. The residual risk is only if a consumer ignores `human_edited`.
+- **Why deferred**: owner decision in the build's clarifying questions. Dropping grounding for edited
+  fields (the stricter alternative) would force the edited record back to must-review on every edit.
+- **Fix-when**: if a public consumer ever renders the grounding quote next to the value AND mis-matches
+  become a real trust problem — switch `editCandidate` to drop grounding for edited paths (the use-case
+  is the single place to change it; `human_edited` already marks which).
+- **Logged**: 2026-06-21
+
 ### Real authenticated access (login automation) — deferred "later" work behind the best-effort-read policy
 - **Severity**: medium (a capability gap the new policy exposes; not a defect)
 - **Area**: fetcher / discovery / legal

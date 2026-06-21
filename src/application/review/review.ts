@@ -1,13 +1,35 @@
+import { createHash } from 'node:crypto';
 import {
   DealStatus,
   DealNotFoundError,
   NotReviewableError,
   MissingApproverError,
+  FieldProposalNotFoundError,
+  PromotionTargetNotSupportedError,
+  ManualCaptureTaskNotFoundError,
+  ManualCaptureTaskNotOpenError,
+  EvidenceIncompleteError,
+  InvalidPatchError,
+  applyCandidatePatch,
+  LlmExtractedDealSchema,
+  validateRecord,
+  trueCostMonthly,
+  adjustConfidence,
+  mustReview,
+  missingReferencedEvidence,
+  CURRENT_SCHEMA_VERSION,
+  CANDIDATES_DEFAULT_LIMIT,
+  CANDIDATES_MAX_LIMIT,
+  CANDIDATES_MAX_OFFSET,
   type DealRecord,
   type Evidence,
   type ManualCaptureTask,
   type FieldProposalRecord,
   type ReviewRecord,
+  type CandidateFilters,
+  type LlmExtractedDeal,
+  type VocabularyEntry,
+  type SuffixOracle,
 } from '../../domain/index.js';
 import type { Database, Clock, Logger } from '../ports/index.js';
 import { newId } from '../shared/id.js';
@@ -16,6 +38,34 @@ import { newId } from '../shared/id.js';
 export interface CandidateView {
   deal: DealRecord;
   evidence: Evidence | null;
+}
+
+/** Optional filters + pagination for the candidate review queue (all bounded/defaulted). */
+export interface ListCandidatesOptions {
+  filters?: CandidateFilters;
+  limit?: number;
+  offset?: number;
+}
+
+/** Inputs to promote a recurring field proposal into the condition vocabulary. */
+export interface PromoteFieldProposalInput {
+  approver: string;
+  /** The proposal's `suggested_key` to resolve. */
+  suggestedKey: string;
+  /** The canonical vocabulary key to create (may differ from the suggested key). */
+  canonicalKey: string;
+  label: string;
+  /** v1 supports only 'vocabulary'; 'field' (a new column) is rejected (deferred). */
+  target: 'vocabulary' | 'field';
+}
+
+/** The evidence a human attaches when completing a manual-capture task (by reference). */
+export interface ManualCaptureEvidenceInput {
+  sourceUrl: string;
+  screenshotRef: string;
+  htmlRef: string;
+  termsRef: string;
+  termsText: string;
 }
 
 /**
@@ -32,25 +82,256 @@ export class ReviewUseCase {
     private readonly db: Database,
     private readonly clock: Clock,
     private readonly logger: Logger,
+    /**
+     * The PSL oracle (Step 6) — pins a manual-captured candidate's registrable
+     * domain from its source URL, exactly as extract does, so the dedupe key + the
+     * reliability join read a consistent value. Injected from the composition root.
+     */
+    private readonly suffixOracle: SuffixOracle,
   ) {}
 
   /**
-   * List deals awaiting review (both `candidate` and the flagged `in_review`
-   * states), each with its evidence bundle. Flagged ones carry the must-review
-   * signal so a reviewer can triage.
+   * List deals awaiting review, each with its evidence bundle, ordered
+   * lowest-confidence-first so a reviewer triages the shakiest extractions first.
+   *
+   * With no options this reproduces the original behaviour: the reviewable pair
+   * (`candidate` + `in_review`). Options narrow by a single `status` (including a
+   * terminal one, for auditing published/rejected/expired deals), `service`, or
+   * `confidenceMax`, and bound the page. `limit`/`offset` are clamped to the domain
+   * caps (never trust a raw caller value) — the HTTP boundary 400s an over-cap
+   * offset, but a programmatic caller is clamped here as a floor guard.
    */
-  async listCandidates(limit = 50): Promise<CandidateView[]> {
-    const [candidates, inReview] = await Promise.all([
-      this.db.deals.listByStatus(DealStatus.enum.candidate, limit),
-      this.db.deals.listByStatus(DealStatus.enum.in_review, limit),
-    ]);
-    const deals = [...candidates, ...inReview].slice(0, limit);
+  async listCandidates(opts: ListCandidatesOptions = {}): Promise<CandidateView[]> {
+    const limit = clamp(opts.limit ?? CANDIDATES_DEFAULT_LIMIT, 1, CANDIDATES_MAX_LIMIT);
+    const offset = clamp(opts.offset ?? 0, 0, CANDIDATES_MAX_OFFSET);
+    const deals = await this.db.deals.listCandidates({
+      filters: opts.filters ?? {},
+      limit,
+      offset,
+    });
     return Promise.all(
       deals.map(async (deal) => ({
         deal,
         evidence: deal.evidence_id ? await this.db.evidence.getById(deal.evidence_id) : null,
       })),
     );
+  }
+
+  /**
+   * Apply a reviewer's correction to a candidate's extracted fields, BEFORE approve.
+   *
+   * The candidate must still be reviewable (`candidate`/`in_review`). The patch is
+   * limited by {@link applyCandidatePatch} to reviewer-correctable fields — never
+   * identity/provenance/status — and re-validated through the deal schema + sanity
+   * rules (currency-vs-country, price band, dates, …). Every changed field is added
+   * to `human_edited` so a corrected value is never read as model-grounded (the
+   * model `grounding` quotes are KEPT — an owner decision — but `human_edited`
+   * flags which fields they no longer back). Status STAYS a candidate; a later
+   * approve publishes the edited record. The edit is recorded in the immutable
+   * audit log (`action: 'edit'`) with an old→new summary + who + when.
+   */
+  async editCandidate(dealId: string, approver: string, patch: unknown): Promise<DealRecord> {
+    this.assertApprover(approver, 'edit');
+    const deal = await this.requireDeal(dealId);
+    this.assertReviewable(deal);
+
+    // Pure: enforce the allowlist, validate sub-objects, merge, re-derive true cost.
+    const { deal: patched, changed } = applyCandidatePatch(deal, patch);
+    if (changed.length === 0) {
+      // A no-op edit isn't an error, but it shouldn't mint an audit row or re-touch
+      // the record — return the candidate unchanged.
+      this.logger.info('editCandidate: no fields changed — no-op', { dealId, approver });
+      return deal;
+    }
+
+    // Re-run sanity validation on the edited record (currency-vs-country, price
+    // band, billing/prepaid, date ordering). We do NOT pass the page text here, so
+    // grounding is reported as not-verifiable — the reviewer is the human in the
+    // loop and the model quotes are kept-but-flagged via human_edited. A failing
+    // sanity rule is logged but never BLOCKS the edit (the owner kept status =
+    // candidate); it surfaces in the audit summary for the approver.
+    const validation = validateRecord(patched);
+    if (!validation.ok) {
+      this.logger.warn('editCandidate: edited record fails a sanity rule (kept for review)', {
+        dealId,
+        approver,
+        failures: validation.failures.map((f) => f.rule),
+      });
+    }
+
+    // Merge changed paths into human_edited (union, stable order) — the trust trail.
+    const humanEdited = unionPaths(deal.human_edited, changed);
+    const at = this.clock.nowIso();
+    const summary = changed.map((f) => editSummary(f, deal, patched)).join('; ');
+
+    // Log-before-act: append the audit row FIRST (the durable decision record).
+    await this.recordReview(
+      dealId,
+      'edit',
+      approver,
+      `edited ${changed.join(', ')}: ${summary}`,
+      at,
+    );
+    const edited: DealRecord = { ...patched, human_edited: humanEdited };
+    await this.db.deals.update(edited);
+    this.logger.info('candidate edited by reviewer', { dealId, approver, changed });
+    return edited;
+  }
+
+  /**
+   * Promote a recurring field proposal into the controlled `condition_vocabulary`
+   * (the API form of the `promote-field-proposal` skill). Adds a vocabulary entry
+   * keyed by `canonicalKey` (the suggested key as an alias so existing `key:"other"`
+   * conditions re-map), marks the matching proposal `promoted` (out of the open
+   * queue), and audits it. Extending the vocabulary is ADDITIVE — no migration.
+   *
+   * `target: 'field'` (a first-class typed column) needs a schema migration and is
+   * NOT supported in v1 — it throws {@link PromotionTargetNotSupportedError} (400).
+   */
+  async promoteFieldProposal(input: PromoteFieldProposalInput): Promise<VocabularyEntry> {
+    this.assertApprover(input.approver, 'promote');
+    if (input.target !== 'vocabulary') {
+      throw new PromotionTargetNotSupportedError(input.target);
+    }
+    const proposal = await this.db.fieldProposals.getByKey(input.suggestedKey);
+    if (proposal === null) throw new FieldProposalNotFoundError(input.suggestedKey);
+
+    // The suggested key becomes an alias of the canonical key, so conditions the
+    // extractor previously emitted under it now map cleanly (vocab-mapping matches
+    // on key OR alias). Existing entry → merge the alias; new → version 1.
+    const existing = await this.db.conditionVocabulary.getByKey(input.canonicalKey);
+    const aliases = unionPaths(existing?.aliases ?? [], [input.suggestedKey]);
+    const entry: VocabularyEntry = {
+      key: input.canonicalKey,
+      label: input.label,
+      aliases,
+      version: existing?.version ?? 1,
+    };
+    await this.db.conditionVocabulary.upsert(entry);
+    await this.db.fieldProposals.markPromoted(input.suggestedKey);
+    this.logger.info('field proposal promoted to vocabulary', {
+      approver: input.approver,
+      suggestedKey: input.suggestedKey,
+      canonicalKey: input.canonicalKey,
+    });
+    return entry;
+  }
+
+  /**
+   * Complete a manual-capture task: a human captured a blocked/captcha-gated offer
+   * by hand. Persists the (referenced) evidence bundle, mints a `candidate` deal
+   * from the human-entered fields, marks the task `done`, and audits it. NEVER
+   * publishes — the candidate flows through normal review/edit/approve.
+   *
+   * Trust: evidence is REQUIRED (a missing ref / terms text → 400, no candidate);
+   * the source URL is pinned from the evidence, never trusted from the fields;
+   * EVERY field path supplied is recorded in `human_edited` (the whole record is
+   * human-entered, so none of it is model-grounded); the record runs through the
+   * SAME sanity/grounding validation as an extraction, and a failure routes it to
+   * `in_review`.
+   */
+  async completeManualCapture(
+    taskId: string,
+    approver: string,
+    fields: unknown,
+    evidence: ManualCaptureEvidenceInput,
+  ): Promise<DealRecord> {
+    this.assertApprover(approver, 'complete-manual-capture');
+    const task = await this.requireManualCaptureTask(taskId);
+    if (task.status !== 'open') {
+      throw new ManualCaptureTaskNotOpenError(taskId, task.status);
+    }
+
+    // Evidence-required invariant: reject a hollow referenced capture up front.
+    const missing = missingReferencedEvidence({
+      sourceUrl: evidence.sourceUrl,
+      screenshotRef: evidence.screenshotRef,
+      htmlRef: evidence.htmlRef,
+      termsRef: evidence.termsRef,
+      termsText: evidence.termsText,
+      capturedAt: this.clock.nowIso(),
+    });
+    if (missing.length > 0) throw new EvidenceIncompleteError(missing);
+
+    // Validate the human-entered deal fields through the deal-record boundary schema
+    // (LlmExtractedDealSchema) — a manual capture is a from-scratch human entry of
+    // the same core an extractor would propose. The boundary rejects garbage/missing
+    // fields (400) before any persistence. We never trust raw input, human or LLM.
+    const parsed = LlmExtractedDealSchema.safeParse(fields);
+    if (!parsed.success) {
+      throw new InvalidPatchError(
+        `Manual-capture fields failed validation: ${parsed.error.issues
+          .map((i) => `${i.path.join('.')} ${i.message}`)
+          .join('; ')}`,
+        parsed.error.issues.map((i) => i.path.join('.')),
+      );
+    }
+    // Pin source_url from the EVIDENCE (provenance we control), never the fields.
+    const filled: LlmExtractedDeal = { ...parsed.data, source_url: evidence.sourceUrl };
+
+    // Persist the referenced evidence bundle as metadata (the bytes live wherever
+    // the human uploaded them — we store the refs + a server-computed content hash
+    // over the terms text, the same region monitoring diffs on). NOT via
+    // EvidenceStore.save (that needs bytes); directly via the evidence repository.
+    const at = this.clock.nowIso();
+    const evidenceRecord: Evidence = {
+      id: newId(),
+      source_url: evidence.sourceUrl,
+      screenshot_ref: evidence.screenshotRef,
+      html_ref: evidence.htmlRef,
+      terms_ref: evidence.termsRef,
+      captured_at: at,
+      content_hash: sha256(evidence.termsText),
+    };
+    await this.db.evidence.insert(evidenceRecord);
+
+    // Re-derive true cost, run the SAME sanity/grounding validation as an extraction
+    // (grounding verified against the captured terms text) → must-review, and pin
+    // the registrable domain. A human-captured record is NEVER auto-trusted.
+    const validation = validateRecord(filled, evidence.termsText);
+    const adjusted = adjustConfidence(filled, validation.failures.length);
+    const review = mustReview(adjusted, validation.failures.length);
+    const sourceRegistrableDomain = this.suffixOracle(evidence.sourceUrl);
+    const candidate: DealRecord = {
+      ...filled,
+      id: newId(),
+      schema_version: CURRENT_SCHEMA_VERSION,
+      true_cost_monthly: trueCostMonthly(filled.price),
+      confidence: adjusted,
+      evidence_id: evidenceRecord.id,
+      status: review ? DealStatus.enum.in_review : DealStatus.enum.candidate,
+      verified_by: null,
+      verified_at: null,
+      affiliate_disclosure: true,
+      published_at: null,
+      source_registrable_domain: sourceRegistrableDomain,
+      // The ENTIRE record was entered by a human (no model proposed any of it), so
+      // every human-entered field — not just the reviewer-editable subset — is
+      // tagged: none of it is model-grounded. Identity/provenance/derived fields
+      // (id/evidence_id/source_url/true_cost/status/…) are pipeline-set, not human,
+      // so they're excluded.
+      human_edited: [...MANUAL_CAPTURE_HUMAN_FIELDS],
+    };
+
+    // Log-before-act (as in approve/reject/editCandidate): the candidate's id is
+    // already generated above, so write the audit row FIRST. A mid-call failure
+    // then leaves at worst an orphan audit row — never an un-audited candidate.
+    await this.recordReview(
+      candidate.id,
+      'edit',
+      approver,
+      `manual capture from task ${taskId} (${task.reason})`,
+      at,
+    );
+    await this.db.deals.insert(candidate);
+    await this.db.manualCapture.markDone(taskId, `captured by ${approver}`);
+    this.logger.info('manual-capture task completed → candidate created', {
+      taskId,
+      dealId: candidate.id,
+      approver,
+      status: candidate.status,
+    });
+    return candidate;
   }
 
   /**
@@ -170,6 +451,12 @@ export class ReviewUseCase {
     return deal;
   }
 
+  private async requireManualCaptureTask(taskId: string): Promise<ManualCaptureTask> {
+    const task = await this.db.manualCapture.getById(taskId);
+    if (task === null) throw new ManualCaptureTaskNotFoundError(taskId);
+    return task;
+  }
+
   /** Only pre-approval states can be approved/rejected — never re-decide a terminal deal. */
   private assertReviewable(deal: DealRecord): void {
     const reviewable: DealStatus[] = [DealStatus.enum.candidate, DealStatus.enum.in_review];
@@ -177,4 +464,53 @@ export class ReviewUseCase {
       throw new NotReviewableError(deal.id, deal.status);
     }
   }
+}
+
+/**
+ * The field paths a manual capture marks `human_edited` — every part of the deal a
+ * HUMAN entered (the whole LLM-proposable core + confidence), since no model
+ * proposed any of it. Excludes pipeline-set identity/provenance/derived fields
+ * (id/evidence_id/source_url/true_cost/status/…) which the human did NOT author.
+ */
+const MANUAL_CAPTURE_HUMAN_FIELDS: readonly string[] = [
+  'service',
+  'provider',
+  'headline',
+  'price',
+  'country',
+  'eligibility',
+  'validity',
+  'included_items',
+  'attributes',
+  'confidence',
+];
+
+/** Clamp `n` into [min, max] — a floor guard for paging values reaching the repo. */
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+/** Union two path lists preserving the existing order, appending new ones once. */
+function unionPaths(existing: readonly string[], added: readonly string[]): string[] {
+  const out = [...existing];
+  for (const p of added) if (!out.includes(p)) out.push(p);
+  return out;
+}
+
+/** A compact old→new summary of one changed field, for the audit reason. */
+function editSummary(field: string, before: DealRecord, after: DealRecord): string {
+  const b = (before as Record<string, unknown>)[field];
+  const a = (after as Record<string, unknown>)[field];
+  return `${field}: ${compact(b)} → ${compact(a)}`;
+}
+
+/** Render a field value compactly for an audit line (bounded length). */
+function compact(v: unknown): string {
+  const s = typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v);
+  return s.length > 120 ? `${s.slice(0, 117)}...` : s;
+}
+
+/** SHA-256 hex of UTF-8 text — matches the crawl path's content-hash convention. */
+function sha256(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
 }

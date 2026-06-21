@@ -92,6 +92,13 @@
       "when": 1781995527298,
       "tag": "0012_spooky_king_cobra",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1782033394168,
+      "tag": "0013_right_hawkeye",
+      "breakpoints": true
     }
   ]
 }

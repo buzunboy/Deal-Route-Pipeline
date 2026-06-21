@@ -14,7 +14,12 @@ import { GroundingSchema, FieldProposalSchema } from './grounding.js';
 // dedupe key + the reliability ranking join read this field instead of recomputing
 // from the URL, so a multi-label TLD (`.co.uk`) is handled correctly. Nullable/
 // additive (null ⇒ the unknown-source fallback), so v1–v3 rows parse unchanged.
-export const CURRENT_SCHEMA_VERSION = 4 as const;
+// v5 (2026-06-21): added `human_edited` — the field paths a human REVIEWER corrected
+// post-extraction (via PATCH /api/candidates/:id) or supplied by hand (manual
+// capture). It keeps the grounding trail honest: a value listed here was set/changed
+// by a person, so it must NOT be read as model-grounded even if a stale model quote
+// still sits beside it. Additive with a `[]` default, so v1–v4 rows parse unchanged.
+export const CURRENT_SCHEMA_VERSION = 5 as const;
 
 /**
  * The fields the LLM is allowed to PROPOSE for a single deal record.
@@ -108,5 +113,18 @@ export const DealRecordSchema = LlmExtractedDealSchema.extend({
    * `unknown-source` dedupe fallback / neutral reliability (an unparseable host).
    */
   source_registrable_domain: z.string().nullable().default(null),
+  /**
+   * Field paths a HUMAN set or corrected after extraction — e.g. `['price',
+   * 'eligibility.new_customer_only']`. Appended by the reviewer-edit path (PATCH)
+   * and pre-filled by manual capture (every supplied field). The trust contract:
+   * a path listed here was NOT proposed by the model, so a consumer must never
+   * present its value as model-grounded — even if an older model `grounding` quote
+   * still references that field. Surfaced in the public DTO. Defaults `[]`
+   * (additive) so pre-v5 rows parse unchanged; never LLM-proposed.
+   */
+  human_edited: z
+    .array(z.string())
+    .nullish()
+    .transform((v) => v ?? []),
 });
 export type DealRecord = z.infer<typeof DealRecordSchema>;

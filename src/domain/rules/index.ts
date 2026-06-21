@@ -5,3 +5,4 @@ export * from './seed-vocabulary.js';
 export * from './confidence.js';
 export * from './validate-record.js';
 export * from './extraction-input.js';
+export * from './candidate-patch.js';

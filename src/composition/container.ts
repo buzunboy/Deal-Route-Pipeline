@@ -188,7 +188,7 @@ export class Container {
       config.fetcher.timeoutMs,
       this.suffixOracle,
     );
-    this.review = new ReviewUseCase(this.db, this.clock, this.logger);
+    this.review = new ReviewUseCase(this.db, this.clock, this.logger, this.suffixOracle);
     this.sourceReview = new SourceReviewUseCase(this.db, this.clock, this.logger);
     this.monitor = new MonitorSourceUseCase(
       this.fetcher,

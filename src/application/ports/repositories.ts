@@ -13,6 +13,8 @@ import type {
   CostSummary,
   PublishedQuery,
   PublishedFilters,
+  CandidateQuery,
+  VocabularyEntry,
 } from '../../domain/index.js';
 
 /**
@@ -69,6 +71,16 @@ export interface DealRepository {
   listPublished(query: PublishedQuery): Promise<DealRecord[]>;
   /** Total `published` deals matching the same filters — for the feed's `total`. */
   countPublished(filters: PublishedFilters): Promise<number>;
+  /**
+   * The GATED admin review queue: candidates filtered + paginated. Unlike
+   * {@link listPublished} this is NOT locked to one status — `filters.status`
+   * narrows to a single status, and ABSENT status defaults to the reviewable pair
+   * (`candidate` + `in_review`). Order is stable: `confidence` ascending (lowest
+   * first — triage the shakiest extractions) with `id` as the deterministic
+   * tiebreaker, so `offset` pagination never skips/repeats. Both adapters MUST
+   * order identically (LSP).
+   */
+  listCandidates(query: CandidateQuery): Promise<DealRecord[]>;
 }
 
 export interface CrawlRunRepository {
@@ -111,12 +123,45 @@ export interface EvidenceRepository {
 export interface ManualCaptureRepository {
   insert(task: ManualCaptureTask): Promise<void>;
   listOpen(limit: number): Promise<ManualCaptureTask[]>;
+  /** Load one task by id (any status), or null. For completing a capture. */
+  getById(id: string): Promise<ManualCaptureTask | null>;
+  /**
+   * Mark a task `done` (a human captured the offer by hand), optionally annotating
+   * it. Idempotent on the row's existence; the caller asserts the task was `open`
+   * first so a capture isn't completed twice (one task → at most one candidate).
+   */
+  markDone(id: string, note: string | null): Promise<void>;
 }
 
 export interface FieldProposalRepository {
   /** Insert or bump the count for a proposal keyed by `suggested_key`. */
   upsertAndCount(proposal: Omit<FieldProposalRecord, 'id' | 'count' | 'status'>): Promise<void>;
   listOpen(limit: number): Promise<FieldProposalRecord[]>;
+  /** Load one proposal by its `suggested_key` (any status), or null. */
+  getByKey(suggestedKey: string): Promise<FieldProposalRecord | null>;
+  /**
+   * Resolve a proposal by marking it `promoted` (a human promoted its key into the
+   * `condition_vocabulary`). Idempotent; a no-op if the key doesn't exist. The
+   * governed-promotion loop's terminal step — the proposal stops surfacing as open.
+   */
+  markPromoted(suggestedKey: string): Promise<void>;
+}
+
+/**
+ * The controlled condition vocabulary (the keys long-tail conditions map to). A
+ * `condition_vocabulary` table has existed since the first migration; this port
+ * gives the promotion loop a typed seam to read/extend it (the
+ * `promote-field-proposal` action). Extending the vocabulary is ADDITIVE and needs
+ * no migration — that is the whole point of the governed loop (vs. a first-class
+ * column, which does). Both adapters implement it identically (LSP).
+ */
+export interface ConditionVocabularyRepository {
+  /** Load one entry by its canonical key, or null. */
+  getByKey(key: string): Promise<VocabularyEntry | null>;
+  /** Insert or replace a vocabulary entry (promotion writes here). */
+  upsert(entry: VocabularyEntry): Promise<void>;
+  /** All entries — the live vocabulary fed to the extractor's condition mapping. */
+  list(): Promise<VocabularyEntry[]>;
 }
 
 export interface ChangeRepository {
@@ -153,6 +198,7 @@ export interface Database {
   evidence: EvidenceRepository;
   manualCapture: ManualCaptureRepository;
   fieldProposals: FieldProposalRepository;
+  conditionVocabulary: ConditionVocabularyRepository;
   changes: ChangeRepository;
   reviews: ReviewRepository;
   sourceReviews: SourceReviewRepository;

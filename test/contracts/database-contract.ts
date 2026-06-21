@@ -3,13 +3,13 @@ import type { Database } from '../../src/application/ports/index.js';
 import {
   DealStatus,
   SOURCELESS_RUN_BUCKET,
+  dedupeKey,
   type DealRecord,
   type CrawlRun,
   type CrawlRunKind,
 } from '../../src/domain/index.js';
-import { makeLlmDeal } from '../factories/deal.js';
+import { makeDealRecord } from '../factories/deal.js';
 import { makeSource } from '../factories/source.js';
-import { tldtsSuffixOracle } from '../../src/adapters/suffix/tldts-suffix-oracle.js';
 import { randomUUID } from 'node:crypto';
 
 /** A valid succeeded CrawlRun with a fixed started_at + cost, for cost-summary cases. */
@@ -34,30 +34,7 @@ function makeRun(
   };
 }
 
-function dealRecord(overrides: Partial<DealRecord> = {}): DealRecord {
-  const record: DealRecord = {
-    ...makeLlmDeal(),
-    id: randomUUID(),
-    schema_version: 1,
-    true_cost_monthly: 10,
-    evidence_id: randomUUID(),
-    source_registrable_domain: null,
-    status: DealStatus.enum.candidate,
-    verified_by: null,
-    verified_at: null,
-    affiliate_disclosure: true,
-    published_at: null,
-    ...overrides,
-  };
-  // Step 6: pin source_registrable_domain from the (possibly-overridden) source_url
-  // via the real PSL — exactly as extract pins it on a persisted record — unless a
-  // test explicitly overrides it. This is what the dedupe-key recompute + the
-  // reliability join key off.
-  if (!('source_registrable_domain' in overrides)) {
-    record.source_registrable_domain = tldtsSuffixOracle(record.source_url);
-  }
-  return record;
-}
+const dealRecord = makeDealRecord;
 
 /**
  * Shared contract suite for the Database port. The in-memory adapter and the
@@ -1003,6 +980,201 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
         expect(limited).toHaveLength(1);
         expect(limited[0]!.started_at).toBe('2320-04-01T05:00:00.000Z');
       });
+    });
+
+    // ── deals.listCandidates (gated admin review queue) ──────────────────────
+    describe('deals.listCandidates', () => {
+      it('defaults to the reviewable pair (candidate + in_review) and excludes terminal states', async () => {
+        const db = await makeDb();
+        const service = `svc-cand-default-${randomUUID()}`;
+        const candidate = dealRecord({ service, status: DealStatus.enum.candidate });
+        const inReview = dealRecord({ ...sameRoute(candidate), service, status: 'in_review' });
+        const published = dealRecord({ ...sameRoute(candidate), service, status: 'published' });
+        const rejected = dealRecord({ ...sameRoute(candidate), service, status: 'rejected' });
+        const expired = dealRecord({ ...sameRoute(candidate), service, status: 'expired' });
+        for (const d of [candidate, inReview, published, rejected, expired])
+          await db.deals.insert(d);
+
+        const out = await db.deals.listCandidates({ filters: { service }, limit: 50, offset: 0 });
+        expect(new Set(out.map((d) => d.id))).toEqual(new Set([candidate.id, inReview.id]));
+      });
+
+      it('orders by confidence ASC then id ASC (lowest-confidence first) and paginates stably', async () => {
+        const db = await makeDb();
+        const service = `svc-cand-order-${randomUUID()}`;
+        const low = dealRecord({ service, status: 'candidate', confidence: 0.2 });
+        const mid = dealRecord({
+          ...sameRoute(low),
+          service,
+          status: 'candidate',
+          confidence: 0.5,
+        });
+        const high = dealRecord({
+          ...sameRoute(low),
+          service,
+          status: 'in_review',
+          confidence: 0.9,
+        });
+        for (const d of [high, low, mid]) await db.deals.insert(d);
+
+        const all = await db.deals.listCandidates({ filters: { service }, limit: 50, offset: 0 });
+        expect(all.map((d) => d.id)).toEqual([low.id, mid.id, high.id]);
+        // Stable pagination: page 1 (offset 1, limit 1) is the second-lowest.
+        const page = await db.deals.listCandidates({ filters: { service }, limit: 1, offset: 1 });
+        expect(page.map((d) => d.id)).toEqual([mid.id]);
+      });
+
+      it('filters by an explicit status (including a terminal one) and by confidenceMax (inclusive)', async () => {
+        const db = await makeDb();
+        const service = `svc-cand-filter-${randomUUID()}`;
+        const lowCand = dealRecord({ service, status: 'candidate', confidence: 0.6 });
+        const highCand = dealRecord({
+          ...sameRoute(lowCand),
+          service,
+          status: 'candidate',
+          confidence: 0.95,
+        });
+        const published = dealRecord({
+          ...sameRoute(lowCand),
+          service,
+          status: 'published',
+          confidence: 0.6,
+        });
+        for (const d of [lowCand, highCand, published]) await db.deals.insert(d);
+
+        // confidenceMax inclusive: 0.6 in, 0.95 out.
+        const triage = await db.deals.listCandidates({
+          filters: { service, confidenceMax: 0.6 },
+          limit: 50,
+          offset: 0,
+        });
+        expect(triage.map((d) => d.id)).toEqual([lowCand.id]);
+
+        // Explicit terminal status reaches published deals for audit.
+        const pub = await db.deals.listCandidates({
+          filters: { service, status: DealStatus.enum.published },
+          limit: 50,
+          offset: 0,
+        });
+        expect(pub.map((d) => d.id)).toEqual([published.id]);
+      });
+
+      it('round-trips human_edited (v5) through the candidate list', async () => {
+        const db = await makeDb();
+        const service = `svc-cand-edited-${randomUUID()}`;
+        const edited = dealRecord({
+          service,
+          status: 'candidate',
+          human_edited: ['price', 'headline'],
+        });
+        await db.deals.insert(edited);
+        const out = await db.deals.listCandidates({ filters: { service }, limit: 50, offset: 0 });
+        expect(out).toHaveLength(1);
+        expect(out[0]!.human_edited).toEqual(['price', 'headline']);
+      });
+    });
+
+    // ── deals.update round-trips human_edited + re-derives the dedupe key ─────
+    it('deals.update persists human_edited and re-derives the dedupe key when a key field changes', async () => {
+      const db = await makeDb();
+      const deal = dealRecord({
+        status: 'candidate',
+        route_type: 'bundle',
+        human_edited: [],
+      });
+      await db.deals.insert(deal);
+
+      // Edit a dedupe-key field (route_type) + tag it human-edited, like editCandidate does.
+      const edited: DealRecord = { ...deal, route_type: 'promo', human_edited: ['route_type'] };
+      await db.deals.update(edited);
+
+      const reloaded = await db.deals.getById(deal.id);
+      expect(reloaded!.route_type).toBe('promo');
+      expect(reloaded!.human_edited).toEqual(['route_type']);
+      // The new dedupe key (promo) finds it; the old (bundle) key no longer does —
+      // both adapters derive the key from the record's fields, so editing re-keys it.
+      const promoKey = dedupeKey({ ...edited }, edited.source_registrable_domain);
+      const bundleKey = dedupeKey({ ...deal }, deal.source_registrable_domain);
+      expect(promoKey).not.toBe(bundleKey);
+      expect((await db.deals.findByDedupeKey(promoKey))?.id).toBe(deal.id);
+      expect(await db.deals.findByDedupeKey(bundleKey)).toBeNull();
+    });
+
+    // ── manualCapture.getById + markDone ─────────────────────────────────────
+    it('manualCapture: getById loads any status; markDone closes an open task', async () => {
+      const db = await makeDb();
+      const id = randomUUID();
+      await db.manualCapture.insert({
+        id,
+        source_id: null,
+        source_url: 'https://blocked.example/offer',
+        reason: 'captcha',
+        created_at: '2026-06-19T00:00:00.000Z',
+        status: 'open',
+        note: null,
+      });
+      expect((await db.manualCapture.getById(id))?.status).toBe('open');
+      expect(await db.manualCapture.getById(randomUUID())).toBeNull();
+
+      await db.manualCapture.markDone(id, 'captured by hand');
+      const done = await db.manualCapture.getById(id);
+      expect(done?.status).toBe('done');
+      expect(done?.note).toBe('captured by hand');
+      // A done task no longer appears in the open queue.
+      expect((await db.manualCapture.listOpen(10)).map((t) => t.id)).not.toContain(id);
+    });
+
+    // ── fieldProposals.getByKey + markPromoted ───────────────────────────────
+    it('fieldProposals: getByKey loads by key; markPromoted resolves it out of the open queue', async () => {
+      const db = await makeDb();
+      const suggested_key = `requires_widget_${randomUUID().slice(0, 8)}`;
+      await db.fieldProposals.upsertAndCount({
+        suggested_key,
+        label: 'Widget required',
+        rationale: 'r',
+        example_quote: 'q',
+        first_seen_at: '2026-06-19T00:00:00.000Z',
+        last_seen_at: '2026-06-19T00:00:00.000Z',
+      });
+      expect((await db.fieldProposals.getByKey(suggested_key))?.status).toBe('open');
+      expect(await db.fieldProposals.getByKey('no-such-key')).toBeNull();
+
+      await db.fieldProposals.markPromoted(suggested_key);
+      expect((await db.fieldProposals.getByKey(suggested_key))?.status).toBe('promoted');
+      expect((await db.fieldProposals.listOpen(50)).map((p) => p.suggested_key)).not.toContain(
+        suggested_key,
+      );
+    });
+
+    // ── conditionVocabulary repo ─────────────────────────────────────────────
+    it('conditionVocabulary: upsert + getByKey + list (upsert is idempotent on key)', async () => {
+      const db = await makeDb();
+      const key = `requires_widget_${randomUUID().slice(0, 8)}`;
+      await db.conditionVocabulary.upsert({
+        key,
+        label: 'Widget required',
+        aliases: ['widget', 'needs_widget'],
+        version: 1,
+      });
+      const got = await db.conditionVocabulary.getByKey(key);
+      expect(got).toEqual({
+        key,
+        label: 'Widget required',
+        aliases: ['widget', 'needs_widget'],
+        version: 1,
+      });
+      expect(await db.conditionVocabulary.getByKey('absent')).toBeNull();
+      expect((await db.conditionVocabulary.list()).map((e) => e.key)).toContain(key);
+
+      // Re-upsert the same key updates in place (no duplicate, no throw).
+      await db.conditionVocabulary.upsert({
+        key,
+        label: 'Widget required (v2)',
+        aliases: [],
+        version: 2,
+      });
+      const updated = await db.conditionVocabulary.getByKey(key);
+      expect(updated).toEqual({ key, label: 'Widget required (v2)', aliases: [], version: 2 });
     });
   });
 }

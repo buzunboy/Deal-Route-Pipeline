@@ -1,4 +1,6 @@
-import type { LlmExtractedDeal } from '../../src/domain/index.js';
+import { randomUUID } from 'node:crypto';
+import { DealStatus, type DealRecord, type LlmExtractedDeal } from '../../src/domain/index.js';
+import { tldtsSuffixOracle } from '../../src/adapters/suffix/tldts-suffix-oracle.js';
 
 /**
  * Build a valid baseline LlmExtractedDeal for tests. Override any field via the
@@ -40,4 +42,33 @@ export function makeLlmDeal(overrides: Partial<LlmExtractedDeal> = {}): LlmExtra
     field_proposals: [],
     ...overrides,
   };
+}
+
+/**
+ * Build a valid full DealRecord (the persisted shape) for tests — the LLM core plus
+ * the pipeline-owned fields. `source_registrable_domain` is pinned from `source_url`
+ * via the real PSL (exactly as extract pins it) unless explicitly overridden, so the
+ * dedupe-key recompute + reliability join key off a consistent value. Shared by the
+ * DB contract suite, the review use-case tests, and the integration tier.
+ */
+export function makeDealRecord(overrides: Partial<DealRecord> = {}): DealRecord {
+  const record: DealRecord = {
+    ...makeLlmDeal(),
+    id: randomUUID(),
+    schema_version: 1,
+    true_cost_monthly: 10,
+    evidence_id: randomUUID(),
+    source_registrable_domain: null,
+    status: DealStatus.enum.candidate,
+    verified_by: null,
+    verified_at: null,
+    affiliate_disclosure: true,
+    published_at: null,
+    human_edited: [],
+    ...overrides,
+  };
+  if (!('source_registrable_domain' in overrides)) {
+    record.source_registrable_domain = tldtsSuffixOracle(record.source_url);
+  }
+  return record;
 }

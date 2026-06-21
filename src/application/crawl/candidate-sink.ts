@@ -116,6 +116,9 @@ export class CandidateSink {
       // value, never recompute. Derived from the SAME fetched URL evidence.source_url
       // pins above, so the extract-time and recompute-from-row dedupe keys agree.
       source_registrable_domain: candidate.sourceRegistrableDomain,
+      // An automatically-extracted candidate has no human-set fields (v5). The
+      // reviewer-edit (PATCH) and manual-capture paths populate this; never the LLM.
+      human_edited: [],
     };
   }
 }
