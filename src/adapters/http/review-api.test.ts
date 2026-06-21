@@ -531,3 +531,113 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     expect(complete.status).toBe(401);
   });
 });
+
+describe('ReviewApi — CORS for the browser admin panel', () => {
+  const ORIGIN = 'https://admin.dealroute.example';
+  let db: InMemoryDb;
+
+  /** Spin up an API with the given options and return its base URL. */
+  async function start(options: ConstructorParameters<typeof ReviewApi>[3]): Promise<{
+    api: ReviewApi;
+    base: string;
+  }> {
+    const review = new ReviewUseCase(
+      db,
+      new SystemClock(),
+      new ConsoleLogger('error'),
+      tldtsSuffixOracle,
+    );
+    const sourceReview = new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    const api = new ReviewApi(review, sourceReview, new ConsoleLogger('error'), options);
+    await api.listen(0);
+    // @ts-expect-error reach into the underlying server for the assigned port
+    const base = `http://localhost:${(api['server'].address() as AddressInfo).port}`;
+    return { api, base };
+  }
+
+  beforeEach(() => {
+    db = new InMemoryDb();
+  });
+
+  it('answers an OPTIONS preflight 204 with the configured origin + Authorization allowed', async () => {
+    const { api, base } = await start({ corsAllowOrigin: ORIGIN, authToken: 'secret-token' });
+    try {
+      const res = await fetch(`${base}/api/candidates/${randomUUID()}/approve`, {
+        method: 'OPTIONS',
+        headers: { origin: ORIGIN, 'access-control-request-method': 'POST' },
+      });
+      expect(res.status).toBe(204);
+      expect(res.headers.get('access-control-allow-origin')).toBe(ORIGIN);
+      // The panel must be allowed to send the bearer + the state-changing methods.
+      expect(res.headers.get('access-control-allow-headers')).toContain('Authorization');
+      expect(res.headers.get('access-control-allow-methods')).toContain('PATCH');
+      expect(res.headers.get('vary')).toContain('Origin');
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('does NOT require a bearer on the preflight (OPTIONS carries no Authorization)', async () => {
+    // A browser preflight is unauthenticated by spec; gating it would break CORS.
+    const { api, base } = await start({ corsAllowOrigin: ORIGIN, authToken: 'secret-token' });
+    try {
+      const res = await fetch(`${base}/api/candidates/${randomUUID()}/approve`, {
+        method: 'OPTIONS',
+        headers: { origin: ORIGIN },
+      });
+      expect(res.status).toBe(204);
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('echoes the CORS origin on a normal GET response', async () => {
+    const { api, base } = await start({ corsAllowOrigin: ORIGIN });
+    try {
+      const res = await fetch(`${base}/api/candidates`, { headers: { origin: ORIGIN } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBe(ORIGIN);
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('includes the CORS origin even on an error response (401), so the browser can read it', async () => {
+    // Without CORS headers on the 401 the browser surfaces an opaque network error
+    // instead of the real status — the panel could never show "unauthorized".
+    const { api, base } = await start({ corsAllowOrigin: ORIGIN, authToken: 'secret-token' });
+    try {
+      const res = await fetch(`${base}/api/candidates/${randomUUID()}/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({ approver: 'a' }),
+      });
+      expect(res.status).toBe(401);
+      expect(res.headers.get('access-control-allow-origin')).toBe(ORIGIN);
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('emits NO CORS headers when no origin is configured (same-origin default)', async () => {
+    const { api, base } = await start({});
+    try {
+      const res = await fetch(`${base}/api/candidates`, { headers: { origin: ORIGIN } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('refuses OPTIONS with 405 when no origin is configured (no preflight support)', async () => {
+    const { api, base } = await start({});
+    try {
+      const res = await fetch(`${base}/api/candidates`, { method: 'OPTIONS' });
+      expect(res.status).toBe(405);
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    } finally {
+      await api.close();
+    }
+  });
+});

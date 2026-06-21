@@ -153,6 +153,15 @@ const ConfigSchema = z.object({
     port: z.coerce.number().int().positive(),
     /** Bearer token gating approve/reject. Unset ⇒ open (bind to a trusted network). */
     authToken: z.string().min(1).optional(),
+    /**
+     * `Access-Control-Allow-Origin` for the gated admin `/api/*` router — the origin
+     * of the browser admin panel. UNSET ⇒ no CORS headers are emitted (same-origin /
+     * server-to-server only), which is the safe default. Unlike the public feed this
+     * must NOT default to `*`: `/api/*` carries the `Authorization` bearer, and a
+     * wildcard origin on a credentialed, state-changing surface would let any site
+     * drive it from a logged-in reviewer's browser. Set it to the exact panel origin.
+     */
+    adminCorsAllowOrigin: z.string().min(1).optional(),
   }),
   publicApi: z.object({
     /**
@@ -261,6 +270,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     reviewApi: {
       port: env.REVIEW_API_PORT ?? '3000',
       authToken: emptyToUndefined(env.REVIEW_API_TOKEN),
+      adminCorsAllowOrigin: emptyToUndefined(env.ADMIN_CORS_ORIGIN),
     },
     publicApi: {
       corsAllowOrigin: env.PUBLIC_CORS_ORIGIN ?? '*',

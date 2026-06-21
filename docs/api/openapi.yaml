@@ -1,0 +1,853 @@
+openapi: 3.1.0
+info:
+  title: DealRoute Pipeline API
+  version: 1.0.0
+  description: |
+    HTTP surface of the DealRoute data-pipeline service, served by the `serve` CLI
+    command on a single port (`REVIEW_API_PORT`, default 3000). Two routers share
+    the port via **total prefix dispatch**:
+
+      * **Public read feed** — `/v1/*`: unauthenticated, READ-ONLY over `published`
+        deals. Returns a curated DTO that NEVER leaks an internal field.
+      * **Gated admin API** — `/api/*`: the review/approval surface consumed by the
+        admin panel. Writes (POST/PATCH) require a Bearer token; reads are open.
+      * **Test page** — `/`: a thin built-in HTML harness over the `/api/*` endpoints.
+
+    Trust invariants (see CLAUDE.md): the LLM only proposes candidates; **nothing
+    auto-publishes** — a deal becomes `published` ONLY via `POST /api/candidates/:id/approve`
+    by a human approver. Every `:id` is a UUID.
+
+    ⚠️ SOURCE-OF-TRUTH: this file is the contract. When an endpoint, query param,
+    request body, or response shape changes, THIS spec must change in the same commit
+    (see `.claude/rules/api-and-openapi.md`). Keep `docs/api/dealroute.postman_collection.json`
+    in step.
+  license:
+    name: UNLICENSED (private)
+servers:
+  - url: http://localhost:3000
+    description: Local dev (npm run cli -- serve)
+  - url: https://api.dealroute.example
+    description: Production (placeholder — set when deployed)
+
+tags:
+  - name: Public feed
+    description: Unauthenticated read-only `/v1/*` surface (landing page / public consumers).
+  - name: Health
+    description: Liveness probes.
+  - name: Candidates
+    description: Review queue — list, edit, approve, reject, audit. (admin)
+  - name: Field proposals
+    description: LLM-proposed novel condition keys awaiting promotion. (admin)
+  - name: Manual capture
+    description: Human-driven evidence capture tasks. (admin)
+  - name: Sources
+    description: Source-promotion loop — approve/reject proposed crawl sources. (admin)
+  - name: Test page
+    description: Built-in HTML review harness.
+
+security: []
+
+paths:
+  # ───────────────────────────── PUBLIC /v1 ─────────────────────────────────
+  /v1/health:
+    get:
+      tags: [Health]
+      summary: Public feed liveness
+      operationId: getPublicHealth
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  /v1/deals:
+    get:
+      tags: [Public feed]
+      summary: List published deals (filtered, sorted, paginated)
+      operationId: listPublishedDeals
+      description: |
+        Returns only `published` deals as the curated `PublicDeal` DTO. Sort is
+        reliability-blended (the raw reliability score is never exposed): the primary
+        key decides order, ties break by source reliability then id.
+      security: []
+      parameters:
+        - name: service
+          in: query
+          description: Exact service name match (case-sensitive), e.g. `Disney+`.
+          schema: { type: string, minLength: 1 }
+        - name: country
+          in: query
+          description: ISO country (market-driven; DE for v1).
+          schema: { $ref: '#/components/schemas/Country' }
+        - name: route_type
+          in: query
+          schema: { $ref: '#/components/schemas/RouteType' }
+        - name: price_max
+          in: query
+          description: Max true monthly cost (EUR), inclusive.
+          schema: { type: number, minimum: 0 }
+        - name: sort
+          in: query
+          schema:
+            $ref: '#/components/schemas/PublishedSort'
+          description: Default `cost_asc`.
+        - name: limit
+          in: query
+          description: Page size. Default 20, hard-capped at 100.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 10000, default: 0 }
+      responses:
+        '200':
+          description: A page of published deals.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicDealPage' }
+        '400':
+          description: Unknown query param, bad enum, non-numeric or over-cap value.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /v1/deals/{id}:
+    get:
+      tags: [Public feed]
+      summary: Get one published deal
+      operationId: getPublishedDeal
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: The deal (curated DTO).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deal]
+                properties:
+                  deal: { $ref: '#/components/schemas/PublicDeal' }
+        '404':
+          description: Missing OR not published (the two are indistinguishable by design).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ───────────────────────────── ADMIN /api ─────────────────────────────────
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Admin API liveness
+      operationId: getAdminHealth
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  /api/candidates:
+    get:
+      tags: [Candidates]
+      summary: List candidates awaiting review (filtered, paginated)
+      operationId: listCandidates
+      description: |
+        Lowest-confidence first. Defaults to the reviewable pair (`candidate` +
+        `in_review`) when `status` is omitted. Read endpoint — not gated.
+      security: []
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/DealStatus' }
+        - name: service
+          in: query
+          schema: { type: string, minLength: 1 }
+        - name: confidence_max
+          in: query
+          description: Inclusive upper bound on the stored confidence (0–1).
+          schema: { type: number, minimum: 0, maximum: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 100000, default: 0 }
+      responses:
+        '200':
+          description: Candidates, each joined with its evidence bundle.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CandidateView' }
+        '400':
+          description: Invalid filter / out-of-range pagination.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/candidates/{id}:
+    patch:
+      tags: [Candidates]
+      summary: Edit a candidate's reviewer-correctable fields (before approve)
+      operationId: editCandidate
+      description: |
+        Applies an allowlisted patch via the pure `applyCandidatePatch`. Re-validates,
+        tags every changed field path into the deal's `human_edited`, keeps the model
+        grounding quotes, and re-derives `true_cost_monthly` on a price change. Status
+        stays `candidate`. Identity / provenance / status are never editable.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EditCandidateBody' }
+      responses:
+        '200': { $ref: '#/components/responses/DealEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/candidates/{id}/approve:
+    post:
+      tags: [Candidates]
+      summary: Approve a candidate → publish it
+      operationId: approveCandidate
+      description: |
+        The ONLY path that sets a deal `published`. The reviewer may set the EU-Omnibus
+        affiliate disclosure here; omitted ⇒ defaults to true (over-disclose) and flags it.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApproveCandidateBody' }
+      responses:
+        '200': { $ref: '#/components/responses/DealEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/candidates/{id}/reject:
+    post:
+      tags: [Candidates]
+      summary: Reject a candidate
+      operationId: rejectCandidate
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectBody' }
+      responses:
+        '200': { $ref: '#/components/responses/DealEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/candidates/{id}/reviews:
+    get:
+      tags: [Candidates]
+      summary: Audit history for a candidate
+      operationId: listCandidateReviews
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Immutable review/audit log (who decided what, when, why).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReviewRecord' }
+
+  /api/field-proposals:
+    get:
+      tags: [Field proposals]
+      summary: List LLM field proposals (novel condition keys)
+      operationId: listFieldProposals
+      security: []
+      responses:
+        '200':
+          description: Field proposals awaiting promotion.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FieldProposalRecord' }
+
+  /api/field-proposals/{key}/promote:
+    post:
+      tags: [Field proposals]
+      summary: Promote a field proposal into the condition vocabulary
+      operationId: promoteFieldProposal
+      description: |
+        Adds a `condition_vocabulary` row with the suggested key as an alias and marks
+        the proposal `promoted`. `target:"field"` (promote to a first-class column) is
+        not supported and returns 400.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The proposal's suggested key (URL-encoded).
+          schema: { type: string, minLength: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PromoteBody' }
+      responses:
+        '200':
+          description: The created vocabulary entry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [vocabulary_entry]
+                properties:
+                  vocabulary_entry: { $ref: '#/components/schemas/ConditionVocabularyEntry' }
+        '400':
+          description: Validation failed, or `target:"field"` (not supported).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/manual-capture-tasks:
+    get:
+      tags: [Manual capture]
+      summary: List open manual-capture tasks
+      operationId: listManualCaptureTasks
+      security: []
+      responses:
+        '200':
+          description: Manual-capture tasks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ManualCaptureTask' }
+
+  /api/manual-capture-tasks/{id}/complete:
+    post:
+      tags: [Manual capture]
+      summary: Complete a manual-capture task → mint an evidence-backed candidate
+      operationId: completeManualCaptureTask
+      description: |
+        Evidence is REQUIRED and supplied by reference (the human uploads artifacts
+        out-of-band and passes the store keys + inline terms text). Mints a `candidate`,
+        marks the whole record `human_edited`, and NEVER auto-publishes.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompleteManualBody' }
+      responses:
+        '200': { $ref: '#/components/responses/DealEnvelope' }
+        '400':
+          description: Missing approver/fields, or incomplete evidence bundle.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/sources/pending:
+    get:
+      tags: [Sources]
+      summary: List proposed sources awaiting approval
+      operationId: listPendingSources
+      security: []
+      responses:
+        '200':
+          description: Pending sources.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Source' }
+
+  /api/sources/{id}/approve:
+    post:
+      tags: [Sources]
+      summary: Approve a proposed source
+      operationId: approveSource
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApproverBody' }
+      responses:
+        '200': { $ref: '#/components/responses/SourceEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/sources/{id}/reject:
+    post:
+      tags: [Sources]
+      summary: Reject a proposed source
+      operationId: rejectSource
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectBody' }
+      responses:
+        '200': { $ref: '#/components/responses/SourceEnvelope' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/sources/{id}/reviews:
+    get:
+      tags: [Sources]
+      summary: Audit history for a source
+      operationId: listSourceReviews
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      responses:
+        '200':
+          description: Source review/audit log.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SourceReviewRecord' }
+
+  # ───────────────────────────── TEST PAGE ──────────────────────────────────
+  /:
+    get:
+      tags: [Test page]
+      summary: Built-in HTML review harness
+      operationId: getTestPage
+      security: []
+      responses:
+        '200':
+          description: The review test page (thin UI over `/api/*`).
+          content:
+            text/html:
+              schema: { type: string }
+        '404':
+          description: No static page configured.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer <REVIEW_API_TOKEN>` on every state-changing (POST/PATCH)
+        endpoint. When no token is configured server-side the API is open and MUST be
+        bound to a trusted network. Read endpoints are never gated.
+
+  parameters:
+    IdParam:
+      name: id
+      in: path
+      required: true
+      description: Resource UUID. A non-UUID currently yields 500 (see docs/KNOWN_ISSUES.md).
+      schema: { type: string, format: uuid }
+
+  responses:
+    DealEnvelope:
+      description: The affected deal.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [deal]
+            properties:
+              deal: { $ref: '#/components/schemas/DealRecord' }
+    SourceEnvelope:
+      description: The affected source.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [source]
+            properties:
+              source: { $ref: '#/components/schemas/Source' }
+    BadRequest:
+      description: Malformed JSON body or failed validation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing or wrong Bearer token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Resource is not in a state that allows this action (e.g. not reviewable).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooLarge:
+      description: Request body exceeds the 64 KiB cap.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Health:
+      type: object
+      required: [ok]
+      properties:
+        ok: { type: boolean, const: true }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    # ── Enums (mirror src/domain/deal-record/enums.ts + published-query.ts) ──
+    RouteType:
+      type: string
+      enum: [bundle, standalone, promo, regional]
+    Billing:
+      type: string
+      enum: [monthly, annual, one_time, prepaid, unknown]
+    DealStatus:
+      type: string
+      enum: [candidate, in_review, published, expired, rejected]
+    Country:
+      type: string
+      description: Market-driven (src/domain/markets/markets.ts). DE for v1.
+      enum: [DE]
+    Currency:
+      type: string
+      description: Market-driven. EUR for v1.
+      enum: [EUR]
+    PublishedSort:
+      type: string
+      enum: [cost_asc, verified_desc]
+    TrustBadge:
+      type: string
+      description: Coarse freshness band derived from verified_at (never the raw score).
+      enum: [recent, verified, stale]
+    ReviewAction:
+      type: string
+      enum: [approve, reject, edit]
+
+    # ── Public DTO (src/adapters/http/public-dto.ts) ────────────────────────
+    PublicCondition:
+      type: object
+      required: [key, label]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        value:
+          type: object
+          additionalProperties: true
+      description: source_quote is deliberately stripped from the public shape.
+    PublicDeal:
+      type: object
+      description: |
+        Allow-listed public projection. Internal/LLM-audit fields (status, confidence,
+        grounding, attributes, raw_conditions_text, evidence_id, verified_by,
+        condition source_quote) are NEVER present.
+      required:
+        [id, service, provider, headline, route_type, country, price,
+         true_cost_monthly, eligibility, validity, included_items, source_url,
+         verified_at, published_at, affiliate_disclosure, trust, human_edited,
+         evidence_screenshot_url]
+      properties:
+        id: { type: string, format: uuid }
+        service: { type: string }
+        provider: { type: string }
+        headline: { type: string }
+        route_type: { $ref: '#/components/schemas/RouteType' }
+        country: { $ref: '#/components/schemas/Country' }
+        price:
+          type: object
+          required: [amount, currency, billing]
+          properties:
+            amount: { type: number }
+            currency: { $ref: '#/components/schemas/Currency' }
+            billing: { $ref: '#/components/schemas/Billing' }
+            prepaid_months:
+              type: integer
+              description: For billing=prepaid — months the up-front amount covers.
+        true_cost_monthly: { type: number }
+        eligibility:
+          type: object
+          required: [new_customer_only, residency_kyc, plan_tier_required, min_spend, stackable, conditions]
+          properties:
+            new_customer_only: { type: [boolean, 'null'] }
+            residency_kyc: { type: [boolean, 'null'] }
+            plan_tier_required: { type: [string, 'null'] }
+            min_spend: { type: [number, 'null'] }
+            stackable: { type: [boolean, 'null'] }
+            conditions:
+              type: array
+              items: { $ref: '#/components/schemas/PublicCondition' }
+        validity:
+          type: object
+          required: [start, end, recheck_days, conditions]
+          properties:
+            start: { type: [string, 'null'] }
+            end: { type: [string, 'null'] }
+            recheck_days: { type: integer }
+            conditions:
+              type: array
+              items: { $ref: '#/components/schemas/PublicCondition' }
+        included_items:
+          type: array
+          items: { type: string }
+        source_url: { type: string, format: uri }
+        verified_at: { type: [string, 'null'], format: date-time }
+        published_at: { type: [string, 'null'], format: date-time }
+        affiliate_disclosure: { type: boolean }
+        trust: { $ref: '#/components/schemas/TrustBadge' }
+        human_edited:
+          type: array
+          description: Field paths a human set/corrected (so a consumer never shows a corrected value as model-grounded).
+          items: { type: string }
+        evidence_screenshot_url:
+          type: [string, 'null']
+          format: uri
+          description: Resolved from S3_CDN_BASE_URL; null when unset (e.g. local-fs evidence).
+    PublicDealPage:
+      type: object
+      required: [deals, total, limit, offset]
+      properties:
+        deals:
+          type: array
+          items: { $ref: '#/components/schemas/PublicDeal' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+
+    # ── Admin records ───────────────────────────────────────────────────────
+    DealRecord:
+      type: object
+      description: |
+        The full internal deal record (src/domain/deal-record). The admin API returns
+        this verbatim (unlike the curated PublicDeal). Only the trust-relevant fields
+        are enumerated here; `attributes` and conditions carry the open extension areas.
+      required: [id, schema_version, service, route_type, price, true_cost_monthly, country, status]
+      properties:
+        id: { type: string, format: uuid }
+        schema_version: { type: integer }
+        service: { type: string }
+        route_type: { $ref: '#/components/schemas/RouteType' }
+        provider: { type: [string, 'null'] }
+        headline: { type: [string, 'null'] }
+        price:
+          type: object
+          properties:
+            amount: { type: number }
+            currency: { $ref: '#/components/schemas/Currency' }
+            billing: { $ref: '#/components/schemas/Billing' }
+            prepaid_months: { type: integer }
+        true_cost_monthly: { type: number }
+        country: { $ref: '#/components/schemas/Country' }
+        status: { $ref: '#/components/schemas/DealStatus' }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        affiliate_disclosure: { type: boolean }
+        published_at: { type: [string, 'null'], format: date-time }
+        verified_by: { type: [string, 'null'] }
+        verified_at: { type: [string, 'null'], format: date-time }
+        evidence_id: { type: [string, 'null'], format: uuid }
+        human_edited:
+          type: array
+          items: { type: string }
+        source_url: { type: string, format: uri }
+      additionalProperties: true
+    Evidence:
+      type: object
+      description: Evidence bundle metadata (src/domain/evidence). Screenshot/html/terms by reference.
+      properties:
+        id: { type: string, format: uuid }
+        source_url: { type: string, format: uri }
+        screenshot_ref: { type: string }
+        html_ref: { type: string }
+        terms_ref: { type: string }
+        terms_text: { type: string }
+        captured_at: { type: string, format: date-time }
+        content_hash: { type: string }
+      additionalProperties: true
+    CandidateView:
+      type: object
+      required: [deal, evidence]
+      properties:
+        deal: { $ref: '#/components/schemas/DealRecord' }
+        evidence:
+          oneOf:
+            - { $ref: '#/components/schemas/Evidence' }
+            - { type: 'null' }
+    ReviewRecord:
+      type: object
+      required: [action, approver, decided_at]
+      properties:
+        id: { type: string }
+        deal_id: { type: string, format: uuid }
+        action: { $ref: '#/components/schemas/ReviewAction' }
+        approver: { type: string }
+        reason: { type: [string, 'null'] }
+        decided_at: { type: string, format: date-time }
+      additionalProperties: true
+    FieldProposalRecord:
+      type: object
+      description: A recurring novel condition key the LLM proposed (src/domain/proposals).
+      properties:
+        suggested_key: { type: string }
+        label: { type: string }
+        rationale: { type: string }
+        example_quote: { type: string }
+        count: { type: integer }
+        status: { type: string, enum: [pending, promoted] }
+      additionalProperties: true
+    ConditionVocabularyEntry:
+      type: object
+      properties:
+        key: { type: string }
+        label: { type: string }
+        aliases:
+          type: array
+          items: { type: string }
+      additionalProperties: true
+    ManualCaptureTask:
+      type: object
+      description: A human-capture task (src/domain/monitoring).
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+        reason: { type: string }
+        source_url: { type: [string, 'null'], format: uri }
+      additionalProperties: true
+    Source:
+      type: object
+      description: A crawl source (src/domain/entities). Only key fields enumerated.
+      properties:
+        id: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        kind: { type: string }
+        tier: { type: integer }
+        status: { type: string }
+        reliability_score: { type: number }
+        registrable_domain: { type: string }
+        resolved_url: { type: [string, 'null'], format: uri }
+      additionalProperties: true
+    SourceReviewRecord:
+      type: object
+      properties:
+        id: { type: string }
+        source_id: { type: string, format: uuid }
+        action: { type: string, enum: [approve, reject] }
+        approver: { type: string }
+        reason: { type: [string, 'null'] }
+        decided_at: { type: string, format: date-time }
+      additionalProperties: true
+
+    # ── Request bodies (mirror the zod schemas in review-api.ts) ────────────
+    ApproverBody:
+      type: object
+      required: [approver]
+      properties:
+        approver: { type: string, minLength: 1 }
+    RejectBody:
+      type: object
+      required: [approver]
+      properties:
+        approver: { type: string, minLength: 1 }
+        reason: { type: string }
+    ApproveCandidateBody:
+      type: object
+      required: [approver]
+      properties:
+        approver: { type: string, minLength: 1 }
+        affiliate_disclosure:
+          type: boolean
+          description: EU-Omnibus disclosure; omitted ⇒ defaults true (over-disclose) + flagged.
+    EditCandidateBody:
+      type: object
+      required: [approver, patch]
+      properties:
+        approver: { type: string, minLength: 1 }
+        patch:
+          type: object
+          additionalProperties: true
+          description: |
+            Allowlisted fields only (enforced by the domain `applyCandidatePatch` —
+            PATCHABLE_FIELDS). Identity/provenance/status are rejected.
+    PromoteBody:
+      type: object
+      required: [approver, canonical_key, label]
+      properties:
+        approver: { type: string, minLength: 1 }
+        canonical_key: { type: string, minLength: 1 }
+        label: { type: string, minLength: 1 }
+        target:
+          type: string
+          enum: [vocabulary, field]
+          default: vocabulary
+          description: '`field` returns 400 (not supported).'
+    CompleteManualBody:
+      type: object
+      required: [approver, fields, evidence]
+      properties:
+        approver: { type: string, minLength: 1 }
+        fields:
+          type: object
+          additionalProperties: true
+          description: The human-entered deal fields.
+        evidence:
+          type: object
+          required: [source_url, screenshot_ref, html_ref, terms_ref, terms_text]
+          properties:
+            source_url: { type: string, minLength: 1, format: uri }
+            screenshot_ref: { type: string, minLength: 1 }
+            html_ref: { type: string, minLength: 1 }
+            terms_ref: { type: string, minLength: 1 }
+            terms_text: { type: string, minLength: 1 }

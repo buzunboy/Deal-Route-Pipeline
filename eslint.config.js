@@ -66,5 +66,15 @@ export default [
       '@typescript-eslint/no-explicit-any': 'off',
     },
   },
+  {
+    // Plain-Node maintenance scripts (run via `node`, not tsx) — e.g. the Postman
+    // collection finalizer. Give them the Node globals they use; no TS parser needed.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: { process: 'readonly', console: 'readonly' },
+    },
+  },
   prettier,
 ];

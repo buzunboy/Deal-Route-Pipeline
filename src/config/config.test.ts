@@ -182,3 +182,28 @@ describe('loadConfig — robots.txt policy (best-effort-read)', () => {
     expect(loadConfig(env({ RESPECT_ROBOTS_TXT: 'false' })).crawl.respectRobotsTxt).toBe(false);
   });
 });
+
+describe('loadConfig — admin API CORS', () => {
+  it('leaves adminCorsAllowOrigin undefined by default (same-origin; no CORS headers)', () => {
+    expect(loadConfig(env()).reviewApi.adminCorsAllowOrigin).toBeUndefined();
+  });
+
+  it('treats a blank ADMIN_CORS_ORIGIN as unset', () => {
+    expect(
+      loadConfig(env({ ADMIN_CORS_ORIGIN: '   ' })).reviewApi.adminCorsAllowOrigin,
+    ).toBeUndefined();
+  });
+
+  it('reads the admin panel origin from ADMIN_CORS_ORIGIN', () => {
+    const cfg = loadConfig(env({ ADMIN_CORS_ORIGIN: 'https://admin.dealroute.example' }));
+    expect(cfg.reviewApi.adminCorsAllowOrigin).toBe('https://admin.dealroute.example');
+  });
+
+  it('defaults the public feed CORS to * and reads PUBLIC_CORS_ORIGIN', () => {
+    expect(loadConfig(env()).publicApi.corsAllowOrigin).toBe('*');
+    expect(
+      loadConfig(env({ PUBLIC_CORS_ORIGIN: 'https://dealroute.example' })).publicApi
+        .corsAllowOrigin,
+    ).toBe('https://dealroute.example');
+  });
+});

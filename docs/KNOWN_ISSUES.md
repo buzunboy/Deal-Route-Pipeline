@@ -31,6 +31,15 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### A malformed (non-UUID) `:id` on an HTTP route 500s instead of 404
+- **Severity**: low
+- **Area**: api / db
+- **Location**: `src/adapters/http/public-api.ts` (`getDeal` → `deals.getById`); `src/adapters/http/review-api.ts` (the `/api/candidates/:id/*` routes → use-cases → repo lookups); surfaces in `src/adapters/db/postgres/postgres-db.ts` where the id hits a `uuid` column.
+- **What**: `GET /v1/deals/abc` and `POST /api/candidates/abc/approve` (any non-UUID id) return **500** with the Postgres error `invalid input syntax for type uuid: "abc"` escaping to the top-level handler, instead of a clean **404**. A valid-but-nonexistent UUID correctly 404s (the typed `DealNotFoundError` → `mapErrors`), so this is purely the id-format boundary. Found 2026-06-21 during local Postgres bring-up; the in-memory DB accepts any string as a key, so no unit/integration test caught it (they all use valid UUIDs).
+- **Why deferred**: low impact — it's a malformed-input edge that returns the wrong status code (500 vs 404) and leaks a generic Postgres type message (no data). Not a trust/security issue; nothing auto-publishes. Out of scope for the local-setup + admin-CORS change that surfaced it.
+- **Fix-when**: when touching the HTTP id boundary or the DB adapter. Cleanest fix: validate `:id` as a UUID at the HTTP boundary (zod `z.string().uuid()`) and 404 on mismatch before the DB call — covers both routers in one place; add a test with a non-UUID id (and ideally make the in-memory DB reject non-UUID keys so the gap can't recur silently). Alternatively, classify the Postgres `22P02` invalid-text-representation error → 404/400 in `db-resilience`.
+- **Logged**: 2026-06-21
+
 ### Manual-capture screenshot/artifact UPLOAD channel is not built (capture is by-reference only)
 - **Severity**: medium (a capability gap, not a defect; the trust invariant still holds)
 - **Area**: api / evidence

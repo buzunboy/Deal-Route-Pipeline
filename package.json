@@ -12,8 +12,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/adapters/cli/main.ts",
-    "cli": "tsx src/adapters/cli/main.ts",
+    "dev": "tsx --env-file-if-exists=.env src/adapters/cli/main.ts",
+    "cli": "tsx --env-file-if-exists=.env src/adapters/cli/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
@@ -24,9 +24,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "npm run lint && npm run typecheck && npm run test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/adapters/db/migrate.ts",
-    "seed:import": "tsx src/adapters/cli/main.ts seed-import",
-    "dry-run-extract": "tsx src/adapters/cli/main.ts dry-run-extract",
+    "db:migrate": "tsx --env-file-if-exists=.env src/adapters/db/migrate.ts",
+    "seed:import": "tsx --env-file-if-exists=.env src/adapters/cli/main.ts seed-import",
+    "dry-run-extract": "tsx --env-file-if-exists=.env src/adapters/cli/main.ts dry-run-extract",
+    "api:lint": "redocly lint docs/api/openapi.yaml",
+    "api:postman": "openapi-to-postmanv2 -s docs/api/openapi.yaml -o docs/api/dealroute.postman_collection.json -p -O folderStrategy=Tags && node scripts/postman-finalize.mjs",
     "prepare": "husky || true"
   },
   "dependencies": {
@@ -44,6 +46,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@redocly/cli": "^2.34.0",
     "@types/node": "^22.10.5",
     "@types/pg": "^8.11.10",
     "@types/turndown": "^5.0.5",
@@ -54,6 +57,7 @@
     "eslint-config-prettier": "^9.1.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.3.0",
+    "openapi-to-postmanv2": "^6.1.0",
     "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
