@@ -26,11 +26,16 @@ Commands:
   monitor --source <id>               Re-verify one source (diff → re-queue / auto-expire)
   monitor --due                       Monitor every due source
   review list                         List candidates awaiting review (+ evidence)
+  review edit <id> <who> '<patch>'    Edit a candidate's fields (JSON patch) before approve
   review approve <id> <approver>      Approve a candidate → published
           [--no-affiliate-disclosure]   mark a non-affiliate deal (default: discloses)
   review reject <id> <approver>       Reject a candidate → archived
   review proposals                    List open field proposals
+  review promote <key> <who> <canonical_key> '<label>'
+                                      Promote a field proposal → condition vocabulary
   review manual                       List open manual-capture tasks
+  review complete-manual <task> <who> '<fields>' '<evidence>'
+                                      Complete a manual capture → candidate (no auto-publish)
   review sources                      List proposed (pending) sources awaiting approval
   review approve-source <id> <who>    Promote a proposed source → active (crawlable)
   review reject-source <id> <who>     Reject a proposed source (never crawled / re-proposed)
@@ -170,6 +175,40 @@ async function runReview(config: Parameters<typeof review>[0], rest: string[]): 
       return review(config, { action: 'proposals' });
     case 'manual':
       return review(config, { action: 'manual' });
+    case 'edit': {
+      const dealId = rest[1];
+      const approver = rest[2];
+      const patchJson = rest[3];
+      if (!dealId || !approver || !patchJson)
+        return fail("review edit requires <id> <approver> '<patch-json>'.");
+      return review(config, { action: 'edit', dealId, approver, patchJson });
+    }
+    case 'promote': {
+      const suggestedKey = rest[1];
+      const approver = rest[2];
+      const canonicalKey = rest[3];
+      const label = rest.slice(4).join(' ');
+      if (!suggestedKey || !approver || !canonicalKey || !label)
+        return fail("review promote <suggested_key> <approver> <canonical_key> '<label>'.");
+      return review(config, { action: 'promote', suggestedKey, approver, canonicalKey, label });
+    }
+    case 'complete-manual': {
+      const taskId = rest[1];
+      const approver = rest[2];
+      const fieldsJson = rest[3];
+      const evidenceJson = rest[4];
+      if (!taskId || !approver || !fieldsJson || !evidenceJson)
+        return fail(
+          "review complete-manual <task-id> <approver> '<fields-json>' '<evidence-json>'.",
+        );
+      return review(config, {
+        action: 'complete-manual',
+        taskId,
+        approver,
+        fieldsJson,
+        evidenceJson,
+      });
+    }
     case 'reject': {
       const dealId = rest[1];
       const approver = rest[2];
@@ -206,7 +245,7 @@ async function runReview(config: Parameters<typeof review>[0], rest: string[]): 
     }
     default:
       return fail(
-        'review requires: list | approve | reject | proposals | manual | sources | approve-source | reject-source',
+        'review requires: list | edit | approve | reject | proposals | promote | manual | complete-manual | sources | approve-source | reject-source',
       );
   }
 }

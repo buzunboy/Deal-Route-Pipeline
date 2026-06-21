@@ -52,6 +52,13 @@ export interface PublicDeal {
   /** Coarse freshness band (never the raw reliability/confidence score). */
   trust: TrustBadge;
   /**
+   * Field paths a HUMAN reviewer set/corrected post-extraction (v5), e.g.
+   * `['price']`. Exposed so a consumer NEVER presents a human-corrected value as
+   * model-grounded: a path here was not proposed by the model. Safe to expose — it
+   * is field-path strings only, never raw page data or any internal score.
+   */
+  human_edited: string[];
+  /**
    * Resolved public CDN URL of the evidence screenshot, or null when no CDN base
    * URL is configured (e.g. local-fs evidence). Derived purely from `evidence_id`
    * — never the raw `evidence_id` itself.
@@ -181,6 +188,7 @@ export function toPublicDeal(deal: DealRecord, opts: PublicDealOptions): PublicD
     published_at: deal.published_at,
     affiliate_disclosure: deal.affiliate_disclosure,
     trust: trustBadge(deal.verified_at, opts.now),
+    human_edited: deal.human_edited,
     evidence_screenshot_url: resolveScreenshotUrl(deal.evidence_id, opts.cdnBaseUrl),
   };
 }

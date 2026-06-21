@@ -22,6 +22,9 @@ import {
   type SubscriptionCatalogEntry,
   type PublishedQuery,
   type PublishedFilters,
+  type CandidateQuery,
+  type VocabularyEntry,
+  REVIEWABLE_STATUSES,
 } from '../../../domain/index.js';
 import type {
   Database,
@@ -31,6 +34,7 @@ import type {
   EvidenceRepository,
   ManualCaptureRepository,
   FieldProposalRepository,
+  ConditionVocabularyRepository,
   ChangeRepository,
   ReviewRepository,
   SourceReviewRepository,
@@ -55,6 +59,7 @@ export class InMemoryDb implements Database {
   crawlRuns: CrawlRunRepository = new InMemoryCrawlRunRepo();
   manualCapture: ManualCaptureRepository = new InMemoryManualCaptureRepo();
   fieldProposals: FieldProposalRepository = new InMemoryFieldProposalRepo();
+  conditionVocabulary: ConditionVocabularyRepository = new InMemoryConditionVocabularyRepo();
   changes: ChangeRepository = new InMemoryChangeRepo();
   reviews: ReviewRepository = new InMemoryReviewRepo();
   sourceReviews: SourceReviewRepository = new InMemorySourceReviewRepo();
@@ -142,6 +147,26 @@ class InMemoryDealRepo implements DealRepository {
       if (d.status === 'published' && matchesPublishedFilters(d, filters)) n++;
     }
     return n;
+  }
+  async listCandidates(query: CandidateQuery): Promise<DealRecord[]> {
+    // Mirror the Postgres adapter exactly (LSP): status set (single filter status,
+    // or the default reviewable pair) → optional service/confidenceMax → order by
+    // confidence ASC then id ASC → page. confidenceMax is inclusive.
+    const statuses = new Set<DealStatus>(
+      query.filters.status ? [query.filters.status] : REVIEWABLE_STATUSES,
+    );
+    return [...this.store.values()]
+      .filter((d) => {
+        if (!statuses.has(d.status)) return false;
+        if (query.filters.service !== undefined && d.service !== query.filters.service)
+          return false;
+        if (query.filters.confidenceMax !== undefined && d.confidence > query.filters.confidenceMax)
+          return false;
+        return true;
+      })
+      .sort((a, b) => a.confidence - b.confidence || a.id.localeCompare(b.id))
+      .slice(query.offset, query.offset + query.limit)
+      .map((d) => ({ ...d }));
   }
   async findByDedupeKey(key: string): Promise<DealRecord | null> {
     // Return the highest-confidence non-rejected match, matching PgDealRepo's
@@ -319,6 +344,14 @@ class InMemoryManualCaptureRepo implements ManualCaptureRepository {
       .slice(0, limit)
       .map((t) => ({ ...t }));
   }
+  async getById(id: string): Promise<ManualCaptureTask | null> {
+    const t = this.tasks.find((x) => x.id === id);
+    return t ? { ...t } : null;
+  }
+  async markDone(id: string, note: string | null): Promise<void> {
+    const i = this.tasks.findIndex((x) => x.id === id);
+    if (i !== -1) this.tasks[i] = { ...this.tasks[i]!, status: 'done', note };
+  }
 }
 
 class InMemoryFieldProposalRepo implements FieldProposalRepository {
@@ -340,6 +373,28 @@ class InMemoryFieldProposalRepo implements FieldProposalRepository {
       .filter((p) => p.status === 'open')
       .slice(0, limit)
       .map((p) => ({ ...p }));
+  }
+  async getByKey(suggestedKey: string): Promise<FieldProposalRecord | null> {
+    const p = this.store.get(suggestedKey);
+    return p ? { ...p } : null;
+  }
+  async markPromoted(suggestedKey: string): Promise<void> {
+    const p = this.store.get(suggestedKey);
+    if (p) this.store.set(suggestedKey, { ...p, status: 'promoted' });
+  }
+}
+
+class InMemoryConditionVocabularyRepo implements ConditionVocabularyRepository {
+  private store = new Map<string, VocabularyEntry>();
+  async getByKey(key: string): Promise<VocabularyEntry | null> {
+    const e = this.store.get(key);
+    return e ? { ...e } : null;
+  }
+  async upsert(entry: VocabularyEntry): Promise<void> {
+    this.store.set(entry.key, { ...entry });
+  }
+  async list(): Promise<VocabularyEntry[]> {
+    return [...this.store.values()].map((e) => ({ ...e }));
   }
 }
 

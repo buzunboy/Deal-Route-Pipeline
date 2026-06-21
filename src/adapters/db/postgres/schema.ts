@@ -116,6 +116,11 @@ export const deals = pgTable(
     // reads it; nullable (no backfill — a pre-Step-6 deal folds to neutral/unknown
     // until its source is re-crawled, by design).
     sourceRegistrableDomain: text('source_registrable_domain'),
+    // Field paths a human set/corrected post-extraction (v5): reviewer PATCH edits +
+    // manual-capture fields. NOT NULL DEFAULT '[]' so pre-v5 rows + the automated
+    // crawl path round-trip without it. The trust contract: a path here was not
+    // model-proposed (see DealRecordSchema.human_edited).
+    humanEdited: jsonb('human_edited').notNull().default([]),
   },
   (t) => ({
     statusIdx: index('deals_status_idx').on(t.status),

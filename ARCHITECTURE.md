@@ -139,12 +139,29 @@ own unknown paths), so a public path can never fall through to an admin/state-ch
 ### Review API trust boundary (`/api/*` — gated admin)
 
 The HTTP review API (`ReviewApi`) is the durable contract for the future admin panel. State-changing
-endpoints (approve/reject) are gated by `REVIEW_API_TOKEN` (bearer) when set; the recorded
-`approver` is still client-supplied, so the **production admin panel terminates real
-authentication and supplies the authenticated principal**. With no token set the API is open and
-**must** be bound to a trusted network (localhost/private). Read endpoints are never gated.
+endpoints (`PATCH /api/candidates/:id` edit, approve, reject, `POST /api/field-proposals/:key/promote`,
+`POST /api/manual-capture-tasks/:id/complete`, source approve/reject) are gated by `REVIEW_API_TOKEN`
+(bearer) when set; the recorded `approver` is still client-supplied, so the **production admin panel
+terminates real authentication and supplies the authenticated principal**. With no token set the API is
+open and **must** be bound to a trusted network (localhost/private). Read endpoints are never gated.
 Domain errors map to precise client status codes (404/409/400/413); internal errors return a
 generic 500 with no leaked detail; request bodies are size-bounded.
+
+Trust rules specific to the write endpoints:
+- **Edit (`PATCH`) can only correct, never rewrite.** The pure `applyCandidatePatch` enforces an
+  allowlist (`PATCHABLE_FIELDS` — price/true-cost/country/route-type/headline/eligibility/validity/
+  included-items/attributes); identity, evidence link, `source_url`, `status` and `schema_version` are
+  not editable. Every changed field is added to the deal's `human_edited` so a corrected value is
+  never presented as model-grounded (the model `grounding` quotes are kept-but-flagged, an owner
+  decision); the record is re-validated; the edit is in the `reviews` audit log (`action:'edit'`).
+  Status stays `candidate` — only the audited approve path publishes.
+- **Promote is additive and governed.** It writes a `condition_vocabulary` row (the suggested key
+  becomes an alias of the canonical key) and resolves the matching `field_proposals` row. Promotion to
+  a first-class *column* (`target:"field"`) needs a migration and is rejected `400` in v1.
+- **Manual capture is evidence-gated and never auto-publishes.** Evidence is required (a missing
+  reference / terms text → `400`); the source URL is pinned from the evidence (never the supplied
+  fields); the human-entered record is marked entirely `human_edited`, runs the SAME sanity/grounding
+  validation as an extraction (a failure → `in_review`), and lands as a `candidate` for normal review.
 
 ### Public read surface (`/v1/*` — unauthenticated, read-only)
 
@@ -229,8 +246,10 @@ currency-sanity trust rule reads it (`isCurrencyAllowedForCountry`; a wrong curr
 - **A new model / vendor** → add an adapter implementing `Llm` (or `Fetcher`, etc.) + its
   contract test, then select it via env in the composition root. No business-logic change.
 - **A new condition** → add a `condition_vocabulary` entry (data). Recurring unknown
-  conditions surface as `field_proposals` and are promoted via the `promote-field-proposal`
-  skill, bumping `schema_version`. Never a new column without promotion.
+  conditions surface as `field_proposals` and are promoted either via the `promote-field-proposal`
+  skill or its API/CLI action (`POST /api/field-proposals/:key/promote` / `review promote`), which
+  writes the vocabulary row (suggested key → alias) and resolves the proposal. Promotion to a
+  first-class *column* still needs a migration. Never a new column without promotion.
 
 ## Data model (Postgres, `src/adapters/db/postgres/schema.ts`)
 

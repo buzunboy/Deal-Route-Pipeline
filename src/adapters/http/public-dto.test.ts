@@ -74,6 +74,7 @@ function fullyPopulatedDeal(overrides: Partial<DealRecord> = {}): DealRecord {
     status: DealStatus.enum.published,
     verified_by: 'reviewer-LEAK-CANARY',
     verified_at: '2026-06-19T00:00:00.000Z',
+    human_edited: [],
     ...overrides,
   };
 }
@@ -150,6 +151,7 @@ describe('toPublicDeal — the no-leak trust contract', () => {
         'eligibility',
         'evidence_screenshot_url',
         'headline',
+        'human_edited',
         'id',
         'included_items',
         'price',
@@ -174,6 +176,12 @@ describe('toPublicDeal — the no-leak trust contract', () => {
     const dto = toPublicDeal(deal, { now: new Date('2026-06-20T00:00:00.000Z') });
     expect(dto.affiliate_disclosure).toBe(true);
     expect(dto.published_at).toBe('2026-06-19T12:00:00.000Z');
+  });
+
+  it('surfaces human_edited (v5) so a consumer never shows a corrected value as model-grounded', () => {
+    const deal = fullyPopulatedDeal({ human_edited: ['price', 'headline'] });
+    const dto = toPublicDeal(deal, { now: new Date('2026-06-20T00:00:00.000Z') });
+    expect(dto.human_edited).toEqual(['price', 'headline']);
   });
 
   it('projects conditions to { key, label, value }, drops source_quote, strips reserved value keys', () => {

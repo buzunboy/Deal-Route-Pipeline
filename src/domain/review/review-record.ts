@@ -8,8 +8,13 @@ import { z } from 'zod';
  * decided what, when, and why — a trust requirement (the product's value is
  * trust, and publication is gated on human review). Rows are never updated or
  * deleted; a re-decision appends a new row.
+ *
+ * `edit` records a reviewer correction of a candidate's extracted fields (PATCH);
+ * the corrected paths + an old→new summary travel in `reason` so the audit log
+ * alone shows what a human changed before approval. An `edit` never changes the
+ * deal's lifecycle status (it stays a candidate); only `approve`/`reject` do.
  */
-export const ReviewAction = z.enum(['approve', 'reject']);
+export const ReviewAction = z.enum(['approve', 'reject', 'edit']);
 export type ReviewAction = z.infer<typeof ReviewAction>;
 
 export const ReviewRecordSchema = z.object({

@@ -10,6 +10,7 @@ import type {
   EvidenceRepository,
   ManualCaptureRepository,
   FieldProposalRepository,
+  ConditionVocabularyRepository,
   ChangeRepository,
   ReviewRepository,
   SourceReviewRepository,
@@ -27,6 +28,7 @@ import {
   buildReliabilityIndex,
   rankPublished,
   PUBLISHED_FETCH_CAP,
+  REVIEWABLE_STATUSES,
 } from '../../../domain/index.js';
 import type {
   Source,
@@ -43,6 +45,8 @@ import type {
   SubscriptionCatalogEntry,
   PublishedQuery,
   PublishedFilters,
+  CandidateQuery,
+  VocabularyEntry,
 } from '../../../domain/index.js';
 import type { Logger } from '../../../application/ports/index.js';
 import * as schema from './schema.js';
@@ -99,6 +103,7 @@ export class PostgresDb implements Database {
   readonly evidence: EvidenceRepository;
   readonly manualCapture: ManualCaptureRepository;
   readonly fieldProposals: FieldProposalRepository;
+  readonly conditionVocabulary: ConditionVocabularyRepository;
   readonly changes: ChangeRepository;
   readonly reviews: ReviewRepository;
   readonly sourceReviews: SourceReviewRepository;
@@ -118,6 +123,7 @@ export class PostgresDb implements Database {
     this.evidence = new PgEvidenceRepo(db, retrier);
     this.manualCapture = new PgManualCaptureRepo(db, retrier);
     this.fieldProposals = new PgFieldProposalRepo(db, retrier);
+    this.conditionVocabulary = new PgConditionVocabularyRepo(db, retrier);
     this.changes = new PgChangeRepo(db, retrier);
     this.reviews = new PgReviewRepo(db, retrier);
     this.sourceReviews = new PgSourceReviewRepo(db, retrier);
@@ -368,6 +374,27 @@ class PgDealRepo extends PgRepo implements DealRepository {
     );
     return rows[0]?.n ?? 0;
   }
+  async listCandidates(query: CandidateQuery): Promise<DealRecord[]> {
+    // status set (single filter status, or the default reviewable pair) + optional
+    // service/confidenceMax, ordered confidence ASC then id ASC, then the page.
+    // Mirrors the in-memory adapter step-for-step (LSP). confidenceMax is inclusive.
+    const statuses = query.filters.status ? [query.filters.status] : [...REVIEWABLE_STATUSES];
+    const predicates: SQL[] = [inArray(schema.deals.status, statuses)];
+    if (query.filters.service !== undefined)
+      predicates.push(eq(schema.deals.service, query.filters.service));
+    if (query.filters.confidenceMax !== undefined)
+      predicates.push(lte(schema.deals.confidence, query.filters.confidenceMax));
+    const rows = await this.run('deals.listCandidates', () =>
+      this.db
+        .select()
+        .from(schema.deals)
+        .where(and(...predicates))
+        .orderBy(asc(schema.deals.confidence), asc(schema.deals.id))
+        .limit(query.limit)
+        .offset(query.offset),
+    );
+    return rows.map(rowToDeal);
+  }
 }
 
 /**
@@ -555,15 +582,21 @@ class PgManualCaptureRepo extends PgRepo implements ManualCaptureRepository {
         .where(eq(schema.manualCaptureTasks.status, 'open'))
         .limit(limit),
     );
-    return rows.map((r) => ({
-      id: r.id,
-      source_id: r.sourceId,
-      source_url: r.sourceUrl,
-      reason: r.reason as ManualCaptureTask['reason'],
-      created_at: isoTimestamp(r.createdAt),
-      status: r.status as ManualCaptureTask['status'],
-      note: r.note,
-    }));
+    return rows.map(rowToManualCaptureTask);
+  }
+  async getById(id: string): Promise<ManualCaptureTask | null> {
+    const rows = await this.run('manualCapture.getById', () =>
+      this.db.select().from(schema.manualCaptureTasks).where(eq(schema.manualCaptureTasks.id, id)),
+    );
+    return rows[0] ? rowToManualCaptureTask(rows[0]) : null;
+  }
+  async markDone(id: string, note: string | null): Promise<void> {
+    await this.run('manualCapture.markDone', () =>
+      this.db
+        .update(schema.manualCaptureTasks)
+        .set({ status: 'done', note })
+        .where(eq(schema.manualCaptureTasks.id, id)),
+    );
   }
 }
 
@@ -605,17 +638,60 @@ class PgFieldProposalRepo extends PgRepo implements FieldProposalRepository {
         .orderBy(desc(schema.fieldProposals.count))
         .limit(limit),
     );
-    return rows.map((r) => ({
-      id: r.id,
-      suggested_key: r.suggestedKey,
-      label: r.label,
-      rationale: r.rationale,
-      example_quote: r.exampleQuote,
-      count: r.count,
-      status: r.status as FieldProposalRecord['status'],
-      first_seen_at: isoTimestamp(r.firstSeenAt),
-      last_seen_at: isoTimestamp(r.lastSeenAt),
-    }));
+    return rows.map(rowToFieldProposal);
+  }
+  async getByKey(suggestedKey: string): Promise<FieldProposalRecord | null> {
+    const rows = await this.run('fieldProposals.getByKey', () =>
+      this.db
+        .select()
+        .from(schema.fieldProposals)
+        .where(eq(schema.fieldProposals.suggestedKey, suggestedKey)),
+    );
+    return rows[0] ? rowToFieldProposal(rows[0]) : null;
+  }
+  async markPromoted(suggestedKey: string): Promise<void> {
+    await this.run('fieldProposals.markPromoted', () =>
+      this.db
+        .update(schema.fieldProposals)
+        .set({ status: 'promoted' })
+        .where(eq(schema.fieldProposals.suggestedKey, suggestedKey)),
+    );
+  }
+}
+
+class PgConditionVocabularyRepo extends PgRepo implements ConditionVocabularyRepository {
+  async getByKey(key: string): Promise<VocabularyEntry | null> {
+    const rows = await this.run('conditionVocabulary.getByKey', () =>
+      this.db
+        .select()
+        .from(schema.conditionVocabulary)
+        .where(eq(schema.conditionVocabulary.key, key)),
+    );
+    return rows[0] ? rowToVocabularyEntry(rows[0]) : null;
+  }
+  async upsert(entry: VocabularyEntry): Promise<void> {
+    // Idempotent: re-promoting the same key updates label/aliases/version rather
+    // than erroring (the promotion action is safe to retry).
+    await this.run('conditionVocabulary.upsert', () =>
+      this.db
+        .insert(schema.conditionVocabulary)
+        .values({
+          key: entry.key,
+          label: entry.label,
+          aliases: entry.aliases,
+          version: entry.version,
+        })
+        .onConflictDoUpdate({
+          target: schema.conditionVocabulary.key,
+          set: { label: entry.label, aliases: entry.aliases, version: entry.version },
+        }),
+    );
+  }
+  async list(): Promise<VocabularyEntry[]> {
+    const rows = await this.run('conditionVocabulary.list', () =>
+      this.db.select().from(schema.conditionVocabulary),
+    );
+    return rows.map(rowToVocabularyEntry);
   }
 }
 
@@ -782,6 +858,43 @@ function toManualCaptureRow(t: ManualCaptureTask): typeof schema.manualCaptureTa
     createdAt: t.created_at,
     status: t.status,
     note: t.note,
+  };
+}
+
+function rowToManualCaptureTask(
+  r: typeof schema.manualCaptureTasks.$inferSelect,
+): ManualCaptureTask {
+  return {
+    id: r.id,
+    source_id: r.sourceId,
+    source_url: r.sourceUrl,
+    reason: r.reason as ManualCaptureTask['reason'],
+    created_at: isoTimestamp(r.createdAt),
+    status: r.status as ManualCaptureTask['status'],
+    note: r.note,
+  };
+}
+
+function rowToFieldProposal(r: typeof schema.fieldProposals.$inferSelect): FieldProposalRecord {
+  return {
+    id: r.id,
+    suggested_key: r.suggestedKey,
+    label: r.label,
+    rationale: r.rationale,
+    example_quote: r.exampleQuote,
+    count: r.count,
+    status: r.status as FieldProposalRecord['status'],
+    first_seen_at: isoTimestamp(r.firstSeenAt),
+    last_seen_at: isoTimestamp(r.lastSeenAt),
+  };
+}
+
+function rowToVocabularyEntry(r: typeof schema.conditionVocabulary.$inferSelect): VocabularyEntry {
+  return {
+    key: r.key,
+    label: r.label,
+    aliases: r.aliases as string[],
+    version: r.version,
   };
 }
 

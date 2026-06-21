@@ -9,6 +9,17 @@ import {
   MissingApproverError,
   SourceNotFoundError,
   SourceNotReviewableError,
+  InvalidPatchError,
+  FieldProposalNotFoundError,
+  PromotionTargetNotSupportedError,
+  ManualCaptureTaskNotFoundError,
+  ManualCaptureTaskNotOpenError,
+  EvidenceIncompleteError,
+  CandidateFiltersSchema,
+  CANDIDATES_DEFAULT_LIMIT,
+  CANDIDATES_MAX_LIMIT,
+  CANDIDATES_MAX_OFFSET,
+  type CandidateFilters,
 } from '../../domain/index.js';
 
 /** Max accepted request-body size. Approve/reject bodies are a few hundred bytes. */
@@ -34,17 +45,23 @@ export interface ReviewApiOptions {
  * Read endpoints are GET; state changes are POST with a JSON body. Nothing here
  * publishes automatically — `approve` requires an approver identity.
  *
- *   GET  /api/health
- *   GET  /api/candidates                 → [{ deal, evidence }]
- *   POST /api/candidates/:id/approve      { approver, affiliate_disclosure? } → { deal }
- *   POST /api/candidates/:id/reject       { approver, reason? }   → { deal }
- *   GET  /api/candidates/:id/reviews      → [ReviewRecord]   (audit history)
- *   GET  /api/field-proposals            → [FieldProposalRecord]
- *   GET  /api/manual-capture-tasks       → [ManualCaptureTask]
- *   GET  /api/sources/pending            → [Source]   (proposed sources)
- *   POST /api/sources/:id/approve         { approver }            → { source }
- *   POST /api/sources/:id/reject          { approver, reason? }   → { source }
- *   GET  /api/sources/:id/reviews        → [SourceReviewRecord]  (audit history)
+ *   GET   /api/health
+ *   GET   /api/candidates                 → [{ deal, evidence }]
+ *           ?status=&service=&confidence_max=&limit=&offset=  (filters + pagination)
+ *   PATCH /api/candidates/:id             { approver, patch }     → { deal }  (reviewer edit)
+ *   POST  /api/candidates/:id/approve     { approver, affiliate_disclosure? } → { deal }
+ *   POST  /api/candidates/:id/reject      { approver, reason? }   → { deal }
+ *   GET   /api/candidates/:id/reviews     → [ReviewRecord]   (audit history)
+ *   GET   /api/field-proposals            → [FieldProposalRecord]
+ *   POST  /api/field-proposals/:key/promote
+ *           { approver, canonical_key, label, target } → { vocabulary_entry }
+ *   GET   /api/manual-capture-tasks       → [ManualCaptureTask]
+ *   POST  /api/manual-capture-tasks/:id/complete
+ *           { approver, fields, evidence } → { deal }  (creates a candidate; never publishes)
+ *   GET   /api/sources/pending            → [Source]   (proposed sources)
+ *   POST  /api/sources/:id/approve        { approver }            → { source }
+ *   POST  /api/sources/:id/reject         { approver, reason? }   → { source }
+ *   GET   /api/sources/:id/reviews        → [SourceReviewRecord]  (audit history)
  */
 export class ReviewApi {
   private server: Server | null = null;
@@ -95,7 +112,9 @@ export class ReviewApi {
     if (method === 'GET' && path === '/api/health') return sendJson(res, 200, { ok: true });
 
     if (method === 'GET' && path === '/api/candidates') {
-      return sendJson(res, 200, await this.review.listCandidates());
+      const parsed = parseCandidateQuery(url.searchParams);
+      if (!parsed.ok) return sendError(res, 400, parsed.error);
+      return sendJson(res, 200, await this.review.listCandidates(parsed.value));
     }
     if (method === 'GET' && path === '/api/field-proposals') {
       return sendJson(res, 200, await this.review.listFieldProposals());
@@ -104,9 +123,75 @@ export class ReviewApi {
       return sendJson(res, 200, await this.review.listManualCaptureTasks());
     }
 
+    const promote = path.match(/^\/api\/field-proposals\/([^/]+)\/promote$/);
+    if (method === 'POST' && promote) {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = PromoteBody.safeParse(body);
+      if (!parsed.success)
+        return sendError(res, 400, 'approver, canonical_key and label are required');
+      return this.mapErrors(res, async () => {
+        const entry = await this.review.promoteFieldProposal({
+          approver: parsed.data.approver,
+          suggestedKey: decodeURIComponent(promote[1]!),
+          canonicalKey: parsed.data.canonical_key,
+          label: parsed.data.label,
+          target: parsed.data.target,
+        });
+        sendJson(res, 200, { vocabulary_entry: entry });
+      });
+    }
+
+    const completeManual = path.match(/^\/api\/manual-capture-tasks\/([^/]+)\/complete$/);
+    if (method === 'POST' && completeManual) {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = CompleteManualBody.safeParse(body);
+      if (!parsed.success) return sendError(res, 400, 'approver, fields and evidence are required');
+      return this.mapErrors(res, async () => {
+        const deal = await this.review.completeManualCapture(
+          decodeURIComponent(completeManual[1]!),
+          parsed.data.approver,
+          parsed.data.fields,
+          {
+            sourceUrl: parsed.data.evidence.source_url,
+            screenshotRef: parsed.data.evidence.screenshot_ref,
+            htmlRef: parsed.data.evidence.html_ref,
+            termsRef: parsed.data.evidence.terms_ref,
+            termsText: parsed.data.evidence.terms_text,
+          },
+        );
+        sendJson(res, 200, { deal });
+      });
+    }
+
     const reviews = path.match(/^\/api\/candidates\/([^/]+)\/reviews$/);
     if (method === 'GET' && reviews) {
       return sendJson(res, 200, await this.review.listReviews(decodeURIComponent(reviews[1]!)));
+    }
+
+    // Edit a candidate's reviewer-correctable fields before approve. PATCH on the
+    // candidate resource itself (no /edit suffix) — the verb carries the intent.
+    const editCandidate = path.match(/^\/api\/candidates\/([^/]+)$/);
+    if (method === 'PATCH' && editCandidate) {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = EditCandidateBody.safeParse(body);
+      if (!parsed.success) return sendError(res, 400, 'approver and patch are required');
+      return this.mapErrors(res, async () => {
+        const deal = await this.review.editCandidate(
+          decodeURIComponent(editCandidate[1]!),
+          parsed.data.approver,
+          parsed.data.patch,
+        );
+        sendJson(res, 200, { deal });
+      });
     }
 
     const approve = path.match(/^\/api\/candidates\/([^/]+)\/approve$/);
@@ -225,6 +310,20 @@ export class ReviewApi {
         return sendError(res, 409, `source is not awaiting approval (status: ${err.status})`);
       }
       if (err instanceof MissingApproverError) return sendError(res, 400, 'approver is required');
+      if (err instanceof InvalidPatchError) return sendError(res, 400, err.message);
+      if (err instanceof EvidenceIncompleteError) return sendError(res, 400, err.message);
+      if (err instanceof PromotionTargetNotSupportedError) {
+        return sendError(res, 400, err.message);
+      }
+      if (err instanceof FieldProposalNotFoundError) {
+        return sendError(res, 404, 'field proposal not found');
+      }
+      if (err instanceof ManualCaptureTaskNotFoundError) {
+        return sendError(res, 404, 'manual-capture task not found');
+      }
+      if (err instanceof ManualCaptureTaskNotOpenError) {
+        return sendError(res, 409, `manual-capture task is not open (status: ${err.status})`);
+      }
       throw err;
     }
   }
@@ -243,6 +342,35 @@ const ApproveCandidateBody = z.object({
   affiliate_disclosure: z.boolean().optional(),
 });
 const RejectBody = z.object({ approver: z.string().min(1), reason: z.string().optional() });
+
+/**
+ * PATCH candidate edit. `patch` is an opaque object — the deeper allowlist +
+ * sub-schema validation happens in the pure domain rule (applyCandidatePatch),
+ * which the use-case calls, so the HTTP boundary only checks the envelope.
+ */
+const EditCandidateBody = z.object({
+  approver: z.string().min(1),
+  patch: z.record(z.unknown()),
+});
+/** Promote a field proposal into the condition vocabulary. */
+const PromoteBody = z.object({
+  approver: z.string().min(1),
+  canonical_key: z.string().min(1),
+  label: z.string().min(1),
+  target: z.enum(['vocabulary', 'field']).default('vocabulary'),
+});
+/** Complete a manual-capture task: human deal fields + referenced evidence. */
+const CompleteManualBody = z.object({
+  approver: z.string().min(1),
+  fields: z.record(z.unknown()),
+  evidence: z.object({
+    source_url: z.string().min(1),
+    screenshot_ref: z.string().min(1),
+    html_ref: z.string().min(1),
+    terms_ref: z.string().min(1),
+    terms_text: z.string().min(1),
+  }),
+});
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const json = JSON.stringify(body);
@@ -301,4 +429,45 @@ function safeEqual(a: string, b: string): boolean {
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/**
+ * Parse the GET /api/candidates query string into bounded review-queue options.
+ * Mirrors the public-feed query parsing: filters validated via the domain schema,
+ * limit/offset parsed as ints and bounded to the domain caps (an over-cap offset is
+ * a 400, never a silent clamp). Absent params ⇒ defaults (reviewable pair, page 0).
+ */
+function parseCandidateQuery(
+  params: URLSearchParams,
+): ParseResult<{ filters: CandidateFilters; limit: number; offset: number }> {
+  const raw: Record<string, unknown> = {};
+  if (params.has('status')) raw.status = params.get('status');
+  if (params.has('service')) raw.service = params.get('service');
+  if (params.has('confidence_max')) raw.confidenceMax = Number(params.get('confidence_max'));
+  const filters = CandidateFiltersSchema.safeParse(raw);
+  if (!filters.success) {
+    return {
+      ok: false,
+      error: `invalid filter: ${filters.error.issues[0]?.message ?? 'bad query'}`,
+    };
+  }
+
+  const limit = parseIntParam(params.get('limit'), CANDIDATES_DEFAULT_LIMIT);
+  if (limit === null || limit < 1 || limit > CANDIDATES_MAX_LIMIT) {
+    return { ok: false, error: `limit must be 1..${CANDIDATES_MAX_LIMIT}` };
+  }
+  const offset = parseIntParam(params.get('offset'), 0);
+  if (offset === null || offset < 0 || offset > CANDIDATES_MAX_OFFSET) {
+    return { ok: false, error: `offset must be 0..${CANDIDATES_MAX_OFFSET}` };
+  }
+  return { ok: true, value: { filters: filters.data, limit, offset } };
+}
+
+/** Parse an integer query param; null when present-but-not-an-integer (caller 400s). */
+function parseIntParam(raw: string | null, fallback: number): number | null {
+  if (raw === null || raw === '') return fallback;
+  if (!/^-?\d+$/.test(raw)) return null;
+  return Number.parseInt(raw, 10);
 }

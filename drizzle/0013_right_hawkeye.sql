@@ -1,0 +1,1 @@
+ALTER TABLE "deals" ADD COLUMN "human_edited" jsonb DEFAULT '[]'::jsonb NOT NULL;
