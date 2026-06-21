@@ -63,7 +63,8 @@ aws s3api put-public-access-block --bucket "$BUCKET" \
   BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 echo "  enforced."
 
-# ── 3. IAM policy (least privilege: Put/Get/HeadObject on this bucket only) ─────
+# ── 3. IAM policy (least privilege: PutObject + GetObject on this bucket only;
+#       HeadObject needs no separate action — it's authorized by s3:GetObject) ─────
 say "IAM policy: $POLICY_NAME"
 POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}"
 if aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
@@ -71,7 +72,7 @@ if aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
 else
   aws iam create-policy --policy-name "$POLICY_NAME" \
     --policy-document "file://$POLICY_FILE" \
-    --description "DealRoute evidence bucket object read/write (Put/Get/HeadObject)" >/dev/null
+    --description "DealRoute evidence bucket object read/write (PutObject + GetObject)" >/dev/null
   echo "  created ($POLICY_ARN)."
 fi
 

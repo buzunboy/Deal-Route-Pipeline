@@ -97,8 +97,10 @@ aws s3api put-public-access-block --bucket dealroute-evidence-prod \
 ```
 
 ### 2.2 Create an IAM policy scoped to JUST this bucket
-The adapter uses exactly three actions: `PutObject`, `GetObject`, `HeadObject`.
-Console → **IAM → Policies → Create policy → JSON**, paste:
+The adapter writes objects and reads them back — including a `HeadObject` (metadata)
+call to check a bundle exists. NOTE: there is **no `s3:HeadObject` IAM action** — the
+HeadObject API is authorized by `s3:GetObject` (HEAD is a metadata-only GET). So the
+policy needs exactly two actions. Console → **IAM → Policies → Create policy → JSON**, paste:
 ```json
 {
   "Version": "2012-10-17",
@@ -106,7 +108,7 @@ Console → **IAM → Policies → Create policy → JSON**, paste:
     {
       "Sid": "DealRouteEvidenceObjectRW",
       "Effect": "Allow",
-      "Action": ["s3:PutObject", "s3:GetObject", "s3:HeadObject"],
+      "Action": ["s3:PutObject", "s3:GetObject"],
       "Resource": "arn:aws:s3:::dealroute-evidence-prod/*"
     }
   ]
