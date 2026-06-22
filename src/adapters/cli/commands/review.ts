@@ -55,8 +55,14 @@ export async function review(config: Config, args: ReviewArgs): Promise<void> {
         break;
       }
       case 'approve': {
+        // Mirror the HTTP approve: when `--[no-]affiliate-disclosure` is omitted, fall
+        // back to the pipeline-owned default from settings (ACR-10) so the CLI and the
+        // panel apply the same default. An explicit flag always wins; the default still
+        // resolves to true (over-disclose) unless an admin set it false.
+        const affiliateDisclosure =
+          args.affiliateDisclosure ?? (await container.settings.defaultAffiliateDisclosure());
         const updated = await container.review.approve(args.dealId, args.approver, {
-          affiliateDisclosure: args.affiliateDisclosure,
+          affiliateDisclosure,
         });
         console.log(
           `Approved → published: ${updated.id} (${updated.service})  affiliate_disclosure=${updated.affiliate_disclosure}`,

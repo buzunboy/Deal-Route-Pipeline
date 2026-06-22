@@ -43,6 +43,13 @@ primary_region = "fra"           # Frankfurt — near the eu-central-1 evidence 
   # the panel/landing origins are known. ADMIN must be the EXACT panel origin (not *).
   # ADMIN_CORS_ORIGIN  = "https://admin.dealroute.example"
   # PUBLIC_CORS_ORIGIN = "https://dealroute.example"
+  # DEPLOYMENT_ID: an opaque per-release identifier (the settings store's queued
+  # `daily_budget_queued` only takes effect on the NEXT deploy, then self-clears, by
+  # comparing this). MUST change every release for that self-clear to work — set it to
+  # the immutable image tag when you pin `image` above (e.g. DEPLOYMENT_ID = "sha-abc1234"),
+  # or wire it from the CI release in the deploy workflow. Unset ⇒ defaults to `local-dev`
+  # (never changes), so a queued budget would persist across restarts.
+  # DEPLOYMENT_ID = "sha-xxxxxxx"
 
 [http_service]
   # Bind this service to the named `app` process (the `serve` command). With named

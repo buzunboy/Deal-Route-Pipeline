@@ -7,7 +7,9 @@ import {
   TeamUseCase,
   AlertsUseCase,
   MetricsUseCase,
+  SettingsUseCase,
 } from '../../application/index.js';
+import { loadConfig } from '../../config/index.js';
 import { DealStatus, type DealRecord } from '../../domain/index.js';
 import { makeSource } from '../../../test/factories/source.js';
 import { InMemoryDb } from '../db/in-memory/in-memory-db.js';
@@ -61,9 +63,24 @@ describe('ReviewApi (HTTP integration)', () => {
     const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const alerts = new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const metrics = new MetricsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    api = new ReviewApi(review, sourceReview, team, alerts, metrics, new ConsoleLogger('error'), {
-      staticPageHtml: '<html>page</html>',
-    });
+    const settings = new SettingsUseCase(
+      db,
+      loadConfig({}),
+      new SystemClock(),
+      new ConsoleLogger('error'),
+    );
+    api = new ReviewApi(
+      review,
+      sourceReview,
+      team,
+      alerts,
+      metrics,
+      settings,
+      new ConsoleLogger('error'),
+      {
+        staticPageHtml: '<html>page</html>',
+      },
+    );
     await api.listen(0);
     // @ts-expect-error reach into the underlying server for the assigned port
     const port = (api['server'].address() as AddressInfo).port;
@@ -246,6 +263,69 @@ describe('ReviewApi (HTTP integration)', () => {
       'warning',
       'danger',
     ]);
+  });
+
+  it('GET /api/settings + PATCH a writable setting; read-only key → 409 (ACR-10 Settings)', async () => {
+    const res = await fetch(`${base}/api/settings`);
+    expect(res.status).toBe(200);
+    const view = (await res.json()) as {
+      groups: { key: string; rows: { key: string; read_only: boolean }[] }[];
+    };
+    const rows = view.groups.flatMap((g) => g.rows);
+    expect(rows.find((r) => r.key === 'affiliate_disclosure')!.read_only).toBe(false);
+    expect(rows.find((r) => r.key === 'evidence_store')!.read_only).toBe(true);
+
+    // PATCH a writable toggle.
+    const ok = await fetch(`${base}/api/settings/affiliate_disclosure`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'alice', value: false }),
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ key: 'affiliate_disclosure', updated: true });
+
+    // PATCH a read-only key → 409.
+    const ro = await fetch(`${base}/api/settings/evidence_store`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'alice', value: 's3' }),
+    });
+    expect(ro.status).toBe(409);
+
+    // PATCH a wholly-unknown key → 409 (same not-writable path).
+    const unknown = await fetch(`${base}/api/settings/nonsense`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'alice', value: 'x' }),
+    });
+    expect(unknown.status).toBe(409);
+
+    // An invalid value for a writable key → 400.
+    const bad = await fetch(`${base}/api/settings/daily_budget_queued`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'alice', value: 'not-a-number' }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('an affiliate_disclosure=false setting becomes the approve default when omitted (ACR-10)', async () => {
+    // Admin turns the default OFF.
+    await fetch(`${base}/api/settings/affiliate_disclosure`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'alice', value: false }),
+    });
+    // Approve WITHOUT specifying disclosure → picks up the false default.
+    const deal = await seedCandidate();
+    const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'bob' }),
+    });
+    expect(res.status).toBe(200);
+    const stored = (await db.deals.getById(deal.id))!;
+    expect(stored.affiliate_disclosure).toBe(false);
   });
 
   it('POST approve publishes the deal (with approver)', async () => {
@@ -632,6 +712,7 @@ describe('ReviewApi (HTTP integration)', () => {
       new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error')),
       new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error')),
       new MetricsUseCase(db, new SystemClock(), new ConsoleLogger('error')),
+      new SettingsUseCase(db, loadConfig({}), new SystemClock(), new ConsoleLogger('error')),
       new ConsoleLogger('error'),
       { evidenceCdnBaseUrl: 'https://cdn.dealroute.example' },
     );
@@ -860,9 +941,24 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const alerts = new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const metrics = new MetricsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    api = new ReviewApi(review, sourceReview, team, alerts, metrics, new ConsoleLogger('error'), {
-      authToken: 'secret-token',
-    });
+    const settings = new SettingsUseCase(
+      db,
+      loadConfig({}),
+      new SystemClock(),
+      new ConsoleLogger('error'),
+    );
+    api = new ReviewApi(
+      review,
+      sourceReview,
+      team,
+      alerts,
+      metrics,
+      settings,
+      new ConsoleLogger('error'),
+      {
+        authToken: 'secret-token',
+      },
+    );
     await api.listen(0);
     // @ts-expect-error reach into the underlying server for the assigned port
     base = `http://localhost:${(api['server'].address() as AddressInfo).port}`;
@@ -978,10 +1074,20 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     expect(ack.status).toBe(401);
     expect((await db.alerts.getById(id))!.status).toBe('open'); // unchanged
 
+    // Settings PATCH — unauth MUST 401 and write no override.
+    const setting = await fetch(`${base}/api/settings/affiliate_disclosure`, {
+      method: 'PATCH',
+      headers: json,
+      body: JSON.stringify({ approver: 'a', value: false }),
+    });
+    expect(setting.status).toBe(401);
+    expect(await db.settings.get('affiliate_disclosure')).toBeNull(); // no override written
+
     // Read endpoints stay open even when gated.
     expect((await fetch(`${base}/api/sources`)).status).toBe(200);
     expect((await fetch(`${base}/api/team`)).status).toBe(200);
     expect((await fetch(`${base}/api/alerts`)).status).toBe(200);
+    expect((await fetch(`${base}/api/settings`)).status).toBe(200);
   });
 });
 
@@ -1004,12 +1110,19 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
     const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const alerts = new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const metrics = new MetricsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    const settings = new SettingsUseCase(
+      db,
+      loadConfig({}),
+      new SystemClock(),
+      new ConsoleLogger('error'),
+    );
     const api = new ReviewApi(
       review,
       sourceReview,
       team,
       alerts,
       metrics,
+      settings,
       new ConsoleLogger('error'),
       options,
     );

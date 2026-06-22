@@ -17,6 +17,7 @@ import type {
   SubscriptionCatalogRepository,
   TeamRepository,
   AlertRepository,
+  SettingsRepository,
 } from '../../../application/ports/index.js';
 import {
   ChangeSchema,
@@ -26,6 +27,7 @@ import {
   SourceReviewRecordSchema,
   TeamMemberSchema,
   AlertRecordSchema,
+  SettingOverrideSchema,
   SubscriptionCatalogEntrySchema,
   CostSummarySchema,
   eurFromMicros,
@@ -54,6 +56,7 @@ import type {
   TeamMember,
   AlertRecord,
   AlertStatus,
+  SettingOverride,
   SubscriptionCatalogEntry,
   PublishedQuery,
   PublishedFilters,
@@ -124,6 +127,7 @@ export class PostgresDb implements Database {
   readonly catalog: SubscriptionCatalogRepository;
   readonly team: TeamRepository;
   readonly alerts: AlertRepository;
+  readonly settings: SettingsRepository;
 
   private constructor(
     private readonly pool: pg.Pool,
@@ -146,6 +150,7 @@ export class PostgresDb implements Database {
     this.catalog = new PgCatalogRepo(db, retrier);
     this.team = new PgTeamRepo(db, retrier);
     this.alerts = new PgAlertRepo(db, retrier);
+    this.settings = new PgSettingsRepo(db, retrier);
   }
 
   static connect(
@@ -1159,6 +1164,51 @@ class PgCatalogRepo extends PgRepo implements SubscriptionCatalogRepository {
       country: r.country as SubscriptionCatalogEntry['country'],
     }));
   }
+}
+
+class PgSettingsRepo extends PgRepo implements SettingsRepository {
+  async get(key: string): Promise<SettingOverride | null> {
+    const rows = await this.run('settings.get', () =>
+      this.db.select().from(schema.settings).where(eq(schema.settings.key, key)).limit(1),
+    );
+    return rows[0] ? rowToSetting(rows[0]) : null;
+  }
+  async list(): Promise<SettingOverride[]> {
+    const rows = await this.run('settings.list', () => this.db.select().from(schema.settings));
+    return rows.map(rowToSetting);
+  }
+  async upsert(o: SettingOverride): Promise<void> {
+    const v = SettingOverrideSchema.parse(o); // validate at the boundary
+    const row = {
+      key: v.key,
+      value: v.value,
+      deploymentId: v.deployment_id,
+      updatedAt: v.updated_at,
+      updatedBy: v.updated_by,
+    };
+    await this.run('settings.upsert', () =>
+      this.db
+        .insert(schema.settings)
+        .values(row)
+        .onConflictDoUpdate({ target: schema.settings.key, set: row }),
+    );
+  }
+  async delete(key: string): Promise<void> {
+    await this.run('settings.delete', () =>
+      this.db.delete(schema.settings).where(eq(schema.settings.key, key)),
+    );
+  }
+}
+
+/** Re-validate a settings row at the boundary; normalise updated_at to ISO-Z. */
+function rowToSetting(r: typeof schema.settings.$inferSelect): SettingOverride {
+  return SettingOverrideSchema.parse({
+    key: r.key,
+    value: r.value,
+    deployment_id: r.deploymentId,
+    updated_at: isoTimestamp(r.updatedAt),
+    updated_by: r.updatedBy,
+  });
 }
 
 // ── row mappers (small, table-local) ─────────────────────────────────────────

@@ -52,6 +52,8 @@ tags:
     description: Persisted alerts — list, acknowledge, resolve (source reliability / budget). (admin)
   - name: Metrics
     description: Dashboard rollups — today's throughput, queue freshness, KPIs/cost/confidence. (admin)
+  - name: Settings
+    description: Operational settings — read the knobs; PATCH the writable ones (env mirrors are read-only). (admin)
   - name: Test page
     description: Built-in HTML review harness.
 
@@ -962,6 +964,68 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DashboardMetrics' }
 
+  # ───────────────────────────── SETTINGS ───────────────────────────────────
+  /api/settings:
+    get:
+      tags: [Settings]
+      summary: Read the operational settings (ACR-10 Settings)
+      operationId: getSettings
+      description: |
+        The grouped settings view: panel-editable knobs PLUS read-only env/derived
+        mirrors (each row carries `read_only`). A writable knob shows its stored override
+        if set, else the live config value. Read endpoint — not gated.
+      security: []
+      responses:
+        '200':
+          description: The grouped settings view.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettingsView' }
+
+  /api/settings/{key}:
+    patch:
+      tags: [Settings]
+      summary: Update one writable setting (ACR-10 Settings)
+      operationId: updateSetting
+      description: |
+        Set a writable knob's override (`affiliate_disclosure`, `daily_budget_queued`).
+        `affiliate_disclosure` takes effect immediately; `daily_budget_queued` is stamped
+        with the current deployment and applies on the NEXT deploy, then self-clears (the
+        in-effect `daily_budget` is read-only). A read-only or unknown key is a 409; an
+        invalid value is a 400.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateSettingBody' }
+      responses:
+        '200':
+          description: The update result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key, updated]
+                properties:
+                  key: { type: string }
+                  updated: { type: boolean }
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: The key is read-only or unknown (not writable via the API).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
   # ───────────────────────────── TEST PAGE ──────────────────────────────────
   /:
     get:
@@ -1444,6 +1508,70 @@ components:
         confidence_distribution:
           type: array
           items: { $ref: '#/components/schemas/ConfidenceBand' }
+      additionalProperties: false
+    SettingRow:
+      type: object
+      description: |
+        One settings row (ACR-10 Settings). A discriminated union on `control`: a
+        `toggle` carries `enabled` (boolean), a `value` carries `value` (string). Every
+        row carries `read_only` — true for env/derived mirrors the panel must render as
+        view-only (a PATCH on them is a 409); false for the panel-editable knobs.
+      required: [key, label, control, read_only]
+      oneOf:
+        - type: object
+          required: [key, label, control, enabled, read_only]
+          properties:
+            key: { type: string }
+            label: { type: string }
+            hint: { type: string }
+            control: { type: string, enum: [toggle] }
+            enabled: { type: boolean }
+            read_only: { type: boolean }
+          additionalProperties: false
+        - type: object
+          required: [key, label, control, value, read_only]
+          properties:
+            key: { type: string }
+            label: { type: string }
+            hint: { type: string }
+            control: { type: string, enum: [value] }
+            value: { type: string }
+            read_only: { type: boolean }
+          additionalProperties: false
+    SettingsGroup:
+      type: object
+      description: A labelled group of settings rows (e.g. Pipeline / Review defaults / Markets).
+      required: [key, label, rows]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/SettingRow' }
+      additionalProperties: false
+    SettingsView:
+      type: object
+      description: The grouped Settings screen view (ACR-10 Settings).
+      required: [groups]
+      properties:
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/SettingsGroup' }
+      additionalProperties: false
+    UpdateSettingBody:
+      type: object
+      description: |
+        PATCH body for one writable setting (ACR-10 Settings). `value` is loosely typed
+        (a toggle sends a boolean, a value chip a string/number); the pipeline's per-key
+        rule validates + normalises it. A read-only / unknown key is a 409.
+      required: [approver, value]
+      properties:
+        approver: { type: string, minLength: 1 }
+        value:
+          oneOf:
+            - { type: string }
+            - { type: number }
+            - { type: boolean }
       additionalProperties: false
     SourceRegistryEntry:
       type: object

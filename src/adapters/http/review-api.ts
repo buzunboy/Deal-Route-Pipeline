@@ -7,6 +7,7 @@ import {
   type TeamUseCase,
   type AlertsUseCase,
   type MetricsUseCase,
+  type SettingsUseCase,
   ALERTS_DEFAULT_LIMIT,
   ALERTS_MAX_LIMIT,
 } from '../../application/index.js';
@@ -25,6 +26,7 @@ import {
   ManualCaptureTaskNotFoundError,
   ManualCaptureTaskNotOpenError,
   EvidenceIncompleteError,
+  SettingNotWritableError,
   CandidateFiltersSchema,
   CANDIDATES_DEFAULT_LIMIT,
   CANDIDATES_MAX_LIMIT,
@@ -112,6 +114,8 @@ export interface ReviewApiOptions {
  *   GET   /api/metrics/throughput         → ThroughputSummary   (today's reviewer throughput, ACR-6)
  *           ?period=today
  *   GET   /api/metrics                    → DashboardMetrics    (KPIs/cost/confidence, ACR-10)
+ *   GET   /api/settings                   → SettingsView   (grouped knobs, ACR-10 Settings)
+ *   PATCH /api/settings/:key              { approver, value } → { key, updated }  (writable only; 409 otherwise)
  */
 export class ReviewApi {
   private server: Server | null = null;
@@ -126,6 +130,7 @@ export class ReviewApi {
     private readonly team: TeamUseCase,
     private readonly alerts: AlertsUseCase,
     private readonly metrics: MetricsUseCase,
+    private readonly settings: SettingsUseCase,
     private readonly logger: Logger,
     options: ReviewApiOptions = {},
   ) {
@@ -241,6 +246,10 @@ export class ReviewApi {
     if (method === 'GET' && path === '/api/metrics') {
       return sendJson(res, 200, await this.metrics.dashboardMetrics());
     }
+    // Settings (ACR-10 Settings): grouped read of the panel-editable + read-only knobs.
+    if (method === 'GET' && path === '/api/settings') {
+      return sendJson(res, 200, await this.settings.getSettings());
+    }
     if (method === 'GET' && path === '/api/manual-capture-tasks') {
       return sendJson(res, 200, await this.review.listManualCaptureTasks());
     }
@@ -351,14 +360,17 @@ export class ReviewApi {
       const parsed = ApproveCandidateBody.safeParse(body);
       if (!parsed.success) return sendError(res, 400, 'approver is required');
       return this.mapErrors(res, async () => {
-        // The reviewer may set the EU-Omnibus affiliate disclosure at approve-time;
-        // omitted ⇒ the use-case defaults it to true (over-disclose) + flags it.
+        // The reviewer may set the EU-Omnibus affiliate disclosure at approve-time.
+        // When OMITTED, fall back to the pipeline-owned default from settings (ACR-10;
+        // an admin may set it false). The default still resolves true unless overridden,
+        // preserving the safe over-disclose posture. Passed explicitly so the override
+        // takes effect; the reviewer-set value (when present) always wins.
+        const affiliateDisclosure =
+          parsed.data.affiliate_disclosure ?? (await this.settings.defaultAffiliateDisclosure());
         const deal = await this.review.approve(
           decodeURIComponent(approve[1]!),
           parsed.data.approver,
-          {
-            affiliateDisclosure: parsed.data.affiliate_disclosure,
-          },
+          { affiliateDisclosure },
         );
         sendJson(res, 200, { deal });
       });
@@ -441,6 +453,25 @@ export class ReviewApi {
       return this.mapErrors(res, async () => {
         const member = await this.team.updateProfile(parsed.data.approver, parsed.data.name);
         sendJson(res, 200, { updated: true, name: member.name });
+      });
+    }
+
+    // Update one writable setting (ACR-10 Settings). A read-only / unknown key is a 409.
+    const updateSetting = path.match(/^\/api\/settings\/([^/]+)$/);
+    if (method === 'PATCH' && updateSetting) {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = UpdateSettingBody.safeParse(body);
+      if (!parsed.success) return sendError(res, 400, 'approver and value are required');
+      return this.mapErrors(res, async () => {
+        const result = await this.settings.updateSetting(
+          decodeURIComponent(updateSetting[1]!),
+          parsed.data.approver,
+          parsed.data.value,
+        );
+        sendJson(res, 200, result);
       });
     }
 
@@ -587,6 +618,7 @@ export class ReviewApi {
       if (err instanceof ManualCaptureTaskNotOpenError) {
         return sendError(res, 409, `manual-capture task is not open (status: ${err.status})`);
       }
+      if (err instanceof SettingNotWritableError) return sendError(res, 409, err.message);
       throw err;
     }
   }
@@ -616,6 +648,15 @@ const InviteMemberBody = z.object({
 const UpdateProfileBody = z.object({
   approver: z.string().min(1),
   name: z.string().min(1),
+});
+/**
+ * Update one writable setting (ACR-10 Settings). `value` is loosely typed at the HTTP
+ * boundary (a toggle sends a boolean, a value chip a string/number); the pure
+ * `validateSettingValue` domain rule is the real, per-key validator.
+ */
+const UpdateSettingBody = z.object({
+  approver: z.string().min(1),
+  value: z.union([z.string(), z.number(), z.boolean()]),
 });
 /** Register a new operational source from the admin "+ Add source" flow (ACR-10). */
 const CreateSourceBody = z.object({

@@ -30,6 +30,7 @@ export async function discoverBroad(config: Config, args: DiscoverBroadArgs): Pr
   }
 
   const container = new Container(config, { usePersistence: !args.dryRun });
+  await container.init(); // adopt a queued daily budget on deploy (ACR-10 Settings)
   try {
     const maxSteps = args.maxSteps ?? config.agent.maxSteps;
     const maxQueries = args.maxQueries ?? config.discovery.maxQueries;

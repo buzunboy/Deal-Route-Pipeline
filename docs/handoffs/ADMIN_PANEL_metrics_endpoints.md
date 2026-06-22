@@ -1,7 +1,12 @@
-# Admin-Panel handoff — the metrics endpoints are LIVE (ACR-6 / ACR-9 / ACR-10 Metrics)
+# Admin-Panel handoff — metrics + settings endpoints are LIVE (ACR-6 / ACR-9 / ACR-10 Metrics + Settings)
 
 **For:** the Admin-Panel project (separate repo). **From:** the DealRoute pipeline.
 **Date:** 2026-06-22.
+
+> **Scope:** §1–§3 cover the metrics endpoints (already shipped). §4 covers the **new
+> Settings endpoints** (`GET /api/settings` + `PATCH /api/settings/:key`) — read §4
+> carefully: several panel placeholder settings are **read-only** or **have no pipeline
+> backing**, so the Settings screen needs view-only handling + some rows dropped.
 
 The pipeline now serves the three metrics/dashboard endpoints the panel had placeholders
 for. Wire each screen's typed client to the real endpoint (`wire-endpoint`) and drop the
@@ -156,6 +161,106 @@ ACR-6 / ACR-9 endpoints above (more focused than re-deriving from `/api/metrics`
 
 ---
 
+## 4. ACR-10 Settings — `GET /api/settings` + `PATCH /api/settings/:key` ⚠️ SHAPE CHANGE + view-only rows
+
+The pipeline now serves the Settings screen. **Key principle:** the pipeline's operational
+config is **env-driven** (the source of truth for a running process). Only a small set of
+knobs are durable, panel-editable **overrides**; the rest are **read-only mirrors** the
+panel must render view-only. Some of your placeholder settings have **no pipeline backing
+at all** and should be dropped or moved.
+
+### 4a. The response shape (one additive field: `read_only`)
+
+```
+GET /api/settings → {
+  "groups": [
+    { "key": "pipeline", "label": "Pipeline", "rows": [
+      { "key": "daily_budget", "label": "...", "control": "value", "value": "€10.00", "read_only": true },
+      ...
+    ]}
+  ]
+}
+```
+
+Every row now carries **`read_only: boolean`** (added to both the `toggle` and `value`
+variants of your `settingRowSchema`). Migration:
+
+```ts
+// lib/api/schemas.ts — add read_only to BOTH members of settingRowSchema:
+export const settingRowSchema = z.discriminatedUnion("control", [
+  z.object({ key: z.string(), label: z.string(), hint: z.string().optional(),
+             control: z.literal("toggle"), enabled: z.boolean(), read_only: z.boolean() }),
+  z.object({ key: z.string(), label: z.string(), hint: z.string().optional(),
+             control: z.literal("value"),  value: z.string(),   read_only: z.boolean() }),
+]);
+```
+
+Render a `read_only: true` row as a **view-only** component (no toggle interactivity / no
+edit affordance) — a `PATCH` on it returns **409**.
+
+### 4b. PATCH a writable setting
+
+```
+PATCH /api/settings/:key   { "approver": "<email>", "value": <bool|string|number> }
+   → 200 { "key": "...", "updated": true }
+   → 409 if the key is read-only or unknown
+   → 400 if the value is invalid for that key
+```
+
+Bearer-gated (like the other writes). `value` is loose (a toggle sends a boolean, a value
+chip a string/number); the pipeline validates per key.
+
+### 4c. Exactly which keys exist, and what to do with each
+
+The pipeline serves THIS catalog (the keys the panel must use — your placeholder keys
+`auto_crawl`, `min_confidence`, `currency_eur`, `slack_alerts` are **not** served; see 4e):
+
+| key                    | group          | control | writable? | notes |
+|------------------------|----------------|---------|-----------|-------|
+| `daily_budget`         | Pipeline       | value   | **read-only** | The €-budget currently IN EFFECT. View-only. |
+| `daily_budget_queued`  | Pipeline       | value   | **writable**  | A new budget that applies on the NEXT deploy (see 4d). |
+| `evidence_store`       | Pipeline       | value   | **read-only** | `local`/`s3`; a deploy concern. View-only. |
+| `respect_robots`       | Pipeline       | toggle  | **read-only** | Legal/policy posture; env-set. View-only. |
+| `affiliate_disclosure` | Review defaults| toggle  | **writable**  | The default applied at approve when a reviewer omits it. Takes effect immediately. |
+| `active_markets`       | Markets        | value   | **read-only** | Derived from the MARKETS registry (currently `DE`). View-only. |
+| `alerting`             | Integrations   | value   | **read-only** | `noop`/`webhook`; env-set. View-only. |
+
+Only **`daily_budget_queued`** and **`affiliate_disclosure`** accept a PATCH.
+
+### 4d. The two budget fields — render BOTH
+
+There are intentionally two budget rows:
+
+- **`daily_budget`** (read-only) — the budget the running pipeline is enforcing NOW.
+- **`daily_budget_queued`** (writable) — a budget that the pipeline **cannot adopt
+  mid-life** (the budget guard is built once at boot). A PATCH stores it stamped with the
+  current deployment; it takes effect on the **next deployment**, then **self-clears**
+  (reads back empty). GET always reports the in-effect value via `daily_budget`.
+
+**Panel UI:** when `daily_budget_queued` has a value, show something like _"Currently
+€10.00/day. A change to €25.00/day will take effect on the next deployment."_ When it's
+empty, just show the in-effect `daily_budget`. A small inline description on the queued
+field ("applies on next deploy") is recommended.
+
+### 4e. Settings the panel shows that the pipeline does NOT serve (drop or rework)
+
+Your `lib/settings/sample.ts` has placeholder rows with **no pipeline backing**. They are
+**not** in the served catalog, so a wired Settings screen won't receive them:
+
+- **`auto_crawl`** ("Automatic crawling" toggle) — there is no runtime crawl on/off flag;
+  scheduling is external cron (a deploy concern). **Drop it**, or move it to docs.
+- **`min_confidence`** ("Minimum confidence to auto-queue") — **no such gate exists** in
+  the pipeline (nothing auto-queues by confidence today). **Drop it** until/unless the gate
+  is built (the pipeline owner deferred building it).
+- **`currency_eur` / "Show EUR equivalents"** — a display concern that belongs to the panel
+  or landing page, not the pipeline. **Keep it panel-local** (don't expect it from the API).
+- **`slack_alerts`** — superseded by the read-only **`alerting`** row (which reflects the
+  real `ALERT_KIND`). If you want a Slack-specific toggle, it's env/deploy config, not a
+  writable pipeline setting. **Replace your `slack_alerts` placeholder with the read-only
+  `alerting` row.**
+
+---
+
 ## Checklist
 
 - [ ] ACR-9 freshness → `wire-endpoint` `/api/candidates/freshness`, map bucket→label/tone, drop sample.
@@ -164,3 +269,9 @@ ACR-6 / ACR-9 endpoints above (more focused than re-deriving from `/api/metrics`
       then `wire-endpoint` `/api/metrics/throughput?period=today`.** (The breaking one.)
 - [ ] Re-point the Dashboard's throughput + freshness placeholder cards at the live reads.
 - [ ] Optionally relabel the "Avg / review" copy to "time-to-decision" (see the note in §1).
+- [ ] **ACR-10 Settings → add `read_only` to `settingRowSchema`; render read-only rows view-only.**
+- [ ] **Wire `/api/settings` GET + `/api/settings/:key` PATCH; drop `lib/settings/sample.ts`.**
+- [ ] **Use the served catalog keys (4c); drop `auto_crawl` / `min_confidence`, keep `currency_eur`
+      panel-local, replace `slack_alerts` with the read-only `alerting` row.**
+- [ ] **Render BOTH `daily_budget` (in effect) + `daily_budget_queued` (next deploy) with the
+      "applies on next deployment" messaging (4d).**

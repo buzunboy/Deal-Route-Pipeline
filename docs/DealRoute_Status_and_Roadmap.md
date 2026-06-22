@@ -145,9 +145,14 @@ monitor, review, public API). **All hold.**
   (pending-queue age buckets), **ACR-10 Metrics** `GET /api/metrics` (KPIs + 14-day cost-per-day +
   confidence distribution) — all pure projections over `crawl_runs` + `reviews` + `deals` on the
   `MetricsUseCase` (new ports `DealRepository.pendingQueueSignals`, `ReviewRepository.
-  listDecisionLatenciesSince`; NO schema/migration). Each with both-adapter parity + contract + unit +
-  integration + OpenAPI/Postman. ACR-6 emits the ACR-doc `avg_review_seconds` number; the panel-side
-  zod migration is handed off in `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`.
+  listDecisionLatenciesSince`; NO schema/migration). Then **ACR-10 Settings** — `GET /api/settings` +
+  `PATCH /api/settings/:key`: env-config stays the source of truth, a `settings` table (migration
+  **0018**) holds only OVERRIDES for the writable knobs (`affiliate_disclosure`, `daily_budget_queued`);
+  read-only env/derived mirrors return `read_only:true` + a PATCH 409s; new `DEPLOYMENT_ID` config drives
+  the queued-budget next-deploy/self-clear semantics. **This completes the ACR endpoint set.** Each with
+  both-adapter parity + contract + unit + integration + OpenAPI/Postman. ACR-6 emits the ACR-doc
+  `avg_review_seconds` number + Settings adds a `read_only` row flag; the panel-side migrations are
+  handed off in `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`.
 - **Cloud deploy — the API is LIVE** (head `5d2c781`, 2026-06-22). Always-on `serve` deployed to
   Fly.io (`https://dealroute-api.fly.dev`, region `fra`): managed Postgres attached, S3 evidence
   bucket + scoped IAM, GHCR image, `REVIEW_API_TOKEN`/`S3_*` Fly secrets; health/CORS/auth verified.
@@ -174,12 +179,16 @@ No roadmap step remains. The concrete forward work, highest-value first:
    layer** — **ACR-6** `GET /api/metrics/throughput` (today's approve/reject/edit + `avg_review_seconds`
    = mean capture→decision latency), **ACR-9** `GET /api/candidates/freshness` (pending-queue age
    buckets `<24h`/`1-3d`/`>3d`), **ACR-10 Metrics** `GET /api/metrics` (KPIs + 14-day cost-per-day +
-   confidence distribution). No schema/migration — pure projections over `crawl_runs` + `reviews` +
-   `deals` on the extended `MetricsUseCase`. STILL deferred: **ACR-10 Settings** (needs an owner call
-   on pipeline-owned vs env config). Plus the ACR-7 follow-up: persist `promote`/`extract` as audit
-   rows. NOTE — ACR-6 returns the ACR-doc `avg_review_seconds` (raw number); the panel's current zod
-   parses a formatted `avg_review` string, so a one-line panel-side migration is handed off in
-   `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`. Details in `docs/KNOWN_ISSUES.md`.
+   confidence distribution), and **ACR-10 Settings** — `GET /api/settings` + `PATCH /api/settings/:key`
+   (env-driven config stays the source of truth; a `settings` table, migration **0018**, stores only
+   OVERRIDES for the writable knobs `affiliate_disclosure` + `daily_budget_queued`; read-only knobs
+   return `read_only:true` and a PATCH on them is a 409; new `DEPLOYMENT_ID` config powers the
+   queued-budget next-deploy semantics). The metrics endpoints are pure projections over `crawl_runs` +
+   `reviews` + `deals` on `MetricsUseCase`. **The full ACR endpoint set is now COMPLETE.** Remaining
+   smaller follow-ups: persist `promote`/`extract` as audit rows (ACR-7); build a `min_confidence`
+   auto-queue gate if wanted. NOTE — ACR-6 returns the ACR-doc `avg_review_seconds` (raw number) and
+   Settings adds a `read_only` row flag; the panel-side migrations (zod + view-only rows + dropping
+   no-backing placeholders) are handed off in `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`.
 2. **Post-deploy hardening** [medium] — the API is live + working, but parked: **rotate** the
    chat-exposed AWS key + GitHub PAT (before going past dev/staging), make the GHCR image private,
    **pin** `:edge` → `:sha-…`, set **`ADMIN_CORS_ORIGIN`** when the panel deploys. Plus the deploy-time

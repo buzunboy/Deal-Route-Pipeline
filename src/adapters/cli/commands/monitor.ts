@@ -13,6 +13,7 @@ export interface MonitorArgs {
 
 export async function monitor(config: Config, args: MonitorArgs): Promise<void> {
   const container = new Container(config, { usePersistence: true });
+  await container.init(); // adopt a queued daily budget on deploy (ACR-10 Settings)
   try {
     const ids = args.sourceId
       ? [args.sourceId]

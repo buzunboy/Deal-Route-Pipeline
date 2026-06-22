@@ -324,4 +324,49 @@ suite('review edit / promote / manual-capture (Container + Postgres)', () => {
     expect(m.confidence_distribution.map((b) => b.level)).toEqual(['success', 'warning', 'danger']);
     expect(m.confidence_distribution.reduce((a, b) => a + b.percent, 0)).toBe(100);
   });
+
+  it('settings: PATCH a writable knob persists; read-only key throws; default feeds approve (ACR-10 Settings)', async () => {
+    container = makeContainer(overrides);
+    // GET mirrors live config (defaults) with read-only flags.
+    const view = await container.settings.getSettings();
+    const rows = view.groups.flatMap((g) => g.rows);
+    expect(rows.find((r) => r.key === 'evidence_store')!.read_only).toBe(true);
+    expect(rows.find((r) => r.key === 'affiliate_disclosure')!.read_only).toBe(false);
+
+    // PATCH a writable knob → persisted through real SQL.
+    await container.settings.updateSetting('affiliate_disclosure', 'alice@dealroute', false);
+    expect((await container.db.settings.get('affiliate_disclosure'))!.value).toBe('false');
+    expect(await container.settings.defaultAffiliateDisclosure()).toBe(false);
+
+    // A read-only key throws (maps to 409 at the HTTP boundary).
+    await expect(
+      container.settings.updateSetting('evidence_store', 'alice@dealroute', 's3'),
+    ).rejects.toMatchObject({ code: 'SETTING_NOT_WRITABLE' });
+
+    // The override feeds the approve default when the reviewer omits disclosure.
+    const deal = await seedCandidate();
+    const published = await container.review.approve(deal.id, 'bob@dealroute', {
+      affiliateDisclosure: await container.settings.defaultAffiliateDisclosure(),
+    });
+    expect(published.affiliate_disclosure).toBe(false);
+  });
+
+  it('settings: a queued daily budget is adopted by the NEXT deployment at init() then cleared (ACR-10)', async () => {
+    // Deployment D1: queue €25 (config default budget is €10).
+    container = makeContainer(overrides, { DEPLOYMENT_ID: 'deploy-1', DAILY_BUDGET_EUR: '10.00' });
+    await container.settings.updateSetting('daily_budget_queued', 'alice@dealroute', '25');
+    expect(container.dailyBudgetGuard.ceiling).toBe(10); // not yet in effect
+    await container.shutdown();
+
+    // Deployment D2 boots against the SAME Postgres: init() consumes the queue.
+    container = makeContainer(overrides, { DEPLOYMENT_ID: 'deploy-2', DAILY_BUDGET_EUR: '10.00' });
+    expect(container.dailyBudgetGuard.ceiling).toBe(10); // before init
+    await container.init();
+    expect(container.dailyBudgetGuard.ceiling).toBe(25); // adopted the queued budget
+    // The row is self-cleared, and the GET view shows €25 in effect, queue empty.
+    expect(await container.db.settings.get('daily_budget_queued')).toBeNull();
+    const rows = (await container.settings.getSettings()).groups.flatMap((g) => g.rows);
+    expect(rows.find((r) => r.key === 'daily_budget')!).toMatchObject({ value: '€25.00' });
+    expect(rows.find((r) => r.key === 'daily_budget_queued')!).toMatchObject({ value: '' });
+  });
 });

@@ -17,3 +17,4 @@ export * from './metrics/metrics.js';
 export * from './metrics/daily-budget-guard.js';
 export * from './team/team.js';
 export * from './alerting/alerts.js';
+export * from './settings/settings.js';

@@ -174,6 +174,16 @@ const ConfigSchema = z.object({
   logLevel: z.enum(['debug', 'info', 'warn', 'error']),
   country: z.string().min(1),
   currency: z.string().min(1),
+  /**
+   * An opaque identifier for THIS deployment/release (the deploy sets `DEPLOYMENT_ID`
+   * to the image SHA / release tag). Used by the settings store so a QUEUED setting
+   * override (e.g. `daily_budget_queued`) only takes effect on the NEXT deployment and
+   * then self-clears: an override stamped with a DIFFERENT `deployment_id` than the
+   * current one is treated as consumed. Defaults to a stable local sentinel so the
+   * mechanism is deterministic in dev/test (where it never changes, so a queued value
+   * persists until cleared) — production must set a real, changing value per deploy.
+   */
+  deploymentId: z.string().min(1),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -278,6 +288,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel: env.LOG_LEVEL ?? 'info',
     country: env.COUNTRY ?? 'DE',
     currency: env.CURRENCY ?? 'EUR',
+    // Stable local sentinel; production sets DEPLOYMENT_ID per release (image SHA/tag).
+    deploymentId: emptyToUndefined(env.DEPLOYMENT_ID) ?? 'local-dev',
   };
 
   const result = ConfigSchema.safeParse(raw);

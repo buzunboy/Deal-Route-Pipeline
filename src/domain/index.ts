@@ -14,3 +14,4 @@ export * from './metrics/index.js';
 export * from './alerting/index.js';
 export * from './markets/index.js';
 export * from './team/index.js';
+export * from './settings/index.js';

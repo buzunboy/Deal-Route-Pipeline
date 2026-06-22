@@ -15,12 +15,15 @@ import { REVIEW_TEST_PAGE } from '../../http/test-page.js';
  */
 export async function serve(config: Config): Promise<void> {
   const container = new Container(config, { usePersistence: true });
+  // Adopt a queued daily budget if one was set under a prior deployment (ACR-10 Settings).
+  await container.init();
   const reviewApi = new ReviewApi(
     container.review,
     container.sourceReview,
     container.team,
     container.alerts,
     container.metrics,
+    container.settings,
     container.logger,
     {
       staticPageHtml: REVIEW_TEST_PAGE,

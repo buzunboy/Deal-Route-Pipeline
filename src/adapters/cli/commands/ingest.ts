@@ -17,6 +17,7 @@ export interface IngestArgs {
 
 export async function ingest(config: Config, args: IngestArgs): Promise<void> {
   const container = new Container(config, { usePersistence: !args.dryRun });
+  await container.init(); // adopt a queued daily budget on deploy (ACR-10 Settings)
   try {
     const sourceIds = await resolveSourceIds(container, args);
     if (sourceIds.length === 0) {

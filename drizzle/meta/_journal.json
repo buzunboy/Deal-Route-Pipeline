@@ -127,6 +127,13 @@
       "when": 1782157075660,
       "tag": "0017_smart_lorna_dane",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1782162721515,
+      "tag": "0018_bright_blackheart",
+      "breakpoints": true
     }
   ]
 }

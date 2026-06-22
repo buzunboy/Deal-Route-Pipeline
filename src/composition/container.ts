@@ -8,6 +8,7 @@ import {
   SourceReviewUseCase,
   TeamUseCase,
   AlertsUseCase,
+  SettingsUseCase,
   MonitorSourceUseCase,
   MetricsUseCase,
   DailyBudgetGuard,
@@ -109,6 +110,7 @@ export class Container {
   readonly sourceReview: SourceReviewUseCase;
   readonly team: TeamUseCase;
   readonly alerts: AlertsUseCase;
+  readonly settings: SettingsUseCase;
   readonly monitor: MonitorSourceUseCase;
   readonly metrics: MetricsUseCase;
   readonly dailyBudgetGuard: DailyBudgetGuard;
@@ -213,6 +215,7 @@ export class Container {
     );
     this.team = new TeamUseCase(this.db, this.clock, this.logger);
     this.alerts = new AlertsUseCase(this.db, this.clock, this.logger);
+    this.settings = new SettingsUseCase(this.db, config, this.clock, this.logger);
     this.monitor = new MonitorSourceUseCase(
       this.fetcher,
       this.db,
@@ -231,6 +234,20 @@ export class Container {
       config.agent.dailyBudgetEur,
       this.alerting,
     );
+  }
+
+  /**
+   * One-time async startup step, called after construction by the entry points that
+   * run real work (`serve` + the CLI lanes). Consumes a queued `daily_budget_queued`
+   * setting (ACR-10 Settings): if one was stamped under a PRIOR deployment, THIS
+   * deployment adopts its euros as the daily-budget ceiling and clears the row
+   * (next-deploy semantics). A no-op when there's nothing queued. Safe to skip in
+   * tests that don't exercise the budget. Idempotent within a process (consume deletes
+   * the row), so a second call finds nothing.
+   */
+  async init(): Promise<void> {
+    const adopted = await this.settings.consumeQueuedBudget();
+    if (adopted !== null) this.dailyBudgetGuard.setCeiling(adopted);
   }
 
   private buildFetcher(config: Config): Fetcher {

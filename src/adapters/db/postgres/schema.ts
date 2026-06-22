@@ -282,6 +282,20 @@ export const teamMembers = pgTable(
   (t) => ({ emailUnique: uniqueIndex('team_members_email_unique').on(t.email) }),
 );
 
+// Persisted settings OVERRIDES (ACR-10 Settings). The pipeline's operational config is
+// env-driven (source of truth for a running process); this table layers the few
+// panel-editable knobs OVER it. An absent row = no override (use the live config value).
+// Keyed by the setting `key` (only writable keys are ever stored). `deployment_id` is
+// set for keys that only take effect on the next deploy (daily_budget_queued): a queued
+// value stamped with a PRIOR deployment is treated as consumed.
+export const settings = pgTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value'), // nullable: a cleared override
+  deploymentId: text('deployment_id'),
+  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'string' }).notNull(),
+  updatedBy: text('updated_by').notNull(),
+});
+
 // Append-only audit log of source-promotion decisions (promote/reject a proposed source).
 export const sourceReviews = pgTable(
   'source_reviews',

@@ -40,12 +40,26 @@ export class DailyBudgetGuard {
     private readonly db: Database,
     private readonly clock: Clock,
     private readonly logger: Logger,
-    private readonly ceilingEur: number,
+    private ceilingEur: number,
     private readonly alerting: Alerting,
   ) {}
 
   get enabled(): boolean {
     return dailyBudgetEnabled(this.ceilingEur);
+  }
+
+  /** The €-ceiling currently enforced (config default, or an adopted queued budget). */
+  get ceiling(): number {
+    return this.ceilingEur;
+  }
+
+  /**
+   * Adopt a new daily ceiling at boot — used by {@link Container.init} when a queued
+   * `daily_budget_queued` setting is consumed on a deploy. Process-lifetime only (the
+   * durable source stays env/settings); set once at startup, never mid-batch.
+   */
+  setCeiling(ceilingEur: number): void {
+    this.ceilingEur = ceilingEur;
   }
 
   /** Today's spend + whether there's headroom for another run. */

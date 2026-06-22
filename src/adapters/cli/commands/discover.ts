@@ -24,6 +24,7 @@ export async function discover(config: Config, args: DiscoverArgs): Promise<void
 
   // Dry-run uses in-memory adapters so it needs no Postgres.
   const container = new Container(config, { usePersistence: !args.dryRun });
+  await container.init(); // adopt a queued daily budget on deploy (ACR-10 Settings)
   try {
     const maxPages = args.maxPages ?? config.agent.maxSteps;
 

@@ -21,6 +21,7 @@ import type {
   TeamMember,
   AlertRecord,
   AlertStatus,
+  SettingOverride,
 } from '../../domain/index.js';
 
 /**
@@ -287,6 +288,22 @@ export interface AlertRepository {
   setStatus(id: string, status: AlertStatus, at: string): Promise<void>;
 }
 
+/**
+ * Persisted settings overrides (ACR-10 Settings). Stores ONLY the panel-editable knobs
+ * as overrides layered over env-driven config; an absent row means "no override". Both
+ * adapters implement it identically (LSP).
+ */
+export interface SettingsRepository {
+  /** Load one override by key, or null when there is none. */
+  get(key: string): Promise<SettingOverride | null>;
+  /** All stored overrides (for the GET /api/settings merge). */
+  list(): Promise<SettingOverride[]>;
+  /** Insert or replace an override (keyed by `key`). PATCH writes here. */
+  upsert(override: SettingOverride): Promise<void>;
+  /** Remove an override (a cleared knob falls back to the live config value). */
+  delete(key: string): Promise<void>;
+}
+
 export interface SourceReviewRepository {
   /** Append a source-promotion decision (immutable audit log). */
   insert(review: SourceReviewRecord): Promise<void>;
@@ -315,4 +332,5 @@ export interface Database {
   catalog: SubscriptionCatalogRepository;
   team: TeamRepository;
   alerts: AlertRepository;
+  settings: SettingsRepository;
 }

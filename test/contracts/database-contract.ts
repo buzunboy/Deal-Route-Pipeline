@@ -1637,6 +1637,68 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       const updated = await db.conditionVocabulary.getByKey(key);
       expect(updated).toEqual({ key, label: 'Widget required (v2)', aliases: [], version: 2 });
     });
+
+    // ── settings repo (ACR-10 Settings) ──────────────────────────────────────
+    describe('settings', () => {
+      it('upsert + get round-trips an override (incl. deployment_id); unknown key is null', async () => {
+        const db = await makeDb();
+        const key = `daily_budget_queued_${randomUUID().slice(0, 8)}`; // unique under the shared DB
+        await db.settings.upsert({
+          key,
+          value: '25.00',
+          deployment_id: 'deploy-1',
+          updated_at: '2026-06-22T12:00:00.000Z',
+          updated_by: 'alice',
+        });
+        expect(await db.settings.get(key)).toEqual({
+          key,
+          value: '25.00',
+          deployment_id: 'deploy-1',
+          updated_at: '2026-06-22T12:00:00.000Z',
+          updated_by: 'alice',
+        });
+        expect(await db.settings.get(`absent_${randomUUID()}`)).toBeNull();
+      });
+
+      it('upsert is idempotent on key (re-write updates in place); list includes it; delete removes it', async () => {
+        const db = await makeDb();
+        const key = `affiliate_disclosure_${randomUUID().slice(0, 8)}`;
+        await db.settings.upsert({
+          key,
+          value: 'true',
+          deployment_id: null,
+          updated_at: '2026-06-22T10:00:00.000Z',
+          updated_by: 'alice',
+        });
+        await db.settings.upsert({
+          key,
+          value: 'false',
+          deployment_id: null,
+          updated_at: '2026-06-22T11:00:00.000Z',
+          updated_by: 'bob',
+        });
+        const got = await db.settings.get(key);
+        expect(got).toMatchObject({ value: 'false', updated_by: 'bob' }); // updated in place
+        expect((await db.settings.list()).map((s) => s.key)).toContain(key);
+
+        await db.settings.delete(key);
+        expect(await db.settings.get(key)).toBeNull();
+        expect((await db.settings.list()).map((s) => s.key)).not.toContain(key);
+      });
+
+      it('a null override value (cleared) round-trips', async () => {
+        const db = await makeDb();
+        const key = `cleared_${randomUUID().slice(0, 8)}`;
+        await db.settings.upsert({
+          key,
+          value: null,
+          deployment_id: null,
+          updated_at: '2026-06-22T12:00:00.000Z',
+          updated_by: 'alice',
+        });
+        expect((await db.settings.get(key))!.value).toBeNull();
+      });
+    });
   });
 }
 

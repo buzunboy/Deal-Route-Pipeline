@@ -36,7 +36,8 @@ export async function resetDb(): Promise<void> {
     const db = drizzle(pool);
     await db.execute(
       sql`TRUNCATE TABLE reviews, source_reviews, changes, deals, evidence, manual_capture_tasks,
-            crawl_runs, field_proposals, sources, subscription_catalog, condition_vocabulary
+            crawl_runs, field_proposals, sources, subscription_catalog, condition_vocabulary,
+            team_members, alert_events, settings
           RESTART IDENTITY CASCADE`,
     );
   } finally {

@@ -18,6 +18,7 @@ import {
   type TeamMember,
   type AlertRecord,
   type AlertStatus,
+  type SettingOverride,
   type Source,
   type DealRecord,
   type CrawlRun,
@@ -51,6 +52,7 @@ import type {
   SubscriptionCatalogRepository,
   TeamRepository,
   AlertRepository,
+  SettingsRepository,
 } from '../../../application/ports/index.js';
 
 /**
@@ -81,6 +83,7 @@ export class InMemoryDb implements Database {
   catalog: SubscriptionCatalogRepository = new InMemoryCatalogRepo();
   team: TeamRepository = new InMemoryTeamRepo();
   alerts: AlertRepository = new InMemoryAlertRepo();
+  settings: SettingsRepository = new InMemorySettingsRepo();
 }
 
 class InMemorySourceRepo implements SourceRepository {
@@ -641,6 +644,23 @@ class InMemoryAlertRepo implements AlertRepository {
   async setStatus(id: string, status: AlertStatus, at: string): Promise<void> {
     const i = this.alerts.findIndex((x) => x.id === id);
     if (i !== -1) this.alerts[i] = { ...this.alerts[i]!, status, updated_at: at };
+  }
+}
+
+class InMemorySettingsRepo implements SettingsRepository {
+  private store = new Map<string, SettingOverride>();
+  async get(key: string): Promise<SettingOverride | null> {
+    const o = this.store.get(key);
+    return o ? { ...o } : null;
+  }
+  async list(): Promise<SettingOverride[]> {
+    return [...this.store.values()].map((o) => ({ ...o }));
+  }
+  async upsert(o: SettingOverride): Promise<void> {
+    this.store.set(o.key, { ...o });
+  }
+  async delete(key: string): Promise<void> {
+    this.store.delete(key);
   }
 }
 

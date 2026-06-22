@@ -214,3 +214,20 @@ export class EvidenceIncompleteError extends DomainError {
     super(`Manual capture is missing required evidence: ${missing.join(', ')}.`, { missing });
   }
 }
+
+/**
+ * A PATCH targeted a setting that is NOT writable — an unknown key, or a read-only
+ * env/derived mirror that can only change via a redeploy (ACR-10 Settings). Maps to
+ * HTTP 409 (the resource exists/known but can't be mutated through this surface).
+ */
+export class SettingNotWritableError extends DomainError {
+  readonly code = 'SETTING_NOT_WRITABLE';
+
+  constructor(readonly key: string) {
+    super(
+      `Setting "${key}" is not writable via the API. It is either unknown or a ` +
+        `read-only mirror of deployment/env config (change it via redeploy).`,
+      { key },
+    );
+  }
+}

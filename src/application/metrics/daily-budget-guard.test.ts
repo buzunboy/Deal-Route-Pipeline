@@ -79,6 +79,19 @@ describe('DailyBudgetGuard', () => {
     expect(alerter.events).toHaveLength(0);
   });
 
+  it('setCeiling adopts a new ceiling (a queued daily budget consumed at boot)', async () => {
+    const { guard, db } = makeGuard(5);
+    expect(guard.ceiling).toBe(5);
+    await db.crawlRuns.insert(run('2026-06-19T08:00:00.000Z', 6.0)); // over the OLD ceiling
+    expect((await guard.check()).ok).toBe(false);
+    // Adopt a higher queued budget → the same spend now fits under the new ceiling.
+    guard.setCeiling(10);
+    expect(guard.ceiling).toBe(10);
+    const check = await guard.check();
+    expect(check.ok).toBe(true);
+    expect(check.remainingEur).toBe(4); // 10 − 6
+  });
+
   describe('effectiveCostCap', () => {
     it('passes the per-run cap through when the guard is disabled', () => {
       const { guard } = makeGuard(0);
