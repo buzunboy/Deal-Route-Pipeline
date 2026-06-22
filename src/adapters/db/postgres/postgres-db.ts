@@ -15,12 +15,14 @@ import type {
   ReviewRepository,
   SourceReviewRepository,
   SubscriptionCatalogRepository,
+  TeamRepository,
 } from '../../../application/ports/index.js';
 import {
   ChangeSchema,
   CrawlRunSchema,
   ReviewRecordSchema,
   SourceReviewRecordSchema,
+  TeamMemberSchema,
   SubscriptionCatalogEntrySchema,
   CostSummarySchema,
   eurFromMicros,
@@ -46,6 +48,7 @@ import type {
   DealStatus,
   ReviewRecord,
   SourceReviewRecord,
+  TeamMember,
   SubscriptionCatalogEntry,
   PublishedQuery,
   PublishedFilters,
@@ -115,6 +118,7 @@ export class PostgresDb implements Database {
   readonly reviews: ReviewRepository;
   readonly sourceReviews: SourceReviewRepository;
   readonly catalog: SubscriptionCatalogRepository;
+  readonly team: TeamRepository;
 
   private constructor(
     private readonly pool: pg.Pool,
@@ -135,6 +139,7 @@ export class PostgresDb implements Database {
     this.reviews = new PgReviewRepo(db, retrier);
     this.sourceReviews = new PgSourceReviewRepo(db, retrier);
     this.catalog = new PgCatalogRepo(db, retrier);
+    this.team = new PgTeamRepo(db, retrier);
   }
 
   static connect(
@@ -873,6 +878,15 @@ class PgReviewRepo extends PgRepo implements ReviewRepository {
     );
     return rows.map((r) => rowToReview(r));
   }
+  async countByApprover(): Promise<Map<string, number>> {
+    const rows = await this.run('reviews.countByApprover', () =>
+      this.db
+        .select({ approver: schema.reviews.approver, n: sql<number>`count(*)::int` })
+        .from(schema.reviews)
+        .groupBy(schema.reviews.approver),
+    );
+    return new Map(rows.map((r) => [r.approver, Number(r.n)]));
+  }
 }
 
 /** Re-validate a reviews row at the boundary (the free-text `action` column). */
@@ -923,6 +937,63 @@ class PgSourceReviewRepo extends PgRepo implements SourceReviewRepository {
       }),
     );
   }
+}
+
+class PgTeamRepo extends PgRepo implements TeamRepository {
+  async upsert(m: TeamMember): Promise<void> {
+    // Conflict on `email` (the natural identity): re-inviting/updating the same
+    // person updates in place and keeps the original id, mirroring sources.upsert.
+    const row = {
+      id: m.id,
+      name: m.name,
+      email: m.email,
+      role: m.role,
+      status: m.status,
+      createdAt: m.created_at,
+    };
+    await this.run('team.upsert', () =>
+      this.db
+        .insert(schema.teamMembers)
+        .values(row)
+        .onConflictDoUpdate({
+          target: schema.teamMembers.email,
+          set: { name: m.name, role: m.role, status: m.status },
+        }),
+    );
+  }
+  async getById(id: string): Promise<TeamMember | null> {
+    const rows = await this.run('team.getById', () =>
+      this.db.select().from(schema.teamMembers).where(eq(schema.teamMembers.id, id)).limit(1),
+    );
+    return rows[0] ? rowToTeamMember(rows[0]) : null;
+  }
+  async getByEmail(email: string): Promise<TeamMember | null> {
+    const rows = await this.run('team.getByEmail', () =>
+      this.db.select().from(schema.teamMembers).where(eq(schema.teamMembers.email, email)).limit(1),
+    );
+    return rows[0] ? rowToTeamMember(rows[0]) : null;
+  }
+  async list(): Promise<TeamMember[]> {
+    const rows = await this.run('team.list', () =>
+      this.db
+        .select()
+        .from(schema.teamMembers)
+        .orderBy(asc(schema.teamMembers.name), asc(schema.teamMembers.id)),
+    );
+    return rows.map(rowToTeamMember);
+  }
+}
+
+function rowToTeamMember(r: typeof schema.teamMembers.$inferSelect): TeamMember {
+  // Re-validate at the boundary (free-text role/status columns) — never trust the row.
+  return TeamMemberSchema.parse({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    role: r.role,
+    status: r.status,
+    created_at: isoTimestamp(r.createdAt),
+  });
 }
 
 class PgCatalogRepo extends PgRepo implements SubscriptionCatalogRepository {

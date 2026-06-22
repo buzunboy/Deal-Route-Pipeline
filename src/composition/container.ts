@@ -6,6 +6,7 @@ import {
   IngestCommunityUseCase,
   ReviewUseCase,
   SourceReviewUseCase,
+  TeamUseCase,
   MonitorSourceUseCase,
   MetricsUseCase,
   DailyBudgetGuard,
@@ -104,6 +105,7 @@ export class Container {
   readonly ingestCommunity: IngestCommunityUseCase;
   readonly review: ReviewUseCase;
   readonly sourceReview: SourceReviewUseCase;
+  readonly team: TeamUseCase;
   readonly monitor: MonitorSourceUseCase;
   readonly metrics: MetricsUseCase;
   readonly dailyBudgetGuard: DailyBudgetGuard;
@@ -196,6 +198,7 @@ export class Container {
       this.suffixOracle,
       config.country,
     );
+    this.team = new TeamUseCase(this.db, this.clock, this.logger);
     this.monitor = new MonitorSourceUseCase(
       this.fetcher,
       this.db,

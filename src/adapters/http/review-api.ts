@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import type { ReviewUseCase, SourceReviewUseCase } from '../../application/index.js';
+import type { ReviewUseCase, SourceReviewUseCase, TeamUseCase } from '../../application/index.js';
 import type { Logger } from '../../application/ports/index.js';
 import { toAdminEvidence } from './admin-evidence-dto.js';
 import {
@@ -93,6 +93,9 @@ export interface ReviewApiOptions {
  *   POST  /api/sources/:id/approve        { approver }            → { source }
  *   POST  /api/sources/:id/reject         { approver, reason? }   → { source }
  *   GET   /api/sources/:id/reviews        → [SourceReviewRecord]  (audit history)
+ *   GET   /api/team                       → { members: [TeamMemberView] }   (ACR-10)
+ *   POST  /api/team                       { approver, name, email, role? } → { id, invited, email }  (ACR-10)
+ *   PATCH /api/profile                    { approver, name } → { updated, name }   (ACR-11)
  */
 export class ReviewApi {
   private server: Server | null = null;
@@ -104,6 +107,7 @@ export class ReviewApi {
   constructor(
     private readonly review: ReviewUseCase,
     private readonly sourceReview: SourceReviewUseCase,
+    private readonly team: TeamUseCase,
     private readonly logger: Logger,
     options: ReviewApiOptions = {},
   ) {
@@ -368,6 +372,40 @@ export class ReviewApi {
       });
     }
 
+    // ── Team & profile (ACR-10 Team + ACR-11 Profile) ────────────────────────
+    if (method === 'GET' && path === '/api/team') {
+      return sendJson(res, 200, { members: await this.team.listTeam() });
+    }
+    if (method === 'POST' && path === '/api/team') {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = InviteMemberBody.safeParse(body);
+      if (!parsed.success) return sendError(res, 400, 'approver, name and email are required');
+      return this.mapErrors(res, async () => {
+        const member = await this.team.inviteMember({
+          approver: parsed.data.approver,
+          name: parsed.data.name,
+          email: parsed.data.email,
+          role: parsed.data.role,
+        });
+        sendJson(res, 201, { id: member.id, invited: true, email: member.email });
+      });
+    }
+    if (method === 'PATCH' && path === '/api/profile') {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = UpdateProfileBody.safeParse(body);
+      if (!parsed.success) return sendError(res, 400, 'approver and name are required');
+      return this.mapErrors(res, async () => {
+        const member = await this.team.updateProfile(parsed.data.approver, parsed.data.name);
+        sendJson(res, 200, { updated: true, name: member.name });
+      });
+    }
+
     // ── Source-promotion loop ────────────────────────────────────────────────
     if (method === 'GET' && path === '/api/sources/pending') {
       return sendJson(res, 200, await this.sourceReview.listPending());
@@ -493,6 +531,18 @@ const ApproveCandidateBody = z.object({
   affiliate_disclosure: z.boolean().optional(),
 });
 const RejectBody = z.object({ approver: z.string().min(1), reason: z.string().optional() });
+/** Invite / register a team member (ACR-10 Team). */
+const InviteMemberBody = z.object({
+  approver: z.string().min(1),
+  name: z.string().min(1),
+  email: z.string().min(1),
+  role: z.string().optional(),
+});
+/** Update the signed-in reviewer's own display name (ACR-11 Profile). */
+const UpdateProfileBody = z.object({
+  approver: z.string().min(1),
+  name: z.string().min(1),
+});
 /** Register a new operational source from the admin "+ Add source" flow (ACR-10). */
 const CreateSourceBody = z.object({
   approver: z.string().min(1),

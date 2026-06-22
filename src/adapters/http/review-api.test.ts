@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { AddressInfo } from 'node:net';
 import { ReviewApi } from './review-api.js';
-import { ReviewUseCase, SourceReviewUseCase } from '../../application/index.js';
+import { ReviewUseCase, SourceReviewUseCase, TeamUseCase } from '../../application/index.js';
 import { DealStatus, type DealRecord } from '../../domain/index.js';
 import { makeSource } from '../../../test/factories/source.js';
 import { InMemoryDb } from '../db/in-memory/in-memory-db.js';
@@ -52,7 +52,8 @@ describe('ReviewApi (HTTP integration)', () => {
       tldtsSuffixOracle,
       'DE',
     );
-    api = new ReviewApi(review, sourceReview, new ConsoleLogger('error'), {
+    const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    api = new ReviewApi(review, sourceReview, team, new ConsoleLogger('error'), {
       staticPageHtml: '<html>page</html>',
     });
     await api.listen(0);
@@ -306,6 +307,55 @@ describe('ReviewApi (HTTP integration)', () => {
     expect(bad.status).toBe(400);
   });
 
+  it('GET/POST /api/team + PATCH /api/profile (ACR-10 Team + ACR-11 Profile)', async () => {
+    // invite a member
+    const invited = await fetch(`${base}/api/team`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'admin', name: 'Alice', email: 'alice@dealroute.de' }),
+    });
+    expect(invited.status).toBe(201);
+    const inviteBody = (await invited.json()) as { id: string; invited: boolean; email: string };
+    expect(inviteBody.invited).toBe(true);
+    expect(inviteBody.email).toBe('alice@dealroute.de');
+
+    // a review by that member → review_count 1 in the list
+    await db.reviews.insert({
+      id: randomUUID(),
+      deal_id: randomUUID(),
+      action: 'approve',
+      approver: 'alice@dealroute.de',
+      reason: null,
+      decided_at: new Date().toISOString(),
+    });
+    const list = (await (await fetch(`${base}/api/team`)).json()) as {
+      members: { email: string; review_count: number; name: string }[];
+    };
+    const alice = list.members.find((m) => m.email === 'alice@dealroute.de')!;
+    expect(alice.review_count).toBe(1);
+
+    // PATCH profile name
+    const patched = await fetch(`${base}/api/profile`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'alice@dealroute.de', name: 'Alice M.' }),
+    });
+    expect(patched.status).toBe(200);
+    expect((await patched.json()) as { updated: boolean; name: string }).toEqual({
+      updated: true,
+      name: 'Alice M.',
+    });
+    expect((await db.team.getByEmail('alice@dealroute.de'))!.name).toBe('Alice M.');
+
+    // a bad role → 400
+    const bad = await fetch(`${base}/api/team`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'admin', name: 'X', email: 'x@dealroute.de', role: 'root' }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it('GET /api/sources/pending lists pending sources; approve → active', async () => {
     const src = makeSource({ status: 'pending_approval', type: 'discovered', tier: 4 });
     await db.sources.upsert(src);
@@ -458,6 +508,7 @@ describe('ReviewApi (HTTP integration)', () => {
     const withCdn = new ReviewApi(
       new ReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'), tldtsSuffixOracle),
       new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error')),
+      new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error')),
       new ConsoleLogger('error'),
       { evidenceCdnBaseUrl: 'https://cdn.dealroute.example' },
     );
@@ -683,7 +734,8 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
       tldtsSuffixOracle,
     );
     const sourceReview = new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    api = new ReviewApi(review, sourceReview, new ConsoleLogger('error'), {
+    const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    api = new ReviewApi(review, sourceReview, team, new ConsoleLogger('error'), {
       authToken: 'secret-token',
     });
     await api.listen(0);
@@ -761,7 +813,8 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
       tldtsSuffixOracle,
     );
     const sourceReview = new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    const api = new ReviewApi(review, sourceReview, new ConsoleLogger('error'), options);
+    const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    const api = new ReviewApi(review, sourceReview, team, new ConsoleLogger('error'), options);
     await api.listen(0);
     // @ts-expect-error reach into the underlying server for the assigned port
     const base = `http://localhost:${(api['server'].address() as AddressInfo).port}`;

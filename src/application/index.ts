@@ -15,3 +15,4 @@ export * from './ingest/ingest-community.js';
 export * from './ingest/triage-prompt.js';
 export * from './metrics/metrics.js';
 export * from './metrics/daily-budget-guard.js';
+export * from './team/team.js';

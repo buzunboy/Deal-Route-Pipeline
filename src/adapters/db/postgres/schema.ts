@@ -231,6 +231,24 @@ export const reviews = pgTable(
   (t) => ({ dealIdx: index('reviews_deal_idx').on(t.dealId, t.decidedAt) }),
 );
 
+// Team / reviewer registry (ACR-10 Team + ACR-11 Profile). The pipeline is the
+// system of record for reviewer identity; the admin panel's auth allow-list mirrors
+// it. `review_count` is NOT stored — it is derived per-actor from the reviews audit
+// log at read time (so it can never drift from the real decision history).
+export const teamMembers = pgTable(
+  'team_members',
+  {
+    id: uuid('id').primaryKey(),
+    name: text('name').notNull(),
+    // The auth identity (the reviews log keys on this as `approver`). Unique.
+    email: text('email').notNull(),
+    role: text('role').notNull(), // admin | reviewer
+    status: text('status').notNull(), // active | invited
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull(),
+  },
+  (t) => ({ emailUnique: uniqueIndex('team_members_email_unique').on(t.email) }),
+);
+
 // Append-only audit log of source-promotion decisions (promote/reject a proposed source).
 export const sourceReviews = pgTable(
   'source_reviews',

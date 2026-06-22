@@ -113,6 +113,13 @@
       "when": 1782150169661,
       "tag": "0015_solid_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1782156411599,
+      "tag": "0016_magenta_sprite",
+      "breakpoints": true
     }
   ]
 }

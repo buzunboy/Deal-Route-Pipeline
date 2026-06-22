@@ -46,6 +46,8 @@ tags:
     description: Cross-deal audit feed of recent review decisions. (admin)
   - name: Published
     description: Admin published-deals screen — publication history. (admin)
+  - name: Team
+    description: Reviewer registry + profile (the pipeline is the identity system of record). (admin)
   - name: Test page
     description: Built-in HTML review harness.
 
@@ -674,6 +676,111 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/SourceReviewRecord' }
 
+  /api/team:
+    get:
+      tags: [Team]
+      summary: List team members with derived review counts (ACR-10)
+      operationId: listTeam
+      description: |
+        Reviewer registry — the pipeline is the system of record for reviewer
+        identity. Each member's `review_count` is DERIVED from the reviews audit log
+        (by email = approver), so it never drifts. Read — not gated.
+      security: []
+      responses:
+        '200':
+          description: Team members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: '#/components/schemas/TeamMemberView' }
+                additionalProperties: false
+    post:
+      tags: [Team]
+      summary: Invite / register a team member (ACR-10)
+      operationId: inviteTeamMember
+      description: Idempotent on email (re-inviting updates name/role). Bearer-gated.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approver, name, email]
+              properties:
+                approver: { type: string, minLength: 1 }
+                name: { type: string, minLength: 1 }
+                email: { type: string, format: email }
+                role: { type: string, enum: [admin, reviewer] }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Member invited/registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, invited, email]
+                properties:
+                  id: { type: string, format: uuid }
+                  invited: { type: boolean }
+                  email: { type: string }
+                additionalProperties: false
+        '400':
+          description: Missing/invalid approver, name, email, or role.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/profile:
+    patch:
+      tags: [Team]
+      summary: Update the signed-in reviewer's own display name (ACR-11)
+      operationId: updateProfile
+      description: |
+        Keyed by the approver's email identity (only the editable name is mutable —
+        email is the auth identity; role/status are admin actions). Bearer-gated.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approver, name]
+              properties:
+                approver: { type: string, minLength: 1 }
+                name: { type: string, minLength: 1 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Profile updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updated, name]
+                properties:
+                  updated: { type: boolean }
+                  name: { type: string }
+                additionalProperties: false
+        '400':
+          description: Missing approver/name, or no member for this approver.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
   # ───────────────────────────── TEST PAGE ──────────────────────────────────
   /:
     get:
@@ -1090,6 +1197,21 @@ components:
           type: string
           enum: [active, degraded, disabled]
           description: '`active` with reliability ≤ 0.3 → `degraded`; `disabled` stays `disabled`.'
+      additionalProperties: false
+    TeamMemberView:
+      type: object
+      description: A team member + derived review_count for the admin Team screen (ACR-10).
+      required: [id, name, email, role, status, review_count]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [admin, reviewer] }
+        status: { type: string, enum: [active, invited] }
+        review_count:
+          type: integer
+          minimum: 0
+          description: Decisions this member made (derived from the reviews audit log).
       additionalProperties: false
     ReviewRecord:
       type: object

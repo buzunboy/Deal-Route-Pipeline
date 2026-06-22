@@ -15,6 +15,7 @@ import {
   type CandidateDealCounts,
   type AdminPublishedQuery,
   type ReviewAction,
+  type TeamMember,
   type Source,
   type DealRecord,
   type CrawlRun,
@@ -46,6 +47,7 @@ import type {
   ReviewRepository,
   SourceReviewRepository,
   SubscriptionCatalogRepository,
+  TeamRepository,
 } from '../../../application/ports/index.js';
 
 /**
@@ -71,6 +73,7 @@ export class InMemoryDb implements Database {
   reviews: ReviewRepository = new InMemoryReviewRepo();
   sourceReviews: SourceReviewRepository = new InMemorySourceReviewRepo();
   catalog: SubscriptionCatalogRepository = new InMemoryCatalogRepo();
+  team: TeamRepository = new InMemoryTeamRepo();
 }
 
 class InMemorySourceRepo implements SourceRepository {
@@ -524,6 +527,36 @@ class InMemoryReviewRepo implements ReviewRepository {
       .sort((a, b) => b.review.decided_at.localeCompare(a.review.decided_at) || b.seq - a.seq)
       .slice(0, filter.limit)
       .map((e) => ({ ...e.review }));
+  }
+  async countByApprover(): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    for (const e of this.reviews) {
+      counts.set(e.review.approver, (counts.get(e.review.approver) ?? 0) + 1);
+    }
+    return counts;
+  }
+}
+
+class InMemoryTeamRepo implements TeamRepository {
+  // Keyed by email (the natural identity), matching the Postgres ON CONFLICT (email).
+  private store = new Map<string, TeamMember>();
+  async upsert(m: TeamMember): Promise<void> {
+    const existing = this.store.get(m.email);
+    // Keep the original id on a conflict (mirrors the Postgres upsert keeping id).
+    this.store.set(m.email, existing ? { ...m, id: existing.id } : { ...m });
+  }
+  async getById(id: string): Promise<TeamMember | null> {
+    for (const m of this.store.values()) if (m.id === id) return { ...m };
+    return null;
+  }
+  async getByEmail(email: string): Promise<TeamMember | null> {
+    const m = this.store.get(email);
+    return m ? { ...m } : null;
+  }
+  async list(): Promise<TeamMember[]> {
+    return [...this.store.values()]
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+      .map((m) => ({ ...m }));
   }
 }
 

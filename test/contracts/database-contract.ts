@@ -1369,6 +1369,57 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       );
     });
 
+    // ── team repo + reviews.countByApprover (ACR-10 Team / ACR-11 Profile) ────
+    describe('team + reviews.countByApprover', () => {
+      it('team: upsert (idempotent on email, keeps id), getById, getByEmail, list', async () => {
+        const db = await makeDb();
+        const email = `alice-${randomUUID()}@dealroute.de`;
+        const member = {
+          id: randomUUID(),
+          name: 'Alice',
+          email,
+          role: 'reviewer' as const,
+          status: 'invited' as const,
+          created_at: '2026-06-19T00:00:00.000Z',
+        };
+        await db.team.upsert(member);
+        expect((await db.team.getById(member.id))!.email).toBe(email);
+        expect((await db.team.getByEmail(email))!.name).toBe('Alice');
+        expect(await db.team.getByEmail(`nobody-${randomUUID()}@x.de`)).toBeNull();
+
+        // Re-upsert same email with a fresh id + new name/role → updates in place,
+        // KEEPS the original id (mirrors sources.upsert on the natural key).
+        await db.team.upsert({ ...member, id: randomUUID(), name: 'Alice A.', role: 'admin' });
+        const reread = (await db.team.getByEmail(email))!;
+        expect(reread.id).toBe(member.id); // original id kept
+        expect(reread.name).toBe('Alice A.');
+        expect(reread.role).toBe('admin');
+        expect((await db.team.list()).some((m) => m.email === email)).toBe(true);
+      });
+
+      it('reviews.countByApprover tallies decisions per approver', async () => {
+        const db = await makeDb();
+        const alice = `alice-${randomUUID()}`;
+        const bob = `bob-${randomUUID()}`;
+        const mk = (approver: string, action: 'approve' | 'reject') =>
+          db.reviews.insert({
+            id: randomUUID(),
+            deal_id: randomUUID(),
+            action,
+            approver,
+            reason: null,
+            decided_at: '2026-06-19T00:00:00.000Z',
+          });
+        await mk(alice, 'approve');
+        await mk(alice, 'reject');
+        await mk(bob, 'approve');
+
+        const counts = await db.reviews.countByApprover();
+        expect(counts.get(alice)).toBe(2);
+        expect(counts.get(bob)).toBe(1);
+      });
+    });
+
     // ── conditionVocabulary repo ─────────────────────────────────────────────
     it('conditionVocabulary: upsert + getByKey + list (upsert is idempotent on key)', async () => {
       const db = await makeDb();

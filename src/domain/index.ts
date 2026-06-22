@@ -13,3 +13,4 @@ export * from './catalog/index.js';
 export * from './metrics/index.js';
 export * from './alerting/index.js';
 export * from './markets/index.js';
+export * from './team/index.js';

@@ -18,6 +18,7 @@ import type {
   AdminPublishedQuery,
   VocabularyEntry,
   ReviewAction,
+  TeamMember,
 } from '../../domain/index.js';
 
 /**
@@ -217,6 +218,26 @@ export interface ReviewRepository {
     since?: Date;
     limit: number;
   }): Promise<ReviewRecord[]>;
+  /**
+   * Total review decisions made by each approver — `approver` → count, in ONE query.
+   * Powers the Team screen's derived `review_count` (ACR-10) without an N+1 per
+   * member. Approvers with no decisions are simply absent from the map. Both
+   * adapters MUST agree for the same data (LSP).
+   */
+  countByApprover(): Promise<Map<string, number>>;
+}
+
+/**
+ * The team / reviewer registry (ACR-10 Team + ACR-11 Profile). The pipeline is the
+ * system of record for reviewer identity. Both adapters implement it identically (LSP).
+ */
+export interface TeamRepository {
+  /** Insert or update a member (keyed by `email`, the natural identity). */
+  upsert(member: TeamMember): Promise<void>;
+  getById(id: string): Promise<TeamMember | null>;
+  getByEmail(email: string): Promise<TeamMember | null>;
+  /** All members (the Team screen list). Ordered by name then id. */
+  list(): Promise<TeamMember[]>;
 }
 
 export interface SourceReviewRepository {
@@ -245,4 +266,5 @@ export interface Database {
   reviews: ReviewRepository;
   sourceReviews: SourceReviewRepository;
   catalog: SubscriptionCatalogRepository;
+  team: TeamRepository;
 }

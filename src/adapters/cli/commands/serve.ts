@@ -15,14 +15,20 @@ import { REVIEW_TEST_PAGE } from '../../http/test-page.js';
  */
 export async function serve(config: Config): Promise<void> {
   const container = new Container(config, { usePersistence: true });
-  const reviewApi = new ReviewApi(container.review, container.sourceReview, container.logger, {
-    staticPageHtml: REVIEW_TEST_PAGE,
-    authToken: config.reviewApi.authToken,
-    corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin,
-    // Same CDN base the public API resolves screenshot URLs from — so the admin
-    // panel's evidence frame gets resolvable artifact URLs (ACR-13).
-    evidenceCdnBaseUrl: config.evidence.s3?.cdnBaseUrl,
-  });
+  const reviewApi = new ReviewApi(
+    container.review,
+    container.sourceReview,
+    container.team,
+    container.logger,
+    {
+      staticPageHtml: REVIEW_TEST_PAGE,
+      authToken: config.reviewApi.authToken,
+      corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin,
+      // Same CDN base the public API resolves screenshot URLs from — so the admin
+      // panel's evidence frame gets resolvable artifact URLs (ACR-13).
+      evidenceCdnBaseUrl: config.evidence.s3?.cdnBaseUrl,
+    },
+  );
   const publicApi = new PublicApi(container.db.deals, container.clock, container.logger, {
     cdnBaseUrl: config.evidence.s3?.cdnBaseUrl,
     corsAllowOrigin: config.publicApi.corsAllowOrigin,
