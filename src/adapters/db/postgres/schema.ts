@@ -50,6 +50,10 @@ export const sources = pgTable(
   },
   (t) => ({
     dueIdx: index('sources_due_idx').on(t.status, t.nextDue),
+    // A source IS its URL (the natural key). This unique index is the conflict target
+    // for `sources.upsert`, making seed-import / source promotion idempotent — without
+    // it, a re-seed inserts duplicate rows (each row carries a fresh random id).
+    urlUnique: uniqueIndex('sources_url_unique').on(t.url),
   }),
 );
 

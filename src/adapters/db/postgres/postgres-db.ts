@@ -180,14 +180,18 @@ abstract class PgRepo {
 
 class PgSourceRepo extends PgRepo implements SourceRepository {
   async upsert(s: Source): Promise<void> {
+    // Conflict on `url`, NOT `id`: a source IS its URL (the natural key). seed-import
+    // mints a fresh random id per run, so keying on id never collides and re-seeding
+    // would INSERT duplicates (49→98). On a url conflict we update everything EXCEPT
+    // the id, so an existing row keeps its identity (and anything that references it)
+    // while its mutable fields refresh.
+    const row = toSourceRow(s);
+    const { id: _id, ...mutable } = row;
     await this.run('sources.upsert', () =>
-      this.db
-        .insert(schema.sources)
-        .values(toSourceRow(s))
-        .onConflictDoUpdate({
-          target: schema.sources.id,
-          set: toSourceRow(s),
-        }),
+      this.db.insert(schema.sources).values(row).onConflictDoUpdate({
+        target: schema.sources.url,
+        set: mutable,
+      }),
     );
   }
   async getById(id: string): Promise<Source | null> {
