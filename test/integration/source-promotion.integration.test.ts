@@ -100,14 +100,15 @@ suite('source-promotion loop (Container + Postgres)', () => {
       fetcher: new ScriptedFetcher({}),
       llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [] }) }),
     });
-    const created = await container.sourceReview.createSource({
+    const { source, created } = await container.sourceReview.createSource({
       approver: 'curator',
       domain: 'netflix.com',
       kind: 'Provider',
       tier: 1,
     });
+    expect(created).toBe(true);
     // persisted active, with a pinned registrable_domain + default DE market.
-    const stored = (await container.db.sources.getById(created.id))!;
+    const stored = (await container.db.sources.getById(source.id))!;
     expect(stored.status).toBe('active');
     expect(stored.country).toBe('DE');
     expect(stored.registrable_domain).toBe('netflix.com');

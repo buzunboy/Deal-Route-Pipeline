@@ -218,6 +218,12 @@ class PgSourceRepo extends PgRepo implements SourceRepository {
     );
     return rows[0] ? fromSourceRow(rows[0]) : null;
   }
+  async getByUrl(url: string): Promise<Source | null> {
+    const rows = await this.run('sources.getByUrl', () =>
+      this.db.select().from(schema.sources).where(eq(schema.sources.url, url)).limit(1),
+    );
+    return rows[0] ? fromSourceRow(rows[0]) : null;
+  }
   async listDue(now: Date, limit: number): Promise<Source[]> {
     const rows = await this.run('sources.listDue', () =>
       this.db

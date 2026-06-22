@@ -5,6 +5,7 @@ import {
   Country,
   SourceNotFoundError,
   SourceNotReviewableError,
+  SourceConflictError,
   MissingApproverError,
   REGISTRY_STATUSES,
   toSourceRegistryEntry,
@@ -92,7 +93,7 @@ export class SourceReviewUseCase {
    * through the domain enums (never trust raw input). `next_due=null` so the next
    * `crawl --due` picks it up. Returns the created source's id.
    */
-  async createSource(input: CreateSourceInput): Promise<Source> {
+  async createSource(input: CreateSourceInput): Promise<{ source: Source; created: boolean }> {
     this.assertApprover(input.approver, 'create-source');
     const url = normaliseToUrl(input.domain);
     const type = parseKind(input.kind);
@@ -106,34 +107,52 @@ export class SourceReviewUseCase {
         'country',
       ]);
     }
+
+    // Governance guard: never let a manual register OVERRIDE a human decision. A URL
+    // that's already `rejected` (a reviewer said no) or `pending_approval` (it must go
+    // through the promotion loop) → 409; the admin uses approve/reject, not re-create.
+    // An existing `active`/`disabled` URL is a benign idempotent update (we keep its id).
+    const existing = await this.db.sources.getByUrl(url);
+    if (
+      existing &&
+      (existing.status === SourceStatus.enum.rejected ||
+        existing.status === SourceStatus.enum.pending_approval)
+    ) {
+      throw new SourceConflictError(url, existing.status);
+    }
+
+    const at = this.clock.nowIso();
     const source: Source = {
-      id: newId(),
+      // Keep an existing row's id (the upsert does too) so the returned id is the
+      // real persisted id, not a stale freshly-minted one.
+      id: existing?.id ?? newId(),
       url,
       type,
       tier: tier.data,
       country: country.data,
-      subscription_service: null,
-      cadence_days: input.cadenceDays ?? DEFAULT_CADENCE_DAYS,
-      reliability_score: 0.5,
+      subscription_service: existing?.subscription_service ?? null,
+      cadence_days: input.cadenceDays ?? existing?.cadence_days ?? DEFAULT_CADENCE_DAYS,
+      // Preserve a re-added source's earned reliability; a brand-new one starts neutral.
+      reliability_score: existing?.reliability_score ?? 0.5,
       status: SourceStatus.enum.active,
-      last_seen: null,
+      last_seen: existing?.last_seen ?? null,
       next_due: null, // due now → crawled on the next due sweep
-      resolved_url: null,
+      resolved_url: existing?.resolved_url ?? null,
       registrable_domain: this.suffixOracle(url),
-      proposal_reason: null,
+      proposal_reason: existing?.proposal_reason ?? null,
     };
+    // Audit the registration (log-before-act, like approve/reject) so an
+    // admin-registered source is auditable like every other source decision.
+    await this.recordReview(source.id, 'approve', input.approver, 'registered via admin panel', at);
     await this.db.sources.upsert(source);
     this.logger.info('source registered → active', {
       url,
       type,
       tier: tier.data,
       approver: input.approver,
+      created: existing === null,
     });
-    // NB: upsert is idempotent on URL — re-adding an existing domain updates the row
-    // in place and KEEPS its original id (so the returned `source.id` is the row id
-    // only for a brand-new domain). Re-adding an existing source is an uncommon admin
-    // action; the panel's "+ Add source" flow is for new domains.
-    return source;
+    return { source, created: existing === null };
   }
 
   /**

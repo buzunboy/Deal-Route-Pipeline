@@ -32,6 +32,8 @@ import type {
 export interface SourceRepository {
   upsert(source: Source): Promise<void>;
   getById(id: string): Promise<Source | null>;
+  /** Load a source by its `url` (the natural key), or null. */
+  getByUrl(url: string): Promise<Source | null>;
   /** Sources whose `next_due` is at/before `now` and status is active. */
   listDue(now: Date, limit: number): Promise<Source[]>;
   listByStatus(status: Source['status']): Promise<Source[]>;

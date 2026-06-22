@@ -649,6 +649,24 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   `npx tsc -p tsconfig.test.json --noEmit` (must be clean).
 - **Logged**: 2026-06-21
 
+### `POST /api/sources` URL-canonicalisation may miss an existing source stored in a different URL form
+- **Severity**: low (a register-flow dedup/governance edge; nothing auto-publishes; the governance guard still holds for the canonical form)
+- **Area**: api / discovery / db
+- **Location**: `src/application/review/source-review.ts` (`createSource` → `normaliseToUrl` → `db.sources.getByUrl`); `sources.upsert` keys on the raw `url` string.
+- **What**: `createSource` runs the admin-supplied domain through `new URL(...).toString()`, which canonicalises a bare host to a trailing slash (`nope.de` → `https://nope.de/`). The by-URL governance lookup + the upsert then key on that canonical string. A source row stored under a DIFFERENT form of the same URL (e.g. `https://nope.de` with no trailing slash, or with a `www.`/path variant — as a discovered/seeded source might be) would NOT be matched: the governance guard (refuse resurrecting a rejected/pending source) could be bypassed, and a duplicate row could be inserted. The trust-critical DEAL dedupe is unaffected (it folds on registrable domain, not the raw source URL).
+- **Why deferred**: the panel's "+ Add source" flow sends a bare domain (the canonical case), and the common path is a NEW domain; canonicalising ALL source-URL storage/lookup (seed-import, discovery, monitor's `resolved_url`) to one form is a wider change than this endpoint. Surfaced by the ACR-10 code review.
+- **Fix-when**: when source-URL handling is unified — normalise to one canonical URL form at every source write (seed-import, discovery proposal, register) and key `getByUrl`/upsert on it (or match on the pinned `registrable_domain` for the governance lookup instead of the exact URL). Add a test for the bare-host-vs-trailing-slash case.
+- **Logged**: 2026-06-22
+
+### `approver` is a free string — Team `review_count` + audit-feed `actor` filter can undercount on case/format drift
+- **Severity**: low (a derived-count accuracy gap, not a trust bug — nothing auto-publishes; surfaced by the ACR-7/10/11 code review)
+- **Area**: api / review / team
+- **Location**: `src/application/team/team.ts` (`listTeam` joins `reviews.countByApprover()` on the member's lowercased `email`); `src/application/review/review.ts` (`auditFeed` `actor` filter); the write boundary — CLI `review approve|reject|edit` + the HTTP `approver` body — does NOT normalise `approver`.
+- **What**: a deal decision is recorded with whatever `approver` string the caller passed (e.g. `Alice@Dealroute.DE`), while team members store a **lowercased** email and the audit-feed `?actor=` filter is an **exact** match. So a decision recorded under a differently-cased/spelled approver won't count toward that member's `review_count` and won't match an `actor=` query — the derived count can silently undercount. Not a trust issue (the audit row itself is correct + immutable); only the aggregation/filter is affected.
+- **Why deferred**: fixing it cleanly means normalising `approver` to a canonical email at every write boundary (CLI + all HTTP write bodies) — a cross-cutting change wider than the ACR endpoints that surfaced it, and the current data is consistent in practice (the panel sends the signed-in email). Out of scope for the ACR build.
+- **Fix-when**: when reviewer identity becomes canonical (it now lives in the pipeline `team_members` table — ACR-11) — normalise `approver` to the member's stored email at the write boundary (or resolve it against the team table on write), so the audit log, the team count, and the `actor` filter all key on one canonical identity.
+- **Logged**: 2026-06-22
+
 ### Admin-panel new-endpoint requests — ACR-6 / ACR-9 / ACR-10-Settings/Metrics still need a metrics layer
 - **Severity**: low (the panel ships working placeholders for these; the rest of the ACR set is now BUILT — see below)
 - **Area**: api / db / metrics

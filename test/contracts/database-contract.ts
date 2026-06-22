@@ -69,6 +69,15 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect(ids).not.toContain(disabled.id);
     });
 
+    it('sources: getByUrl loads by the natural key (or null)', async () => {
+      const db = await makeDb();
+      const s = makeSource({ url: 'https://by-url.de', status: 'active' });
+      await db.sources.upsert(s);
+      const got = await db.sources.getByUrl('https://by-url.de');
+      expect(got!.id).toBe(s.id);
+      expect(await db.sources.getByUrl('https://absent.de')).toBeNull();
+    });
+
     it('sources: resolved_url round-trips — a set value and a null both survive (Prereq A)', async () => {
       const db = await makeDb();
       const resolved = makeSource({

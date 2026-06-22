@@ -845,6 +845,69 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     });
     expect(complete.status).toBe(401);
   });
+
+  it('gates the ACR write endpoints (ad-hoc capture / sources / team / profile / alerts) with the bearer token (401)', async () => {
+    const json = { 'content-type': 'application/json' };
+    // Each is a state-changing endpoint that MUST 401 without a bearer + perform no write.
+    const adhoc = await fetch(`${base}/api/manual-capture-tasks`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ approver: 'a', fields: {}, evidence: {} }),
+    });
+    expect(adhoc.status).toBe(401);
+    // No manual-capture task was minted (the ad-hoc create writes a done ad_hoc task).
+    expect(await db.manualCapture.listOpen(50)).toHaveLength(0);
+
+    const addSource = await fetch(`${base}/api/sources`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ approver: 'a', domain: 'netflix.com', kind: 'provider', tier: 1 }),
+    });
+    expect(addSource.status).toBe(401);
+    expect(await db.sources.getByUrl('https://netflix.com/')).toBeNull();
+
+    const invite = await fetch(`${base}/api/team`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ approver: 'a', name: 'X', email: 'x@dealroute.de' }),
+    });
+    expect(invite.status).toBe(401);
+    expect(await db.team.getByEmail('x@dealroute.de')).toBeNull();
+
+    const profile = await fetch(`${base}/api/profile`, {
+      method: 'PATCH',
+      headers: json,
+      body: JSON.stringify({ approver: 'a', name: 'X' }),
+    });
+    expect(profile.status).toBe(401);
+
+    // Alerts ack/resolve — seed an open alert, prove an unauth POST leaves it open.
+    const id = randomUUID();
+    await db.alerts.upsertOpen({
+      id,
+      dedupe_key: `daily_budget_reached:2026-06-19`,
+      kind: 'daily_budget_reached',
+      severity: 'warning',
+      title: 't',
+      summary: 's',
+      context: {},
+      status: 'open',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const ack = await fetch(`${base}/api/alerts/${id}/acknowledge`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ approver: 'a' }),
+    });
+    expect(ack.status).toBe(401);
+    expect((await db.alerts.getById(id))!.status).toBe('open'); // unchanged
+
+    // Read endpoints stay open even when gated.
+    expect((await fetch(`${base}/api/sources`)).status).toBe(200);
+    expect((await fetch(`${base}/api/team`)).status).toBe(200);
+    expect((await fetch(`${base}/api/alerts`)).status).toBe(200);
+  });
 });
 
 describe('ReviewApi — CORS for the browser admin panel', () => {
@@ -852,7 +915,7 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
   let db: InMemoryDb;
 
   /** Spin up an API with the given options and return its base URL. */
-  async function start(options: ConstructorParameters<typeof ReviewApi>[3]): Promise<{
+  async function start(options: ConstructorParameters<typeof ReviewApi>[5]): Promise<{
     api: ReviewApi;
     base: string;
   }> {

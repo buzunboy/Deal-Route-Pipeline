@@ -115,12 +115,13 @@ describe('SourceReviewUseCase (source-promotion loop)', () => {
 
   describe('createSource', () => {
     it('registers an active source, pins registrable_domain, defaults country to the market', async () => {
-      const source = await uc.createSource({
+      const { source, created } = await uc.createSource({
         approver: 'curator',
         domain: 'netflix.com',
         kind: 'Provider',
         tier: 1,
       });
+      expect(created).toBe(true);
       expect(source.status).toBe('active');
       expect(source.url).toBe('https://netflix.com/');
       expect(source.type).toBe('provider');
@@ -130,6 +131,48 @@ describe('SourceReviewUseCase (source-promotion loop)', () => {
       // it appears in the registry now.
       const registry = await uc.listRegistry();
       expect(registry.some((r) => r.domain === 'netflix.com')).toBe(true);
+      // an audit row was written (registration is auditable like a promotion).
+      const history = await uc.listReviews(source.id);
+      expect(history.some((r) => r.action === 'approve' && r.approver === 'curator')).toBe(true);
+    });
+
+    it("REFUSES to resurrect a rejected source (409-class), and won't override a pending one", async () => {
+      // A human rejected this domain → register must NOT silently flip it to active.
+      // Seed the URL in the canonical form `normaliseToUrl` produces (trailing slash
+      // on a bare host), so the by-URL governance lookup matches.
+      const rejected = makeSource({ url: 'https://nope.de/', status: 'rejected' });
+      await db.sources.upsert(rejected);
+      await expect(
+        uc.createSource({ approver: 'curator', domain: 'nope.de', kind: 'provider', tier: 1 }),
+      ).rejects.toThrow(/already exists|conflict|promotion/i);
+      expect((await db.sources.getById(rejected.id))!.status).toBe('rejected'); // unchanged
+
+      const pending = makeSource({ url: 'https://wait.de/', status: 'pending_approval' });
+      await db.sources.upsert(pending);
+      await expect(
+        uc.createSource({ approver: 'curator', domain: 'wait.de', kind: 'provider', tier: 1 }),
+      ).rejects.toThrow(/already exists|conflict|promotion/i);
+      expect((await db.sources.getById(pending.id))!.status).toBe('pending_approval');
+    });
+
+    it('re-adding an existing ACTIVE source is an idempotent update (keeps id + reliability), created=false', async () => {
+      const active = makeSource({
+        url: 'https://x.de/',
+        status: 'active',
+        reliability_score: 0.9,
+        tier: 1,
+      });
+      await db.sources.upsert(active);
+      const { source, created } = await uc.createSource({
+        approver: 'curator',
+        domain: 'x.de',
+        kind: 'bundler',
+        tier: 2,
+      });
+      expect(created).toBe(false);
+      expect(source.id).toBe(active.id); // kept the original id (real persisted id)
+      expect(source.reliability_score).toBe(0.9); // earned reliability preserved
+      expect(source.tier).toBe(2); // updatable fields refreshed
     });
 
     it('rejects an unsupported kind, a bad tier, and a missing approver', async () => {

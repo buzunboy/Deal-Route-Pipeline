@@ -113,6 +113,27 @@ export class SourceNotReviewableError extends DomainError {
 }
 
 /**
+ * A manual `POST /api/sources` register hit a URL that already exists in a state the
+ * create flow must not silently override — a `rejected` source (a human decided
+ * against it) or a `pending_approval` one (it must go through the promotion loop).
+ * Maps to HTTP 409 (conflict): the admin should use the source-promotion loop, not
+ * re-create. (Re-adding an already-`active`/`disabled` URL is allowed — it's a
+ * benign idempotent update.)
+ */
+export class SourceConflictError extends DomainError {
+  readonly code = 'SOURCE_CONFLICT';
+
+  constructor(
+    readonly url: string,
+    readonly status: string,
+  ) {
+    super(
+      `A source for ${url} already exists with status "${status}" — use the source-promotion loop, not register.`,
+    );
+  }
+}
+
+/**
  * A reviewer patch tried to change a field that is NOT reviewer-correctable
  * (identity/provenance/lifecycle: `id`, `evidence_id`, `source_url`, `status`,
  * `schema_version`, …) or supplied a structurally invalid patch. Maps to HTTP 400 —

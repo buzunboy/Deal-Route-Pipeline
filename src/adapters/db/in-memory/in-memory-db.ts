@@ -95,6 +95,10 @@ class InMemorySourceRepo implements SourceRepository {
     }
     return null;
   }
+  async getByUrl(url: string): Promise<Source | null> {
+    const s = this.store.get(url);
+    return s ? { ...s } : null;
+  }
   async listDue(now: Date, limit: number): Promise<Source[]> {
     return [...this.store.values()]
       .filter(

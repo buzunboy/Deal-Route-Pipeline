@@ -584,7 +584,20 @@ paths:
               additionalProperties: false
       responses:
         '201':
-          description: Source registered.
+          description: 'A NEW source was created (`created: true`).'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, created]
+                properties:
+                  id: { type: string, format: uuid }
+                  created: { type: boolean }
+                additionalProperties: false
+        '200':
+          description: |
+            An EXISTING active/disabled source for this URL was updated in place
+            (`created: false`, `id` = the existing row's id).
           content:
             application/json:
               schema:
@@ -600,6 +613,13 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: |
+            A source for this URL already exists as `rejected` or `pending_approval` —
+            use the source-promotion loop, not register (governance guard).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '413': { $ref: '#/components/responses/TooLarge' }
 
   /api/sources/pending:
@@ -794,6 +814,10 @@ paths:
         at read time; a manual ack/resolve always wins. `open_count` feeds the top-bar
         bell badge. Read — not gated.
       security: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
       responses:
         '200':
           description: Alerts + open count.
@@ -808,6 +832,11 @@ paths:
                     items: { $ref: '#/components/schemas/AlertView' }
                   open_count: { type: integer, minimum: 0 }
                 additionalProperties: false
+        '400':
+          description: Out-of-range limit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/alerts/{id}/acknowledge:
     post:

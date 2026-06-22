@@ -1,11 +1,13 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import type {
-  ReviewUseCase,
-  SourceReviewUseCase,
-  TeamUseCase,
-  AlertsUseCase,
+import {
+  type ReviewUseCase,
+  type SourceReviewUseCase,
+  type TeamUseCase,
+  type AlertsUseCase,
+  ALERTS_DEFAULT_LIMIT,
+  ALERTS_MAX_LIMIT,
 } from '../../application/index.js';
 import type { Logger } from '../../application/ports/index.js';
 import { toAdminEvidence } from './admin-evidence-dto.js';
@@ -15,6 +17,7 @@ import {
   MissingApproverError,
   SourceNotFoundError,
   SourceNotReviewableError,
+  SourceConflictError,
   InvalidPatchError,
   FieldProposalNotFoundError,
   PromotionTargetNotSupportedError,
@@ -369,7 +372,7 @@ export class ReviewApi {
       if (!parsed.success)
         return sendError(res, 400, 'approver, domain, kind and tier are required');
       return this.mapErrors(res, async () => {
-        const source = await this.sourceReview.createSource({
+        const { source, created } = await this.sourceReview.createSource({
           approver: parsed.data.approver,
           domain: parsed.data.domain,
           kind: parsed.data.kind,
@@ -377,7 +380,8 @@ export class ReviewApi {
           country: parsed.data.country,
           cadenceDays: parsed.data.cadence_days,
         });
-        sendJson(res, 201, { id: source.id, created: true });
+        // 201 when a new source was created; 200 when an existing one was updated.
+        sendJson(res, created ? 201 : 200, { id: source.id, created });
       });
     }
 
@@ -417,7 +421,11 @@ export class ReviewApi {
 
     // ── Alerts (ACR-8) ───────────────────────────────────────────────────────
     if (method === 'GET' && path === '/api/alerts') {
-      return sendJson(res, 200, await this.alerts.listAlerts());
+      const limit = parseIntParam(url.searchParams.get('limit'), ALERTS_DEFAULT_LIMIT);
+      if (limit === null || limit < 1 || limit > ALERTS_MAX_LIMIT) {
+        return sendError(res, 400, `limit must be 1..${ALERTS_MAX_LIMIT}`);
+      }
+      return sendJson(res, 200, await this.alerts.listAlerts(limit));
     }
     const ackAlert = path.match(/^\/api\/alerts\/([^/]+)\/acknowledge$/);
     if (method === 'POST' && ackAlert) {
@@ -538,6 +546,7 @@ export class ReviewApi {
       if (err instanceof SourceNotReviewableError) {
         return sendError(res, 409, `source is not awaiting approval (status: ${err.status})`);
       }
+      if (err instanceof SourceConflictError) return sendError(res, 409, err.message);
       if (err instanceof MissingApproverError) return sendError(res, 400, 'approver is required');
       if (err instanceof InvalidPatchError) return sendError(res, 400, err.message);
       if (err instanceof EvidenceIncompleteError) return sendError(res, 400, err.message);
@@ -575,7 +584,7 @@ const RejectBody = z.object({ approver: z.string().min(1), reason: z.string().op
 const InviteMemberBody = z.object({
   approver: z.string().min(1),
   name: z.string().min(1),
-  email: z.string().min(1),
+  email: z.string().email(),
   role: z.string().optional(),
 });
 /** Update the signed-in reviewer's own display name (ACR-11 Profile). */
