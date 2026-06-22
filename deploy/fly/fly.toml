@@ -45,6 +45,9 @@ primary_region = "fra"           # Frankfurt — near the eu-central-1 evidence 
   # PUBLIC_CORS_ORIGIN = "https://dealroute.example"
 
 [http_service]
+  # Bind this service to the named `app` process (the `serve` command). With named
+  # processes defined above, every service MUST declare which process(es) it serves.
+  processes = ["app"]
   internal_port = 8080           # the container listens here (REVIEW_API_PORT above)
   force_https = true             # managed TLS — the panel (HTTPS) can call it without mixed-content
   auto_stop_machines = "off"     # keep it always-on so the panel never hits a cold start
