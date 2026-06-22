@@ -46,9 +46,18 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
   describe(`Database contract: ${name}`, () => {
     it('sources: upsert, getById, listDue honours next_due and active status', async () => {
       const db = await makeDb();
-      const due = makeSource({ status: 'active', next_due: '2020-01-01T00:00:00.000Z' });
-      const future = makeSource({ status: 'active', next_due: '2999-01-01T00:00:00.000Z' });
-      const disabled = makeSource({ status: 'disabled', next_due: null });
+      // Distinct URLs: these are three DIFFERENT sources (url is the natural key now).
+      const due = makeSource({
+        url: 'https://a.de',
+        status: 'active',
+        next_due: '2020-01-01T00:00:00.000Z',
+      });
+      const future = makeSource({
+        url: 'https://b.de',
+        status: 'active',
+        next_due: '2999-01-01T00:00:00.000Z',
+      });
+      const disabled = makeSource({ url: 'https://c.de', status: 'disabled', next_due: null });
       await db.sources.upsert(due);
       await db.sources.upsert(future);
       await db.sources.upsert(disabled);
@@ -62,8 +71,11 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
 
     it('sources: resolved_url round-trips — a set value and a null both survive (Prereq A)', async () => {
       const db = await makeDb();
-      const resolved = makeSource({ resolved_url: 'https://www.telekom.de/final' });
-      const unresolved = makeSource({ resolved_url: null });
+      const resolved = makeSource({
+        url: 'https://r.de',
+        resolved_url: 'https://www.telekom.de/final',
+      });
+      const unresolved = makeSource({ url: 'https://u.de', resolved_url: null });
       await db.sources.upsert(resolved);
       await db.sources.upsert(unresolved);
       expect((await db.sources.getById(resolved.id))!.resolved_url).toBe(
@@ -73,6 +85,29 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       // update() also persists a newly-set resolved_url (the crawl/monitor write path).
       await db.sources.update({ ...unresolved, resolved_url: 'https://www.x.de/r' });
       expect((await db.sources.getById(unresolved.id))!.resolved_url).toBe('https://www.x.de/r');
+    });
+
+    it('sources: upsert is idempotent on url — re-importing the same URL does NOT duplicate', async () => {
+      // Regression: seed-import mints a fresh id per run, so an id-keyed upsert
+      // INSERTed a duplicate row on every re-seed (observed 49 -> 98 in prod). The
+      // upsert must conflict on `url` (the natural key) so a re-import with a NEW id
+      // updates the existing row in place. Two makeSource() calls = same default url,
+      // different ids — exactly the re-seed scenario.
+      const db = await makeDb();
+      const first = makeSource({ url: 'https://www.netflix.com/de', tier: 1 });
+      const second = makeSource({ url: 'https://www.netflix.com/de', tier: 2 });
+      expect(first.id).not.toBe(second.id);
+
+      await db.sources.upsert(first);
+      await db.sources.upsert(second);
+
+      const all = await db.sources.listByStatus(first.status);
+      const sameUrl = all.filter((s) => s.url === 'https://www.netflix.com/de');
+      expect(sameUrl).toHaveLength(1); // one row, not two
+      // The conflicting fields were updated (tier 1 -> 2)...
+      expect(sameUrl[0]!.tier).toBe(2);
+      // ...and the row kept its ORIGINAL id (the first insert wins identity).
+      expect(sameUrl[0]!.id).toBe(first.id);
     });
 
     it('deals: insert, getById, listByStatus, updateStatus', async () => {

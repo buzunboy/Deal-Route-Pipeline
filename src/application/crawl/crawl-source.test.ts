@@ -344,7 +344,13 @@ describe('CrawlSourceUseCase', () => {
 
   it('reliability decides cadence: a flaky source is scheduled further out than a healthy one', async () => {
     // A successful crawl of a high-reliability source → tight cadence (≈base).
-    const healthy = makeSource({ reliability_score: 0.95, cadence_days: 3, next_due: null });
+    // Distinct url: url is the source's natural key (upsert dedupes on it).
+    const healthy = makeSource({
+      url: 'https://healthy.de',
+      reliability_score: 0.95,
+      cadence_days: 3,
+      next_due: null,
+    });
     await env.db.sources.upsert(healthy);
     await env.uc.execute({ sourceId: healthy.id });
     const healthyDue = (await env.db.sources.getById(healthy.id))!.next_due!;

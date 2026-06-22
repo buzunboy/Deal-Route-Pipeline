@@ -67,13 +67,19 @@ export class InMemoryDb implements Database {
 }
 
 class InMemorySourceRepo implements SourceRepository {
+  // Keyed by `url` (the natural key), NOT id — so re-upserting the same URL with a
+  // fresh id updates the existing row instead of adding a duplicate, matching the
+  // Postgres adapter's ON CONFLICT (url). An existing row keeps its original id.
   private store = new Map<string, Source>();
   async upsert(s: Source): Promise<void> {
-    this.store.set(s.id, { ...s });
+    const existing = this.store.get(s.url);
+    this.store.set(s.url, existing ? { ...s, id: existing.id } : { ...s });
   }
   async getById(id: string): Promise<Source | null> {
-    const s = this.store.get(id);
-    return s ? { ...s } : null;
+    for (const s of this.store.values()) {
+      if (s.id === id) return { ...s };
+    }
+    return null;
   }
   async listDue(now: Date, limit: number): Promise<Source[]> {
     return [...this.store.values()]
@@ -88,7 +94,10 @@ class InMemorySourceRepo implements SourceRepository {
     return [...this.store.values()].filter((s) => s.status === status).map((s) => ({ ...s }));
   }
   async update(s: Source): Promise<void> {
-    this.store.set(s.id, { ...s });
+    // Keyed by url to match the upsert above (the store is url-keyed). The Postgres
+    // adapter updates by id; here we locate the existing row's url (it equals s.url
+    // for a normal update) and overwrite it.
+    this.store.set(s.url, { ...s });
   }
 }
 

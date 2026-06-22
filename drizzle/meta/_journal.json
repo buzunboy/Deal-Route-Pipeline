@@ -99,6 +99,13 @@
       "when": 1782033394168,
       "tag": "0013_right_hawkeye",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1782120275240,
+      "tag": "0014_bouncy_stature",
+      "breakpoints": true
     }
   ]
 }

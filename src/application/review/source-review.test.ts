@@ -21,6 +21,7 @@ describe('SourceReviewUseCase (source-promotion loop)', () => {
 
   async function seedPending() {
     const src = makeSource({
+      url: 'https://pending.de',
       status: 'pending_approval',
       type: 'discovered',
       tier: 4,
@@ -32,7 +33,9 @@ describe('SourceReviewUseCase (source-promotion loop)', () => {
 
   it('lists only pending sources', async () => {
     await seedPending();
-    await db.sources.upsert(makeSource({ status: 'active' }));
+    // Distinct url — a different source (url is the natural key); without this it
+    // would overwrite the pending row instead of adding a second, active source.
+    await db.sources.upsert(makeSource({ url: 'https://active.de', status: 'active' }));
     const pending = await uc.listPending();
     expect(pending).toHaveLength(1);
     expect(pending[0]!.status).toBe('pending_approval');
