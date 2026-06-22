@@ -15,6 +15,7 @@ import type {
   PublishedFilters,
   CandidateQuery,
   CandidateDealCounts,
+  AdminPublishedQuery,
   VocabularyEntry,
   ReviewAction,
 } from '../../domain/index.js';
@@ -92,6 +93,17 @@ export interface DealRepository {
    * return identical numbers for the same data (LSP).
    */
   countCandidates(): Promise<CandidateDealCounts>;
+  /**
+   * The GATED admin "Published deals" screen (ACR-10): deals in the
+   * {@link ADMIN_PUBLISHED_STATUSES} set (`published` + `expired` — publication
+   * HISTORY, not just the live feed), ordered newest-published-first
+   * (`published_at` desc NULLS LAST) then `id`, paginated. Both adapters MUST order
+   * identically (LSP). Distinct from {@link listPublished} (public, published-only,
+   * reliability-ranked).
+   */
+  listAdminPublished(query: AdminPublishedQuery): Promise<DealRecord[]>;
+  /** Total deals in the admin-published status set — for the screen's `total`. */
+  countAdminPublished(): Promise<number>;
 }
 
 export interface CrawlRunRepository {

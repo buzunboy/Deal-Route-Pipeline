@@ -143,6 +143,25 @@ describe('ReviewApi (HTTP integration)', () => {
     expect((await fetch(`${base}/api/audit?since=not-a-date`)).status).toBe(400);
   });
 
+  it('GET /api/published returns the admin publication-history screen (ACR-10)', async () => {
+    await seedCandidate({ status: 'published', published_at: '2026-06-10T00:00:00.000Z' });
+    await seedCandidate({ status: 'expired', published_at: '2026-05-01T00:00:00.000Z' });
+    await seedCandidate({ status: 'candidate' }); // excluded
+
+    const res = await fetch(`${base}/api/published?limit=50`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      deals: { status: string; geo: string; true_monthly: number; published_at: string }[];
+      total: number;
+    };
+    expect(body.total).toBe(2);
+    expect(body.deals.map((d) => d.status)).toEqual(['live', 'unpublished']); // newest first
+    expect(body.deals[0]!.geo).toBeDefined();
+
+    // out-of-range limit → 400.
+    expect((await fetch(`${base}/api/published?limit=9999`)).status).toBe(400);
+  });
+
   it('POST approve publishes the deal (with approver)', async () => {
     const deal = await seedCandidate();
     const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {

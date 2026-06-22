@@ -467,6 +467,39 @@ describe('ReviewUseCase', () => {
     });
   });
 
+  // ── adminPublished (ACR-10) ───────────────────────────────────────────────
+  describe('adminPublished', () => {
+    it('returns live + unpublished history newest-first with a total, projected', async () => {
+      await makeCandidate(db, randomUUID(), {
+        status: 'published',
+        published_at: '2026-06-01T00:00:00.000Z',
+      });
+      await makeCandidate(db, randomUUID(), {
+        status: 'published',
+        published_at: '2026-06-10T00:00:00.000Z',
+      });
+      await makeCandidate(db, randomUUID(), {
+        status: 'expired',
+        published_at: '2026-05-01T00:00:00.000Z',
+      });
+      await makeCandidate(db, randomUUID(), { status: 'candidate' }); // excluded
+
+      const { deals, total } = await uc.adminPublished();
+      expect(total).toBe(3);
+      expect(deals.map((d) => d.status)).toEqual(['live', 'live', 'unpublished']);
+      // newest published_at first
+      expect(deals[0]!.published_at).toBe('2026-06-10T00:00:00.000Z');
+      // projected shape
+      expect(deals[0]!.geo).toBeDefined();
+      expect(deals[0]!.true_monthly).toBeDefined();
+
+      // pagination: page size 1 → first row, total unchanged.
+      const page = await uc.adminPublished({ limit: 1, offset: 0 });
+      expect(page.deals).toHaveLength(1);
+      expect(page.total).toBe(3);
+    });
+  });
+
   // ── auditFeed (ACR-7) ─────────────────────────────────────────────────────
   describe('auditFeed', () => {
     it('projects recent review rows newest-first, filtered by actor/entity, capped', async () => {

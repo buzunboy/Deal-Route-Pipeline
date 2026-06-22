@@ -44,6 +44,8 @@ tags:
     description: Source-promotion loop — approve/reject proposed crawl sources. (admin)
   - name: Audit
     description: Cross-deal audit feed of recent review decisions. (admin)
+  - name: Published
+    description: Admin published-deals screen — publication history. (admin)
   - name: Test page
     description: Built-in HTML review harness.
 
@@ -345,6 +347,43 @@ paths:
                 additionalProperties: false
         '400':
           description: Out-of-range limit or an unparseable `since`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/published:
+    get:
+      tags: [Published]
+      summary: Admin "Published deals" screen — publication history (ACR-10)
+      operationId: listAdminPublished
+      description: |
+        Live (`published`) + unpublished (`expired`) deals — publication HISTORY, not
+        just the live feed — newest-published-first, paginated. Curated admin row
+        (not the public allow-list, but not the whole record either). Read — not gated.
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 100000, default: 0 }
+      responses:
+        '200':
+          description: Published-screen rows + total.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deals, total]
+                properties:
+                  deals:
+                    type: array
+                    items: { $ref: '#/components/schemas/AdminPublishedDeal' }
+                  total: { type: integer, minimum: 0 }
+                additionalProperties: false
+        '400':
+          description: Out-of-range pagination.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -935,6 +974,28 @@ components:
         detail: { type: [string, 'null'] }
         entity_id: { type: string, format: uuid }
         at: { type: string, format: date-time }
+      additionalProperties: false
+    AdminPublishedDeal:
+      type: object
+      description: One row on the admin "Published deals" screen (ACR-10).
+      required: [id, service, provider, geo, true_monthly, published_at, status]
+      properties:
+        id: { type: string, format: uuid }
+        service: { type: string }
+        provider: { type: string }
+        geo:
+          type: string
+          description: The deal's country (panel column "geo").
+        true_monthly:
+          type: number
+          description: Amortised monthly true cost (panel column "true_monthly").
+        published_at: { type: [string, 'null'], format: date-time }
+        status:
+          type: string
+          enum: [live, re-review, unpublished]
+          description: |
+            Panel lifecycle status. `published` → `live`; `expired` → `unpublished`.
+            `re-review` is reserved (no single backing pipeline status today).
       additionalProperties: false
     ReviewRecord:
       type: object

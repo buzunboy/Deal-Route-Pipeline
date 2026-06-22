@@ -32,6 +32,7 @@ import {
   LOW_CONFIDENCE_MAX,
   zeroByRoute,
   isRouteType,
+  ADMIN_PUBLISHED_STATUSES,
 } from '../../../domain/index.js';
 import type {
   Source,
@@ -50,6 +51,7 @@ import type {
   PublishedFilters,
   CandidateQuery,
   CandidateDealCounts,
+  AdminPublishedQuery,
   VocabularyEntry,
   ReviewAction,
 } from '../../../domain/index.js';
@@ -437,6 +439,29 @@ class PgDealRepo extends PgRepo implements DealRepository {
       if (isRouteType(r.routeType)) by_route[r.routeType] += total;
     }
     return { all_pending, low_confidence, human_edited, by_route };
+  }
+  async listAdminPublished(query: AdminPublishedQuery): Promise<DealRecord[]> {
+    // published + expired (publication history), newest-published-first then id —
+    // mirrors the in-memory adapter step-for-step (LSP).
+    const rows = await this.run('deals.listAdminPublished', () =>
+      this.db
+        .select()
+        .from(schema.deals)
+        .where(inArray(schema.deals.status, [...ADMIN_PUBLISHED_STATUSES]))
+        .orderBy(sql`${schema.deals.publishedAt} desc nulls last`, asc(schema.deals.id))
+        .limit(query.limit)
+        .offset(query.offset),
+    );
+    return rows.map(rowToDeal);
+  }
+  async countAdminPublished(): Promise<number> {
+    const rows = await this.run('deals.countAdminPublished', () =>
+      this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.deals)
+        .where(inArray(schema.deals.status, [...ADMIN_PUBLISHED_STATUSES])),
+    );
+    return rows[0]?.n ?? 0;
   }
 }
 

@@ -211,6 +211,24 @@ suite('review edit / promote / manual-capture (Container + Postgres)', () => {
     expect(after.rejected_today - before.rejected_today).toBe(1);
   });
 
+  it('adminPublished returns live + unpublished history newest-first over real SQL (ACR-10)', async () => {
+    container = makeContainer(overrides);
+    const before = await container.review.adminPublished();
+    await seedCandidate({ status: 'published', published_at: '2026-06-10T00:00:00.000Z' });
+    await seedCandidate({ status: 'expired', published_at: '2026-05-01T00:00:00.000Z' });
+    await seedCandidate({ status: 'candidate' }); // excluded
+
+    const after = await container.review.adminPublished({ limit: 200, offset: 0 });
+    expect(after.total - before.total).toBe(2);
+    // the two new rows are present, mapped + projected.
+    const live = after.deals.find((d) => d.published_at === '2026-06-10T00:00:00.000Z');
+    const unp = after.deals.find((d) => d.published_at === '2026-05-01T00:00:00.000Z');
+    expect(live!.status).toBe('live');
+    expect(unp!.status).toBe('unpublished');
+    expect(live!.geo).toBeDefined();
+    expect(live!.true_monthly).toBeDefined();
+  });
+
   it('createManualCapture mints a done ad_hoc task + evidence-backed candidate (ACR-12)', async () => {
     container = makeContainer(overrides);
     const candidate = await container.review.createManualCapture('alice', makeLlmDeal(), {

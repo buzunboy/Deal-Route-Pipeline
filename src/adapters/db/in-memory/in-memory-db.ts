@@ -11,7 +11,9 @@ import {
   LOW_CONFIDENCE_MAX,
   zeroByRoute,
   isRouteType,
+  ADMIN_PUBLISHED_STATUSES,
   type CandidateDealCounts,
+  type AdminPublishedQuery,
   type ReviewAction,
   type Source,
   type DealRecord,
@@ -200,6 +202,22 @@ class InMemoryDealRepo implements DealRepository {
     }
     return { all_pending, low_confidence, human_edited, by_route };
   }
+  async listAdminPublished(query: AdminPublishedQuery): Promise<DealRecord[]> {
+    // published + expired (publication history), newest-published-first (published_at
+    // desc NULLS LAST) then id asc — mirrors the Postgres adapter exactly (LSP).
+    const set = new Set<DealStatus>(ADMIN_PUBLISHED_STATUSES);
+    return [...this.store.values()]
+      .filter((d) => set.has(d.status))
+      .sort((a, b) => comparePublishedAtDesc(a, b) || a.id.localeCompare(b.id))
+      .slice(query.offset, query.offset + query.limit)
+      .map((d) => ({ ...d }));
+  }
+  async countAdminPublished(): Promise<number> {
+    const set = new Set<DealStatus>(ADMIN_PUBLISHED_STATUSES);
+    let n = 0;
+    for (const d of this.store.values()) if (set.has(d.status)) n++;
+    return n;
+  }
   async findByDedupeKey(key: string): Promise<DealRecord | null> {
     // Return the highest-confidence non-rejected match, matching PgDealRepo's
     // `orderBy(desc(confidence))` so the canonical-deal choice is identical
@@ -250,6 +268,21 @@ class InMemoryDealRepo implements DealRepository {
  * constraint). Mirrors the Postgres adapter's AND-ed predicates exactly so the two
  * return the same set (LSP). `priceMax` is inclusive on `true_cost_monthly`.
  */
+/**
+ * Compare two deals by `published_at` DESCENDING with NULLS LAST — the admin
+ * published screen's primary order. Returns <0 if `a` sorts first. Mirrors the
+ * Postgres `published_at desc nulls last`. A 0 means equal (or both null) → the
+ * caller falls through to the id tiebreaker.
+ */
+function comparePublishedAtDesc(a: DealRecord, b: DealRecord): number {
+  const av = a.published_at;
+  const bv = b.published_at;
+  if (av === bv) return 0;
+  if (av === null) return 1; // a is null → sorts after b (nulls last)
+  if (bv === null) return -1; // b is null → a sorts first
+  return bv.localeCompare(av); // newer (greater ISO) first
+}
+
 function matchesPublishedFilters(d: DealRecord, f: PublishedFilters): boolean {
   if (f.service !== undefined && d.service !== f.service) return false;
   if (f.country !== undefined && d.country !== f.country) return false;

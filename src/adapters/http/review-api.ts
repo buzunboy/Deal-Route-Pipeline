@@ -22,6 +22,8 @@ import {
   CANDIDATES_MAX_OFFSET,
   AUDIT_DEFAULT_LIMIT,
   AUDIT_MAX_LIMIT,
+  ADMIN_PUBLISHED_MAX_LIMIT,
+  ADMIN_PUBLISHED_MAX_OFFSET,
   type CandidateFilters,
 } from '../../domain/index.js';
 
@@ -77,6 +79,8 @@ export interface ReviewApiOptions {
  *   GET   /api/field-proposals            → [FieldProposalRecord]
  *   GET   /api/audit                      → { entries: [AuditEntry] }   (ACR-7)
  *           ?actor=&entity_id=&since=&limit=
+ *   GET   /api/published                  → { deals: [AdminPublishedDeal], total }  (ACR-10)
+ *           ?limit=&offset=
  *   POST  /api/field-proposals/:key/promote
  *           { approver, canonical_key, label, target } → { vocabulary_entry }
  *   GET   /api/manual-capture-tasks       → [ManualCaptureTask]
@@ -183,6 +187,16 @@ export class ReviewApi {
       if (!parsed.ok) return sendError(res, 400, parsed.error);
       const entries = await this.review.auditFeed(parsed.value);
       return sendJson(res, 200, { entries });
+    }
+    // Admin "Published deals" screen (ACR-10): live + unpublished publication history.
+    if (method === 'GET' && path === '/api/published') {
+      const parsed = parsePageQuery(
+        url.searchParams,
+        ADMIN_PUBLISHED_MAX_LIMIT,
+        ADMIN_PUBLISHED_MAX_OFFSET,
+      );
+      if (!parsed.ok) return sendError(res, 400, parsed.error);
+      return sendJson(res, 200, await this.review.adminPublished(parsed.value));
     }
     if (method === 'GET' && path === '/api/manual-capture-tasks') {
       return sendJson(res, 200, await this.review.listManualCaptureTasks());
@@ -582,6 +596,28 @@ function parseIntParam(raw: string | null, fallback: number): number | null {
   if (raw === null || raw === '') return fallback;
   if (!/^-?\d+$/.test(raw)) return null;
   return Number.parseInt(raw, 10);
+}
+
+/**
+ * Parse a bare `?limit=&offset=` page query, bounded to the given caps (an over-cap
+ * / negative / non-integer value is a 400, never a silent clamp). Default offset 0,
+ * default limit 50 (the common review default). Shared by the admin published +
+ * sources-registry list endpoints.
+ */
+function parsePageQuery(
+  params: URLSearchParams,
+  maxLimit: number,
+  maxOffset: number,
+): ParseResult<{ limit: number; offset: number }> {
+  const limit = parseIntParam(params.get('limit'), 50);
+  if (limit === null || limit < 1 || limit > maxLimit) {
+    return { ok: false, error: `limit must be 1..${maxLimit}` };
+  }
+  const offset = parseIntParam(params.get('offset'), 0);
+  if (offset === null || offset < 0 || offset > maxOffset) {
+    return { ok: false, error: `offset must be 0..${maxOffset}` };
+  }
+  return { ok: true, value: { limit, offset } };
 }
 
 /**

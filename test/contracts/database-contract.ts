@@ -1185,6 +1185,52 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       });
     });
 
+    // ── deals.listAdminPublished + countAdminPublished (ACR-10 admin screen) ──
+    describe('deals.listAdminPublished + countAdminPublished', () => {
+      it('lists published + expired (history), newest-published-first then id; excludes candidate/rejected', async () => {
+        const db = await makeDb();
+        const service = `svc-admin-pub-${randomUUID()}`;
+        // Two published (distinct published_at), one expired, plus excluded states.
+        const older = dealRecord({
+          service,
+          status: 'published',
+          published_at: '2026-06-01T00:00:00.000Z',
+        });
+        const newer = dealRecord({
+          ...sameRoute(older),
+          service,
+          status: 'published',
+          published_at: '2026-06-10T00:00:00.000Z',
+        });
+        const expired = dealRecord({
+          ...sameRoute(older),
+          service,
+          status: 'expired',
+          published_at: '2026-05-01T00:00:00.000Z',
+        });
+        const candidate = dealRecord({ ...sameRoute(older), service, status: 'candidate' });
+        const rejected = dealRecord({ ...sameRoute(older), service, status: 'rejected' });
+        for (const d of [older, newer, expired, candidate, rejected]) await db.deals.insert(d);
+
+        // Fetch a generous page and filter to this case's deals (shared DB).
+        const page = await db.deals.listAdminPublished({ limit: 200, offset: 0 });
+        const mine = page.filter((d) => d.service === service);
+        // newest published_at first; the three published/expired rows only.
+        expect(mine.map((d) => d.id)).toEqual([newer.id, older.id, expired.id]);
+        expect(mine.every((d) => d.status === 'published' || d.status === 'expired')).toBe(true);
+      });
+
+      it('countAdminPublished counts published + expired (delta over a known insert set)', async () => {
+        const db = await makeDb();
+        const before = await db.deals.countAdminPublished();
+        await db.deals.insert(dealRecord({ status: 'published' }));
+        await db.deals.insert(dealRecord({ status: 'expired' }));
+        await db.deals.insert(dealRecord({ status: 'candidate' })); // excluded
+        const after = await db.deals.countAdminPublished();
+        expect(after - before).toBe(2);
+      });
+    });
+
     // ── reviews.countByActionSince + listRecent (ACR-5 rejected_today / ACR-7) ─
     describe('reviews.countByActionSince + listRecent', () => {
       it('countByActionSince counts only that action at/after since (inclusive)', async () => {

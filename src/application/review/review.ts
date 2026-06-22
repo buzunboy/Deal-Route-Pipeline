@@ -24,8 +24,13 @@ import {
   AUDIT_DEFAULT_LIMIT,
   AUDIT_MAX_LIMIT,
   toAuditEntry,
+  ADMIN_PUBLISHED_DEFAULT_LIMIT,
+  ADMIN_PUBLISHED_MAX_LIMIT,
+  ADMIN_PUBLISHED_MAX_OFFSET,
+  toAdminPublishedDeal,
   type CandidateCounts,
   type AuditEntry,
+  type AdminPublishedDeal,
   type DealRecord,
   type Evidence,
   type ManualCaptureTask,
@@ -162,6 +167,24 @@ export class ReviewUseCase {
       limit,
     });
     return rows.map(toAuditEntry);
+  }
+
+  /**
+   * The gated admin "Published deals" screen (ACR-10): publication HISTORY — live
+   * (`published`) + unpublished (`expired`) deals — newest-published-first, projected
+   * to the panel's row shape, with a `total`. Page size/offset clamped to the domain
+   * caps (floor guard; the HTTP boundary 400s an over-cap value).
+   */
+  async adminPublished(
+    opts: { limit?: number; offset?: number } = {},
+  ): Promise<{ deals: AdminPublishedDeal[]; total: number }> {
+    const limit = clamp(opts.limit ?? ADMIN_PUBLISHED_DEFAULT_LIMIT, 1, ADMIN_PUBLISHED_MAX_LIMIT);
+    const offset = clamp(opts.offset ?? 0, 0, ADMIN_PUBLISHED_MAX_OFFSET);
+    const [deals, total] = await Promise.all([
+      this.db.deals.listAdminPublished({ limit, offset }),
+      this.db.deals.countAdminPublished(),
+    ]);
+    return { deals: deals.map(toAdminPublishedDeal), total };
   }
 
   /**
