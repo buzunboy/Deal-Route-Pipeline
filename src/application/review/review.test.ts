@@ -358,6 +358,49 @@ describe('ReviewUseCase', () => {
     });
   });
 
+  // ── createManualCapture (ACR-12 — ad-hoc, no backing task) ────────────────
+  describe('createManualCapture', () => {
+    const evidenceInput = () => ({
+      sourceUrl: 'https://blocked.example/offer',
+      screenshotRef: 'manual/s.png',
+      htmlRef: 'manual/p.html',
+      termsRef: 'manual/t.txt',
+      termsText: 'Disney+ ist im Tarif enthalten für 10 EUR pro Monat.',
+    });
+
+    it('mints a done ad_hoc task + an evidence-backed candidate, never publishes', async () => {
+      const fields = makeLlmDeal({ source_url: 'https://ignored.example' });
+      const candidate = await uc.createManualCapture('alice', fields, evidenceInput());
+
+      // never auto-published; source pinned from evidence; whole record human-edited.
+      expect(['candidate', 'in_review']).toContain(candidate.status);
+      expect(candidate.source_url).toBe('https://blocked.example/offer');
+      expect(candidate.human_edited).toContain('price');
+      // evidence linked
+      expect(await db.evidence.getById(candidate.evidence_id)).not.toBeNull();
+      // a backing ad_hoc task was minted, already done (so it never shows as open work).
+      const open = await db.manualCapture.listOpen(50);
+      expect(open).toHaveLength(0);
+      // audit row written on the new candidate
+      const history = await uc.listReviews(candidate.id);
+      expect(history).toHaveLength(1);
+      expect(history[0]!.action).toBe('edit');
+      expect(history[0]!.approver).toBe('alice');
+    });
+
+    it('rejects incomplete evidence and malformed fields at the boundary; refuses no approver', async () => {
+      await expect(
+        uc.createManualCapture('alice', makeLlmDeal(), { ...evidenceInput(), screenshotRef: '' }),
+      ).rejects.toThrow(/evidence|EVIDENCE_INCOMPLETE/i);
+      await expect(
+        uc.createManualCapture('alice', { not: 'a deal' }, evidenceInput()),
+      ).rejects.toThrow();
+      await expect(uc.createManualCapture('  ', makeLlmDeal(), evidenceInput())).rejects.toThrow(
+        /approver/,
+      );
+    });
+  });
+
   // ── listCandidates filters ────────────────────────────────────────────────
   describe('listCandidates (filters + pagination)', () => {
     it('defaults to the reviewable pair and joins evidence', async () => {

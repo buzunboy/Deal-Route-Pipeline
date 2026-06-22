@@ -289,6 +289,77 @@ export class ReviewUseCase {
       throw new ManualCaptureTaskNotOpenError(taskId, task.status);
     }
 
+    const candidate = await this.mintCandidateFromCapture(
+      approver,
+      fields,
+      evidence,
+      `manual capture from task ${taskId} (${task.reason})`,
+    );
+    await this.db.manualCapture.markDone(taskId, `captured by ${approver}`);
+    this.logger.info('manual-capture task completed → candidate created', {
+      taskId,
+      dealId: candidate.id,
+      approver,
+      status: candidate.status,
+    });
+    return candidate;
+  }
+
+  /**
+   * Create a candidate from an AD-HOC manual capture (ACR-12) — a deal a reviewer
+   * enters from scratch with NO backing crawler "couldn't read" task. Mints a
+   * `done` manual-capture task (reason `ad_hoc`, so the provenance is auditable) AND
+   * the evidence-backed candidate in one call. Same trust contract as
+   * {@link completeManualCapture}: evidence REQUIRED, source_url pinned from the
+   * evidence, the whole record tagged `human_edited`, validated, NEVER auto-published.
+   */
+  async createManualCapture(
+    approver: string,
+    fields: unknown,
+    evidence: ManualCaptureEvidenceInput,
+  ): Promise<DealRecord> {
+    this.assertApprover(approver, 'create-manual-capture');
+    // Mint the backing task FIRST (status done, reason ad_hoc) so the candidate's
+    // audit line can reference it and the capture has a durable provenance row.
+    const taskId = newId();
+    await this.db.manualCapture.insert({
+      id: taskId,
+      source_id: null,
+      source_url: evidence.sourceUrl,
+      reason: 'ad_hoc',
+      created_at: this.clock.nowIso(),
+      status: 'done',
+      note: `ad-hoc capture by ${approver}`,
+    });
+    const candidate = await this.mintCandidateFromCapture(
+      approver,
+      fields,
+      evidence,
+      `ad-hoc manual capture (task ${taskId})`,
+    );
+    this.logger.info('ad-hoc manual capture → candidate created', {
+      taskId,
+      dealId: candidate.id,
+      approver,
+      status: candidate.status,
+    });
+    return candidate;
+  }
+
+  /**
+   * Shared core of the two manual-capture paths: validate the referenced evidence +
+   * the human fields, persist the evidence bundle, mint a must-review candidate
+   * (source_url pinned from evidence, registrable domain pinned, whole record tagged
+   * `human_edited`), and write the audit row BEFORE the deal (log-before-act). Never
+   * publishes. The caller owns the task lifecycle (close an existing one / mint a new
+   * one) and its own log line.
+   */
+  private async mintCandidateFromCapture(
+    approver: string,
+    fields: unknown,
+    evidence: ManualCaptureEvidenceInput,
+    auditReason: string,
+  ): Promise<DealRecord> {
     // Evidence-required invariant: reject a hollow referenced capture up front.
     const missing = missingReferencedEvidence({
       sourceUrl: evidence.sourceUrl,
@@ -363,21 +434,8 @@ export class ReviewUseCase {
     // Log-before-act (as in approve/reject/editCandidate): the candidate's id is
     // already generated above, so write the audit row FIRST. A mid-call failure
     // then leaves at worst an orphan audit row — never an un-audited candidate.
-    await this.recordReview(
-      candidate.id,
-      'edit',
-      approver,
-      `manual capture from task ${taskId} (${task.reason})`,
-      at,
-    );
+    await this.recordReview(candidate.id, 'edit', approver, auditReason, at);
     await this.db.deals.insert(candidate);
-    await this.db.manualCapture.markDone(taskId, `captured by ${approver}`);
-    this.logger.info('manual-capture task completed → candidate created', {
-      taskId,
-      dealId: candidate.id,
-      approver,
-      status: candidate.status,
-    });
     return candidate;
   }
 

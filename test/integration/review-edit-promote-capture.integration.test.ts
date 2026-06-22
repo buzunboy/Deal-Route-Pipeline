@@ -211,6 +211,28 @@ suite('review edit / promote / manual-capture (Container + Postgres)', () => {
     expect(after.rejected_today - before.rejected_today).toBe(1);
   });
 
+  it('createManualCapture mints a done ad_hoc task + evidence-backed candidate (ACR-12)', async () => {
+    container = makeContainer(overrides);
+    const candidate = await container.review.createManualCapture('alice', makeLlmDeal(), {
+      sourceUrl: 'https://blocked.example/offer',
+      screenshotRef: 'manual/s.png',
+      htmlRef: 'manual/p.html',
+      termsRef: 'manual/t.txt',
+      termsText: 'Disney+ ist im Tarif enthalten für 10 EUR pro Monat.',
+    });
+    // never published; persisted with evidence; whole record human-edited.
+    expect(['candidate', 'in_review']).toContain(candidate.status);
+    const reloaded = (await container.db.deals.getById(candidate.id))!;
+    expect(reloaded.source_url).toBe('https://blocked.example/offer');
+    expect(reloaded.human_edited.length).toBeGreaterThan(0);
+    expect(await container.db.evidence.getById(candidate.evidence_id)).not.toBeNull();
+    // the ad_hoc task is minted done → nothing left in the open queue.
+    expect(await container.db.manualCapture.listOpen(50)).toHaveLength(0);
+    // audit row written.
+    const history = await container.review.listReviews(candidate.id);
+    expect(history.some((r) => r.action === 'edit' && r.approver === 'alice')).toBe(true);
+  });
+
   it('auditFeed projects approve/reject/edit rows newest-first over real SQL (ACR-7)', async () => {
     container = makeContainer(overrides);
     // Drive REAL review actions so the reviews audit rows are written by the use-case.

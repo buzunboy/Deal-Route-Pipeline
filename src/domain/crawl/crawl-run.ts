@@ -38,12 +38,18 @@ export const CrawlRunStoppedReason = z.enum([
 ]);
 export type CrawlRunStoppedReason = z.infer<typeof CrawlRunStoppedReason>;
 
-/** Why a page was routed to manual capture instead of extracted. */
+/**
+ * Why a page was routed to manual capture instead of extracted. The first four are
+ * crawler-detected (a page the pipeline couldn't read); `ad_hoc` is reviewer-
+ * initiated — a deal a human captures from scratch with NO backing crawler task
+ * (ACR-12). Additive enum value; the DB column is free `text`, so no migration.
+ */
 export const ManualCaptureReason = z.enum([
   'login_required',
   'captcha',
   'anti_bot_blocked',
   'fetch_failed',
+  'ad_hoc',
 ]);
 export type ManualCaptureReason = z.infer<typeof ManualCaptureReason>;
 

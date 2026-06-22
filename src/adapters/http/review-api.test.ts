@@ -522,6 +522,35 @@ describe('ReviewApi (HTTP integration)', () => {
     expect((await db.manualCapture.getById(taskId))!.status).toBe('done');
   });
 
+  it('POST /api/manual-capture-tasks (ad-hoc, ACR-12) creates a candidate → 201 { created, candidate_id }', async () => {
+    const res = await fetch(`${base}/api/manual-capture-tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'alice', fields: makeLlmDeal(), evidence: manualEvidence }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { created: boolean; candidate_id: string };
+    expect(body.created).toBe(true);
+    const deal = (await db.deals.getById(body.candidate_id))!;
+    expect(['candidate', 'in_review']).toContain(deal.status); // never published
+    expect(deal.source_url).toBe('https://blocked.example/offer'); // pinned from evidence
+    // a done ad_hoc task was minted (nothing left open).
+    expect(await db.manualCapture.listOpen(50)).toHaveLength(0);
+  });
+
+  it('POST /api/manual-capture-tasks (ad-hoc) with incomplete evidence is a 400, no candidate', async () => {
+    const res = await fetch(`${base}/api/manual-capture-tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        approver: 'alice',
+        fields: makeLlmDeal(),
+        evidence: { ...manualEvidence, terms_text: '' },
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('POST complete with incomplete evidence is a 400 and leaves the task open', async () => {
     const taskId = await openManualTask();
     const res = await fetch(`${base}/api/manual-capture-tasks/${taskId}/complete`, {

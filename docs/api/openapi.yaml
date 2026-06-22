@@ -419,6 +419,42 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ManualCaptureTask' }
+    post:
+      tags: [Manual capture]
+      summary: Create a candidate from an ad-hoc manual capture (no backing task, ACR-12)
+      operationId: createManualCapture
+      description: |
+        For a deal a reviewer captures from scratch — NOT a crawler "couldn't read"
+        task. Mints a `done` `ad_hoc` capture task AND an evidence-backed `candidate`
+        in one call. Same trust contract as `/{id}/complete`: evidence REQUIRED (by
+        reference), source_url pinned from the evidence, whole record `human_edited`,
+        never auto-published. Distinct from `/{id}/complete`, which needs a task id.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompleteManualBody' }
+      responses:
+        '201':
+          description: Candidate created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [created, candidate_id]
+                properties:
+                  created: { type: boolean }
+                  candidate_id: { type: string, format: uuid }
+                additionalProperties: false
+        '400':
+          description: Missing approver/fields, or incomplete evidence bundle.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/TooLarge' }
 
   /api/manual-capture-tasks/{id}/complete:
     post:

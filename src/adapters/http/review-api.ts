@@ -80,6 +80,7 @@ export interface ReviewApiOptions {
  *   POST  /api/field-proposals/:key/promote
  *           { approver, canonical_key, label, target } → { vocabulary_entry }
  *   GET   /api/manual-capture-tasks       → [ManualCaptureTask]
+ *   POST  /api/manual-capture-tasks       { approver, fields, evidence } → { created, candidate_id }  (ad-hoc, ACR-12)
  *   POST  /api/manual-capture-tasks/:id/complete
  *           { approver, fields, evidence } → { deal }  (creates a candidate; never publishes)
  *   GET   /api/sources/pending            → [Source]   (proposed sources)
@@ -205,6 +206,32 @@ export class ReviewApi {
           target: parsed.data.target,
         });
         sendJson(res, 200, { vocabulary_entry: entry });
+      });
+    }
+
+    // Ad-hoc manual capture (ACR-12): create a candidate from scratch with NO
+    // backing task. Distinct from `/:id/complete` (which needs an existing task id).
+    if (method === 'POST' && path === '/api/manual-capture-tasks') {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = CreateManualBody.safeParse(body);
+      if (!parsed.success) return sendError(res, 400, 'approver, fields and evidence are required');
+      return this.mapErrors(res, async () => {
+        const deal = await this.review.createManualCapture(
+          parsed.data.approver,
+          parsed.data.fields,
+          {
+            sourceUrl: parsed.data.evidence.source_url,
+            screenshotRef: parsed.data.evidence.screenshot_ref,
+            htmlRef: parsed.data.evidence.html_ref,
+            termsRef: parsed.data.evidence.terms_ref,
+            termsText: parsed.data.evidence.terms_text,
+          },
+        );
+        // The panel keys off { created, candidate_id }; the new candidate id is deal.id.
+        sendJson(res, 201, { created: true, candidate_id: deal.id });
       });
     }
 
@@ -440,8 +467,8 @@ const PromoteBody = z.object({
   label: z.string().min(1),
   target: z.enum(['vocabulary', 'field']).default('vocabulary'),
 });
-/** Complete a manual-capture task: human deal fields + referenced evidence. */
-const CompleteManualBody = z.object({
+/** Human deal fields + referenced evidence — shared by complete + ad-hoc create. */
+const ManualCaptureBody = z.object({
   approver: z.string().min(1),
   fields: z.record(z.unknown()),
   evidence: z.object({
@@ -452,6 +479,10 @@ const CompleteManualBody = z.object({
     terms_text: z.string().min(1),
   }),
 });
+/** Complete an EXISTING manual-capture task (task id in the path). */
+const CompleteManualBody = ManualCaptureBody;
+/** Create a candidate from an AD-HOC capture with no backing task (ACR-12). */
+const CreateManualBody = ManualCaptureBody;
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const json = JSON.stringify(body);
