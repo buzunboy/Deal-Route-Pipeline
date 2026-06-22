@@ -1,7 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import type { ReviewUseCase, SourceReviewUseCase, TeamUseCase } from '../../application/index.js';
+import type {
+  ReviewUseCase,
+  SourceReviewUseCase,
+  TeamUseCase,
+  AlertsUseCase,
+} from '../../application/index.js';
 import type { Logger } from '../../application/ports/index.js';
 import { toAdminEvidence } from './admin-evidence-dto.js';
 import {
@@ -96,6 +101,9 @@ export interface ReviewApiOptions {
  *   GET   /api/team                       → { members: [TeamMemberView] }   (ACR-10)
  *   POST  /api/team                       { approver, name, email, role? } → { id, invited, email }  (ACR-10)
  *   PATCH /api/profile                    { approver, name } → { updated, name }   (ACR-11)
+ *   GET   /api/alerts                     → { alerts: [AlertView], open_count }   (ACR-8)
+ *   POST  /api/alerts/:id/acknowledge     { approver } → { acknowledged }   (ACR-8)
+ *   POST  /api/alerts/:id/resolve         { approver } → { resolved }   (ACR-8)
  */
 export class ReviewApi {
   private server: Server | null = null;
@@ -108,6 +116,7 @@ export class ReviewApi {
     private readonly review: ReviewUseCase,
     private readonly sourceReview: SourceReviewUseCase,
     private readonly team: TeamUseCase,
+    private readonly alerts: AlertsUseCase,
     private readonly logger: Logger,
     options: ReviewApiOptions = {},
   ) {
@@ -403,6 +412,37 @@ export class ReviewApi {
       return this.mapErrors(res, async () => {
         const member = await this.team.updateProfile(parsed.data.approver, parsed.data.name);
         sendJson(res, 200, { updated: true, name: member.name });
+      });
+    }
+
+    // ── Alerts (ACR-8) ───────────────────────────────────────────────────────
+    if (method === 'GET' && path === '/api/alerts') {
+      return sendJson(res, 200, await this.alerts.listAlerts());
+    }
+    const ackAlert = path.match(/^\/api\/alerts\/([^/]+)\/acknowledge$/);
+    if (method === 'POST' && ackAlert) {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = ApproveBody.safeParse(body);
+      if (!parsed.success) return sendError(res, 400, 'approver is required');
+      return this.mapErrors(res, async () => {
+        await this.alerts.acknowledge(decodeURIComponent(ackAlert[1]!), parsed.data.approver);
+        sendJson(res, 200, { acknowledged: true });
+      });
+    }
+    const resolveAlert = path.match(/^\/api\/alerts\/([^/]+)\/resolve$/);
+    if (method === 'POST' && resolveAlert) {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = ApproveBody.safeParse(body);
+      if (!parsed.success) return sendError(res, 400, 'approver is required');
+      return this.mapErrors(res, async () => {
+        await this.alerts.resolve(decodeURIComponent(resolveAlert[1]!), parsed.data.approver);
+        sendJson(res, 200, { resolved: true });
       });
     }
 

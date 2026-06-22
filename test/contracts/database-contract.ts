@@ -1420,6 +1420,68 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       });
     });
 
+    // ── alerts repo (ACR-8 persisted alert store) ────────────────────────────
+    describe('alerts', () => {
+      const mkAlert = (over: Partial<import('../../src/domain/index.js').AlertRecord> = {}) => ({
+        id: randomUUID(),
+        dedupe_key: `source_reliability_low:${randomUUID()}`,
+        kind: 'source_reliability_low' as const,
+        severity: 'warning' as const,
+        title: 'Source reliability low',
+        summary: 'reliability fell',
+        context: { source_id: randomUUID() },
+        status: 'open' as const,
+        created_at: '2026-06-19T00:00:00.000Z',
+        updated_at: '2026-06-19T00:00:00.000Z',
+        ...over,
+      });
+
+      it('upsertOpen dedupes to ONE open row per dedupe_key (a repeat refreshes it)', async () => {
+        const db = await makeDb();
+        const key = `daily_budget_reached:${randomUUID()}`;
+        await db.alerts.upsertOpen(
+          mkAlert({ kind: 'daily_budget_reached', dedupe_key: key, summary: 'first' }),
+        );
+        await db.alerts.upsertOpen(
+          mkAlert({
+            kind: 'daily_budget_reached',
+            dedupe_key: key,
+            summary: 'refreshed',
+            updated_at: '2026-06-19T06:00:00.000Z',
+          }),
+        );
+        const open = (await db.alerts.list(500)).filter(
+          (a) => a.dedupe_key === key && a.status === 'open',
+        );
+        expect(open).toHaveLength(1); // one open row, not two
+        expect(open[0]!.summary).toBe('refreshed'); // refreshed in place
+      });
+
+      it('getById + setStatus (ack/resolve), list newest-first', async () => {
+        const db = await makeDb();
+        const a = mkAlert({ created_at: '2026-06-19T01:00:00.000Z' });
+        const b = mkAlert({ created_at: '2026-06-19T05:00:00.000Z' });
+        await db.alerts.upsertOpen(a);
+        await db.alerts.upsertOpen(b);
+
+        expect((await db.alerts.getById(a.id))!.dedupe_key).toBe(a.dedupe_key);
+        expect(await db.alerts.getById(randomUUID())).toBeNull();
+
+        await db.alerts.setStatus(a.id, 'resolved', '2026-06-20T00:00:00.000Z');
+        expect((await db.alerts.getById(a.id))!.status).toBe('resolved');
+
+        // a resolved alert frees the partial-unique key → a new occurrence re-opens.
+        await db.alerts.upsertOpen(mkAlert({ dedupe_key: a.dedupe_key }));
+        const sameKey = (await db.alerts.list(500)).filter((x) => x.dedupe_key === a.dedupe_key);
+        expect(sameKey.filter((x) => x.status === 'open')).toHaveLength(1);
+        expect(sameKey.filter((x) => x.status === 'resolved')).toHaveLength(1);
+
+        // list is newest-first (scope to these two ids).
+        const listed = (await db.alerts.list(500)).filter((x) => x.id === a.id || x.id === b.id);
+        expect(listed.map((x) => x.id)).toEqual([b.id, a.id]);
+      });
+    });
+
     // ── conditionVocabulary repo ─────────────────────────────────────────────
     it('conditionVocabulary: upsert + getByKey + list (upsert is idempotent on key)', async () => {
       const db = await makeDb();

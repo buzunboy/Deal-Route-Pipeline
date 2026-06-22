@@ -16,6 +16,7 @@ import type {
   SourceReviewRepository,
   SubscriptionCatalogRepository,
   TeamRepository,
+  AlertRepository,
 } from '../../../application/ports/index.js';
 import {
   ChangeSchema,
@@ -23,6 +24,7 @@ import {
   ReviewRecordSchema,
   SourceReviewRecordSchema,
   TeamMemberSchema,
+  AlertRecordSchema,
   SubscriptionCatalogEntrySchema,
   CostSummarySchema,
   eurFromMicros,
@@ -49,6 +51,8 @@ import type {
   ReviewRecord,
   SourceReviewRecord,
   TeamMember,
+  AlertRecord,
+  AlertStatus,
   SubscriptionCatalogEntry,
   PublishedQuery,
   PublishedFilters,
@@ -119,6 +123,7 @@ export class PostgresDb implements Database {
   readonly sourceReviews: SourceReviewRepository;
   readonly catalog: SubscriptionCatalogRepository;
   readonly team: TeamRepository;
+  readonly alerts: AlertRepository;
 
   private constructor(
     private readonly pool: pg.Pool,
@@ -140,6 +145,7 @@ export class PostgresDb implements Database {
     this.sourceReviews = new PgSourceReviewRepo(db, retrier);
     this.catalog = new PgCatalogRepo(db, retrier);
     this.team = new PgTeamRepo(db, retrier);
+    this.alerts = new PgAlertRepo(db, retrier);
   }
 
   static connect(
@@ -993,6 +999,80 @@ function rowToTeamMember(r: typeof schema.teamMembers.$inferSelect): TeamMember 
     role: r.role,
     status: r.status,
     created_at: isoTimestamp(r.createdAt),
+  });
+}
+
+class PgAlertRepo extends PgRepo implements AlertRepository {
+  async upsertOpen(r: AlertRecord): Promise<void> {
+    // One OPEN row per dedupe_key via the partial unique index (status='open'):
+    // a repeat refreshes the open row; a first sighting (or a re-open after a prior
+    // resolve) inserts. Idempotent under retry (the conflict path is a safe update).
+    await this.run('alerts.upsertOpen', () =>
+      this.db
+        .insert(schema.alertEvents)
+        .values({
+          id: r.id,
+          dedupeKey: r.dedupe_key,
+          kind: r.kind,
+          severity: r.severity,
+          title: r.title,
+          summary: r.summary,
+          context: r.context,
+          status: r.status,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at,
+        })
+        .onConflictDoUpdate({
+          target: schema.alertEvents.dedupeKey,
+          targetWhere: sql`${schema.alertEvents.status} = 'open'`,
+          set: {
+            summary: r.summary,
+            context: r.context,
+            severity: r.severity,
+            title: r.title,
+            updatedAt: r.updated_at,
+          },
+        }),
+    );
+  }
+  async list(limit: number): Promise<AlertRecord[]> {
+    const rows = await this.run('alerts.list', () =>
+      this.db
+        .select()
+        .from(schema.alertEvents)
+        .orderBy(desc(schema.alertEvents.createdAt), desc(schema.alertEvents.id))
+        .limit(limit),
+    );
+    return rows.map(rowToAlert);
+  }
+  async getById(id: string): Promise<AlertRecord | null> {
+    const rows = await this.run('alerts.getById', () =>
+      this.db.select().from(schema.alertEvents).where(eq(schema.alertEvents.id, id)).limit(1),
+    );
+    return rows[0] ? rowToAlert(rows[0]) : null;
+  }
+  async setStatus(id: string, status: AlertStatus, at: string): Promise<void> {
+    await this.run('alerts.setStatus', () =>
+      this.db
+        .update(schema.alertEvents)
+        .set({ status, updatedAt: at })
+        .where(eq(schema.alertEvents.id, id)),
+    );
+  }
+}
+
+function rowToAlert(r: typeof schema.alertEvents.$inferSelect): AlertRecord {
+  return AlertRecordSchema.parse({
+    id: r.id,
+    dedupe_key: r.dedupeKey,
+    kind: r.kind,
+    severity: r.severity,
+    title: r.title,
+    summary: r.summary,
+    context: r.context,
+    status: r.status,
+    created_at: isoTimestamp(r.createdAt),
+    updated_at: isoTimestamp(r.updatedAt),
   });
 }
 

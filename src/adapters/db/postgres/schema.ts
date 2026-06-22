@@ -10,6 +10,7 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 /**
  * Drizzle schema for the DealRoute pipeline (Postgres). Mirrors the data model in
@@ -229,6 +230,38 @@ export const reviews = pgTable(
   },
   // The sole access path is the deal-scoped, time-ordered history (listForDeal).
   (t) => ({ dealIdx: index('reviews_deal_idx').on(t.dealId, t.decidedAt) }),
+);
+
+// Persisted alert events (ACR-8). The fire-and-forget Alerting port still delivers
+// to a webhook/Slack; a PersistingAlerter ALSO records each event here so the admin
+// panel can list/ack/resolve. Open alerts are deduped on `dedupe_key` (one open row
+// per occurrence identity — e.g. source_reliability_low:<sourceId>); a repeat
+// refreshes the existing open row rather than piling up. Manual ack/resolve sets
+// `status`; the use-case overlays read-time AUTO-resolve (budget alert from a past
+// UTC day; reliability alert whose source has recovered).
+export const alertEvents = pgTable(
+  'alert_events',
+  {
+    id: uuid('id').primaryKey(),
+    dedupeKey: text('dedupe_key').notNull(),
+    kind: text('kind').notNull(),
+    severity: text('severity').notNull(),
+    title: text('title').notNull(),
+    summary: text('summary').notNull(),
+    context: jsonb('context').notNull(),
+    status: text('status').notNull(), // open | acknowledged | resolved
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'string' }).notNull(),
+  },
+  (t) => ({
+    statusIdx: index('alert_events_status_idx').on(t.status, t.createdAt),
+    // The conflict target for the open-dedupe upsert: at most one OPEN row per
+    // dedupe_key. A partial unique index (status='open') lets a resolved alert with
+    // the same key coexist (history) while a repeat re-opens the single open row.
+    openDedupeUnique: uniqueIndex('alert_events_open_dedupe_unique')
+      .on(t.dedupeKey)
+      .where(sql`${t.status} = 'open'`),
+  }),
 );
 
 // Team / reviewer registry (ACR-10 Team + ACR-11 Profile). The pipeline is the

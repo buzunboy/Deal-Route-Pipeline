@@ -44,6 +44,39 @@ suite('Alerting wiring (Container + Postgres)', () => {
     expect(alerter.events).toHaveLength(1);
     expect(alerter.events[0]!.kind).toBe('source_reliability_low');
     expect(alerter.events[0]!.context.source_id).toBe(source.id);
+
+    // ACR-8: the PersistingAlerter wrapper also stored it (open) — the panel reads this.
+    const listed = await container.alerts.listAlerts();
+    const persisted = listed.alerts.find((a) => a.body.includes('flaky.de'));
+    expect(persisted).toBeDefined();
+    expect(persisted!.status).toBe('open'); // source still below threshold → open
+    expect(listed.open_count).toBeGreaterThanOrEqual(1);
+  });
+
+  it('ACR-8: a persisted reliability alert auto-resolves once the source recovers, ack/resolve persists', async () => {
+    const alerter = new FakeAlerter();
+    const source = makeSource({ url: 'https://recover.de/offer', reliability_score: 0.4 });
+    container = makeContainer({
+      fetcher: new ScriptedFetcher({}),
+      llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [makeLlmDeal()] }) }),
+      alerting: alerter,
+    });
+    await container.db.sources.upsert(source);
+    await container.crawlSource.execute({ sourceId: source.id }); // fails → alert persisted open
+
+    // The source recovers (e.g. a later good crawl) → the open alert auto-resolves at read.
+    const recovered = (await container.db.sources.getById(source.id))!;
+    await container.db.sources.update({ ...recovered, reliability_score: 0.9 });
+    const afterRecovery = await container.alerts.listAlerts();
+    const alert = afterRecovery.alerts.find((a) => a.body.includes('recover.de'))!;
+    expect(alert.status).toBe('resolved'); // auto-resolved (no manual action)
+
+    // A manual acknowledge still persists durably (independent of the auto rule).
+    // Re-drop reliability so the auto rule would say "open", proving manual wins.
+    await container.db.sources.update({ ...recovered, reliability_score: 0.1 });
+    await container.alerts.acknowledge(alert.id, 'alice');
+    const afterAck = await container.alerts.listAlerts();
+    expect(afterAck.alerts.find((a) => a.id === alert.id)!.status).toBe('acknowledged');
   });
 
   it('fires a daily_budget_reached alert when the guard hits its ceiling (reading real spend)', async () => {

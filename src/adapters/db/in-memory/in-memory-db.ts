@@ -16,6 +16,8 @@ import {
   type AdminPublishedQuery,
   type ReviewAction,
   type TeamMember,
+  type AlertRecord,
+  type AlertStatus,
   type Source,
   type DealRecord,
   type CrawlRun,
@@ -48,6 +50,7 @@ import type {
   SourceReviewRepository,
   SubscriptionCatalogRepository,
   TeamRepository,
+  AlertRepository,
 } from '../../../application/ports/index.js';
 
 /**
@@ -74,6 +77,7 @@ export class InMemoryDb implements Database {
   sourceReviews: SourceReviewRepository = new InMemorySourceReviewRepo();
   catalog: SubscriptionCatalogRepository = new InMemoryCatalogRepo();
   team: TeamRepository = new InMemoryTeamRepo();
+  alerts: AlertRepository = new InMemoryAlertRepo();
 }
 
 class InMemorySourceRepo implements SourceRepository {
@@ -557,6 +561,43 @@ class InMemoryTeamRepo implements TeamRepository {
     return [...this.store.values()]
       .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
       .map((m) => ({ ...m }));
+  }
+}
+
+class InMemoryAlertRepo implements AlertRepository {
+  private alerts: AlertRecord[] = [];
+  async upsertOpen(record: AlertRecord): Promise<void> {
+    // One OPEN row per dedupe_key: refresh an existing open row, else insert.
+    // Mirrors the Postgres partial-unique upsert (status='open').
+    const i = this.alerts.findIndex(
+      (a) => a.dedupe_key === record.dedupe_key && a.status === 'open',
+    );
+    if (i !== -1) {
+      this.alerts[i] = {
+        ...this.alerts[i]!,
+        summary: record.summary,
+        context: { ...record.context },
+        severity: record.severity,
+        title: record.title,
+        updated_at: record.updated_at,
+      };
+    } else {
+      this.alerts.push({ ...record, context: { ...record.context } });
+    }
+  }
+  async list(limit: number): Promise<AlertRecord[]> {
+    return [...this.alerts]
+      .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))
+      .slice(0, limit)
+      .map((a) => ({ ...a, context: { ...a.context } }));
+  }
+  async getById(id: string): Promise<AlertRecord | null> {
+    const a = this.alerts.find((x) => x.id === id);
+    return a ? { ...a, context: { ...a.context } } : null;
+  }
+  async setStatus(id: string, status: AlertStatus, at: string): Promise<void> {
+    const i = this.alerts.findIndex((x) => x.id === id);
+    if (i !== -1) this.alerts[i] = { ...this.alerts[i]!, status, updated_at: at };
   }
 }
 

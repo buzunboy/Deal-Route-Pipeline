@@ -7,6 +7,7 @@ import {
   ReviewUseCase,
   SourceReviewUseCase,
   TeamUseCase,
+  AlertsUseCase,
   MonitorSourceUseCase,
   MetricsUseCase,
   DailyBudgetGuard,
@@ -52,6 +53,7 @@ import { InMemoryDb } from '../adapters/db/in-memory/in-memory-db.js';
 import { PostgresDb } from '../adapters/db/postgres/postgres-db.js';
 import { NoopAlerter } from '../adapters/alerting/noop-alerter.js';
 import { WebhookAlerter } from '../adapters/alerting/webhook-alerter.js';
+import { PersistingAlerter } from '../adapters/alerting/persisting-alerter.js';
 
 /**
  * The ONE composition root. It reads typed config and constructs concrete
@@ -106,6 +108,7 @@ export class Container {
   readonly review: ReviewUseCase;
   readonly sourceReview: SourceReviewUseCase;
   readonly team: TeamUseCase;
+  readonly alerts: AlertsUseCase;
   readonly monitor: MonitorSourceUseCase;
   readonly metrics: MetricsUseCase;
   readonly dailyBudgetGuard: DailyBudgetGuard;
@@ -133,7 +136,17 @@ export class Container {
     // Built BEFORE the browser agent (the search agent threads it in).
     this.suffixOracle = overrides.suffixOracle ?? tldtsSuffixOracle;
     this.browserAgent = overrides.browserAgent ?? this.buildBrowserAgent(config);
-    this.alerting = overrides.alerting ?? this.buildAlerter(config);
+    // The DELIVERY alerter (webhook/Slack or noop), then WRAP it so every alert is
+    // also PERSISTED (ACR-8) — the panel's Alerts screen + bell read the store, while
+    // delivery still goes to the inner alerter. Best-effort: a persist failure never
+    // affects the lane. A test-supplied `overrides.alerting` is still wrapped, so the
+    // persisted-alert path is exercised end-to-end through the real Container.
+    this.alerting = new PersistingAlerter(
+      overrides.alerting ?? this.buildAlerter(config),
+      this.db.alerts,
+      this.clock,
+      this.logger,
+    );
     // NB: there is intentionally no job queue wired here. v1 runs as external
     // cron invoking the CLI (`crawl --due`, `monitor --due`, `ingest
     // --community-due`) — see README "Deployment". The `Queue` port + pg-boss/
@@ -199,6 +212,7 @@ export class Container {
       config.country,
     );
     this.team = new TeamUseCase(this.db, this.clock, this.logger);
+    this.alerts = new AlertsUseCase(this.db, this.clock, this.logger);
     this.monitor = new MonitorSourceUseCase(
       this.fetcher,
       this.db,

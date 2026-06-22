@@ -120,6 +120,13 @@
       "when": 1782156411599,
       "tag": "0016_magenta_sprite",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1782157075660,
+      "tag": "0017_smart_lorna_dane",
+      "breakpoints": true
     }
   ]
 }

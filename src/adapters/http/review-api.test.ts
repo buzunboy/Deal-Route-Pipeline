@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { AddressInfo } from 'node:net';
 import { ReviewApi } from './review-api.js';
-import { ReviewUseCase, SourceReviewUseCase, TeamUseCase } from '../../application/index.js';
+import {
+  ReviewUseCase,
+  SourceReviewUseCase,
+  TeamUseCase,
+  AlertsUseCase,
+} from '../../application/index.js';
 import { DealStatus, type DealRecord } from '../../domain/index.js';
 import { makeSource } from '../../../test/factories/source.js';
 import { InMemoryDb } from '../db/in-memory/in-memory-db.js';
@@ -53,7 +58,8 @@ describe('ReviewApi (HTTP integration)', () => {
       'DE',
     );
     const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    api = new ReviewApi(review, sourceReview, team, new ConsoleLogger('error'), {
+    const alerts = new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    api = new ReviewApi(review, sourceReview, team, alerts, new ConsoleLogger('error'), {
       staticPageHtml: '<html>page</html>',
     });
     await api.listen(0);
@@ -356,6 +362,48 @@ describe('ReviewApi (HTTP integration)', () => {
     expect(bad.status).toBe(400);
   });
 
+  it('GET /api/alerts lists persisted alerts + open_count; POST ack/resolve (ACR-8)', async () => {
+    // Seed an open alert directly in the store (the persisting path is unit-tested).
+    const id = randomUUID();
+    await db.alerts.upsertOpen({
+      id,
+      dedupe_key: `daily_budget_reached:2026-06-19`,
+      kind: 'daily_budget_reached',
+      severity: 'warning',
+      title: 'Daily budget reached',
+      summary: 'budget hit',
+      context: { utc_day: '2026-06-19' },
+      status: 'open',
+      created_at: new Date().toISOString(), // today → stays open under SystemClock
+      updated_at: new Date().toISOString(),
+    });
+
+    const list = (await (await fetch(`${base}/api/alerts`)).json()) as {
+      alerts: { id: string; title: string; status: string }[];
+      open_count: number;
+    };
+    expect(list.alerts.some((a) => a.id === id)).toBe(true);
+    expect(list.open_count).toBeGreaterThanOrEqual(1);
+
+    // acknowledge → 200, status reflects it on the next read.
+    const ack = await fetch(`${base}/api/alerts/${id}/acknowledge`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'alice' }),
+    });
+    expect(ack.status).toBe(200);
+    expect((await db.alerts.getById(id))!.status).toBe('acknowledged');
+
+    // resolve → 200.
+    const resolved = await fetch(`${base}/api/alerts/${id}/resolve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'alice' }),
+    });
+    expect(resolved.status).toBe(200);
+    expect((await db.alerts.getById(id))!.status).toBe('resolved');
+  });
+
   it('GET /api/sources/pending lists pending sources; approve → active', async () => {
     const src = makeSource({ status: 'pending_approval', type: 'discovered', tier: 4 });
     await db.sources.upsert(src);
@@ -509,6 +557,7 @@ describe('ReviewApi (HTTP integration)', () => {
       new ReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'), tldtsSuffixOracle),
       new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error')),
       new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error')),
+      new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error')),
       new ConsoleLogger('error'),
       { evidenceCdnBaseUrl: 'https://cdn.dealroute.example' },
     );
@@ -735,7 +784,8 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     );
     const sourceReview = new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    api = new ReviewApi(review, sourceReview, team, new ConsoleLogger('error'), {
+    const alerts = new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    api = new ReviewApi(review, sourceReview, team, alerts, new ConsoleLogger('error'), {
       authToken: 'secret-token',
     });
     await api.listen(0);
@@ -814,7 +864,15 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
     );
     const sourceReview = new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    const api = new ReviewApi(review, sourceReview, team, new ConsoleLogger('error'), options);
+    const alerts = new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    const api = new ReviewApi(
+      review,
+      sourceReview,
+      team,
+      alerts,
+      new ConsoleLogger('error'),
+      options,
+    );
     await api.listen(0);
     // @ts-expect-error reach into the underlying server for the assigned port
     const base = `http://localhost:${(api['server'].address() as AddressInfo).port}`;

@@ -48,6 +48,8 @@ tags:
     description: Admin published-deals screen — publication history. (admin)
   - name: Team
     description: Reviewer registry + profile (the pipeline is the identity system of record). (admin)
+  - name: Alerts
+    description: Persisted alerts — list, acknowledge, resolve (source reliability / budget). (admin)
   - name: Test page
     description: Built-in HTML review harness.
 
@@ -781,6 +783,88 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '413': { $ref: '#/components/responses/TooLarge' }
 
+  /api/alerts:
+    get:
+      tags: [Alerts]
+      summary: List persisted alerts + the open count (ACR-8)
+      operationId: listAlerts
+      description: |
+        Recent alerts (newest first) with their EFFECTIVE status — a budget alert from
+        a past UTC day and a reliability alert whose source has recovered auto-resolve
+        at read time; a manual ack/resolve always wins. `open_count` feeds the top-bar
+        bell badge. Read — not gated.
+      security: []
+      responses:
+        '200':
+          description: Alerts + open count.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [alerts, open_count]
+                properties:
+                  alerts:
+                    type: array
+                    items: { $ref: '#/components/schemas/AlertView' }
+                  open_count: { type: integer, minimum: 0 }
+                additionalProperties: false
+
+  /api/alerts/{id}/acknowledge:
+    post:
+      tags: [Alerts]
+      summary: Acknowledge an alert (ACR-8)
+      operationId: acknowledgeAlert
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApproverBody' }
+      responses:
+        '200':
+          description: Acknowledged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [acknowledged]
+                properties: { acknowledged: { type: boolean } }
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/alerts/{id}/resolve:
+    post:
+      tags: [Alerts]
+      summary: Resolve an alert (ACR-8)
+      operationId: resolveAlert
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApproverBody' }
+      responses:
+        '200':
+          description: Resolved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [resolved]
+                properties: { resolved: { type: boolean } }
+                additionalProperties: false
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
   # ───────────────────────────── TEST PAGE ──────────────────────────────────
   /:
     get:
@@ -1212,6 +1296,24 @@ components:
           type: integer
           minimum: 0
           description: Decisions this member made (derived from the reviews audit log).
+      additionalProperties: false
+    AlertView:
+      type: object
+      description: One alert as the admin panel sees it (ACR-8), with effective status.
+      required: [id, title, body, severity, status, at]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        body: { type: string }
+        severity: { type: string, enum: [info, warning, critical] }
+        status:
+          type: string
+          enum: [open, acknowledged, resolved]
+          description: |
+            Effective status: a budget alert from a past UTC day and a reliability
+            alert whose source recovered auto-resolve at read time; a manual
+            ack/resolve always wins.
+        at: { type: string, format: date-time }
       additionalProperties: false
     ReviewRecord:
       type: object

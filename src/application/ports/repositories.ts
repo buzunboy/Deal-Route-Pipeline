@@ -19,6 +19,8 @@ import type {
   VocabularyEntry,
   ReviewAction,
   TeamMember,
+  AlertRecord,
+  AlertStatus,
 } from '../../domain/index.js';
 
 /**
@@ -240,6 +242,26 @@ export interface TeamRepository {
   list(): Promise<TeamMember[]>;
 }
 
+/**
+ * Persisted alert store (ACR-8). The fire-and-forget Alerting port still delivers;
+ * this records each event so the panel can list / ack / resolve. Both adapters
+ * implement it identically (LSP).
+ */
+export interface AlertRepository {
+  /**
+   * Record an alert occurrence, deduped to ONE open row per `dedupe_key`: a repeat
+   * refreshes the existing open row's summary/context/updated_at rather than adding
+   * a new row; a first sighting inserts `open`. A previously RESOLVED alert with the
+   * same key re-opens (a new open row). Idempotent under retry.
+   */
+  upsertOpen(record: AlertRecord): Promise<void>;
+  /** All alerts, newest-first (created_at desc, id desc), capped at `limit`. */
+  list(limit: number): Promise<AlertRecord[]>;
+  getById(id: string): Promise<AlertRecord | null>;
+  /** Set an alert's stored status (manual ack/resolve), stamping `updated_at`. */
+  setStatus(id: string, status: AlertStatus, at: string): Promise<void>;
+}
+
 export interface SourceReviewRepository {
   /** Append a source-promotion decision (immutable audit log). */
   insert(review: SourceReviewRecord): Promise<void>;
@@ -267,4 +289,5 @@ export interface Database {
   sourceReviews: SourceReviewRepository;
   catalog: SubscriptionCatalogRepository;
   team: TeamRepository;
+  alerts: AlertRepository;
 }
