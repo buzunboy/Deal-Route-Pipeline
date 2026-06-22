@@ -152,15 +152,16 @@ shared contract suite enforcing LSP. The implementation is sound.
 
 No roadmap step remains. The concrete forward work, highest-value first:
 
-1. **Admin-panel new endpoints (ACR-5 → ACR-12)** [medium] — the panel ships placeholder UI for
-   screens the pipeline has no endpoint for. NOT blocked, but the real next features. Cheapest wins
-   first: **ACR-5** `GET /api/candidates/counts` (a `countCandidates(filters)` + date-bounded
-   "rejected today") and **ACR-12** `POST /api/manual-capture-tasks` (a thin `completeManualCapture`
-   variant). Then the keystone: **ACR-7** the `reviews`-backed **audit feed** (backs both the
-   Dashboard recent-activity card and the Audit-log screen). ACR-6/8/9 (throughput/freshness/alerts)
-   need a metrics/aggregation layer that doesn't exist yet; ACR-10 (Published/Sources/Team/Settings/
-   Metrics) needs new tables. **ACR-11** (profile/team) is a **design decision first** — reviewer
-   identity currently lives in the panel's allow-list, not the pipeline; ask the owner before building.
+1. **Admin-panel new endpoints — mostly DONE (2026-06-22); a metrics layer is what's left.**
+   BUILT (both-adapter parity + contract + unit + integration + OpenAPI): **ACR-5** candidate counts,
+   **ACR-7** audit feed (approve/reject/edit), **ACR-10** admin published + sources registry,
+   **ACR-12** ad-hoc capture, **ACR-11 + ACR-10-Team** team/profile (pipeline is now the reviewer-
+   identity system of record; `team_members`, migration 0016), **ACR-8** persisted alerts +
+   ack/resolve (`alert_events`, migration 0017, read-time auto-resolve). STILL deferred (need a
+   metrics/aggregation layer that doesn't exist yet): **ACR-6** throughput, **ACR-9** queue-freshness,
+   **ACR-10 Metrics** (KPIs/cost/confidence) and **ACR-10 Settings** (needs an owner call on
+   pipeline-owned vs env config). Plus the ACR-7 follow-up: persist `promote`/`extract` as audit rows.
+   Details + fix-when in `docs/KNOWN_ISSUES.md`. The panel renders placeholders for the deferred set.
 2. **Post-deploy hardening** [medium] — the API is live + working, but parked: **rotate** the
    chat-exposed AWS key + GitHub PAT (before going past dev/staging), make the GHCR image private,
    **pin** `:edge` → `:sha-…`, set **`ADMIN_CORS_ORIGIN`** when the panel deploys. Plus the deploy-time
@@ -202,7 +203,8 @@ No roadmap step remains. The concrete forward work, highest-value first:
   origin advanced mid-flight — `git fetch`, `git rebase origin/master`, re-run `npm run check`, then
   push. The main worktree's local `master` then needs a `git pull`.
 - **Migrations:** edit `schema.ts` → `npm run db:generate` → commit the generated `drizzle/*.sql` +
-  `drizzle/meta/*` (in `.prettierignore` — don't reformat). Latest is **`0015`**.
+  `drizzle/meta/*` (in `.prettierignore` — don't reformat). Latest is **`0017`** (0016 team_members,
+  0017 alert_events).
 - **Touch the HTTP API → update `docs/api/openapi.yaml` in the same change** (`npm run api:lint` +
   `npm run api:postman`, commit both). The public DTO stays an allow-list — no internal field leaks.
 - **No `Co-Authored-By` trailer** on commits (global user rule). Husky pre-commit runs
