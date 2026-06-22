@@ -1,0 +1,108 @@
+name: Run lane on Fly
+
+# ONE-CLICK lane runner (manual trigger only — no cron). Pick a lane from the
+# dropdown in the GitHub Actions UI and click "Run workflow"; this runs the exact
+# `fly machine run ... -- <lane>` command we'd otherwise paste into a terminal,
+# INSIDE the Fly org — so the production Postgres stays private (.flycast) and never
+# has to be exposed to GitHub runners.
+#
+# This is the Fly-native counterpart to deploy/k8s/cronjobs.yaml and the
+# (docker-run-against-a-public-DB) .github/workflows/scheduled.yml. Use THIS one when
+# the DB is Fly-internal.
+#
+# SETUP (one-time):
+#   1. Create a Fly deploy token scoped to the app:
+#        fly tokens create deploy -a dealroute-api
+#   2. Add it as a repo secret named FLY_API_TOKEN
+#        (Settings → Secrets and variables → Actions → New repository secret).
+#   The app already holds DATABASE_URL / ANTHROPIC_API_KEY / S3_* as Fly secrets,
+#   which the launched machine inherits — nothing else to configure here.
+#
+# Nothing auto-publishes; lanes are bounded. Discover (Tier-4) is included for
+# completeness but stays off unless you pick it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: 'Lane to run'
+        required: true
+        default: crawl
+        type: choice
+        options: [seed-import, crawl, monitor, ingest, discover]
+      image_tag:
+        description: 'GHCR image tag to run'
+        required: true
+        default: edge
+
+concurrency:
+  # Never overlap a lane run with itself (no source-level advisory lock yet — see
+  # docs/KNOWN_ISSUES.md). A second click waits rather than racing the first.
+  group: run-lane-fly
+  cancel-in-progress: false
+
+jobs:
+  run-lane:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      APP: dealroute-api
+      REGION: fra
+      IMAGE: ghcr.io/buzunboy/deal-route-pipeline:${{ inputs.image_tag }}
+      LANE: ${{ inputs.lane }}
+    steps:
+      - name: Guard — require the Fly token
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::error::FLY_API_TOKEN secret is not set. Create one with"
+            echo "::error::  fly tokens create deploy -a dealroute-api"
+            echo "::error::and add it as the repo secret FLY_API_TOKEN (see this workflow's header)."
+            exit 1
+          fi
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Resolve the lane command
+        id: cmd
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Map the chosen lane → its CLI args + whether it needs the real LLM.
+          # seed-import doesn't call the LLM; the others do (override LLM_PROVIDER).
+          case "$LANE" in
+            seed-import) ARGS="seed-import";          NEEDS_LLM=0 ;;
+            crawl)       ARGS="crawl --due";           NEEDS_LLM=1 ;;
+            monitor)     ARGS="monitor --due";         NEEDS_LLM=1 ;;
+            ingest)      ARGS="ingest --community-due"; NEEDS_LLM=1 ;;
+            discover)    ARGS="discover --broad";       NEEDS_LLM=1 ;;
+            *) echo "::error::unknown lane '$LANE'"; exit 1 ;;
+          esac
+          echo "args=$ARGS"        >> "$GITHUB_OUTPUT"
+          echo "needs_llm=$NEEDS_LLM" >> "$GITHUB_OUTPUT"
+
+      - name: Run the lane (fly machine run, ephemeral, in the Fly org)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Build the -e overrides. The app's secrets (DATABASE_URL, ANTHROPIC_API_KEY,
+          # S3_*) are inherited automatically; we only override the lane-specific env:
+          #   - LLM_PROVIDER=anthropic for lanes that call the model (the app runs `stub`),
+          #   - RUN_MIGRATIONS=false (the schema is already applied by the live API),
+          #   - discover also needs AGENT=search + SEARCH_PROVIDER (kept off otherwise).
+          EXTRA_ENV=(-e RUN_MIGRATIONS=false)
+          if [ "${{ steps.cmd.outputs.needs_llm }}" = "1" ]; then
+            EXTRA_ENV+=(-e LLM_PROVIDER=anthropic)
+          fi
+          if [ "$LANE" = "discover" ]; then
+            EXTRA_ENV+=(-e AGENT=search -e SEARCH_PROVIDER=api)
+          fi
+
+          echo "Running '$LANE' → fly machine run $IMAGE -- ${{ steps.cmd.outputs.args }}"
+          # `--rm` self-deletes the machine on exit. The `--` separates fly's flags
+          # from the container command (without it, fly parses `--due` as its own flag).
+          fly machine run "$IMAGE" \
+            -a "$APP" --region "$REGION" --rm \
+            "${EXTRA_ENV[@]}" \
+            -- ${{ steps.cmd.outputs.args }}
