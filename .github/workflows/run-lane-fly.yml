@@ -34,6 +34,10 @@ on:
         description: 'GHCR image tag to run'
         required: true
         default: edge
+      lane_timeout:
+        description: 'Max wait for the lane before stopping the attached CLI (e.g. 20m, 40m)'
+        required: false
+        default: 20m
 
 concurrency:
   # Never overlap a lane run with itself (no source-level advisory lock yet — see
@@ -44,13 +48,17 @@ concurrency:
 jobs:
   run-lane:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Comfortably above the default lane_timeout (20m) so the in-step `timeout` fires
+    # first with a clean warning, rather than GitHub hard-killing the job. Raise this
+    # too if you set a lane_timeout above ~45m.
+    timeout-minutes: 50
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: dealroute-api
       REGION: fra
       IMAGE: ghcr.io/buzunboy/deal-route-pipeline:${{ inputs.image_tag }}
       LANE: ${{ inputs.lane }}
+      LANE_TIMEOUT: ${{ inputs.lane_timeout }}
     steps:
       - name: Guard — require the Fly token
         run: |
@@ -104,7 +112,27 @@ jobs:
           # guaranteed on PATH in the run step). `--rm` self-deletes the machine on exit.
           # The `--` separates flyctl's flags from the container command (without it,
           # flyctl parses `--due` as its own flag).
-          flyctl machine run "$IMAGE" \
+          #
+          # Stay ATTACHED so the lane's streamed logs AND its exit code surface in this
+          # step — but bound it with `timeout`, because `flyctl machine run` (without
+          # --detach) keeps monitoring and may not exit cleanly after the one-off
+          # command finishes, hanging the step. The lane's own work is bounded (per-run
+          # caps), so LANE_TIMEOUT is a generous backstop, not the expected duration.
+          LANE_TIMEOUT="${LANE_TIMEOUT:-20m}"
+          set +e
+          timeout "$LANE_TIMEOUT" flyctl machine run "$IMAGE" \
             -a "$APP" --region "$REGION" --rm \
             "${EXTRA_ENV[@]}" \
             -- ${{ steps.cmd.outputs.args }}
+          rc=$?
+          set -e
+          if [ "$rc" -eq 124 ]; then
+            # 124 = `timeout` killed it. The lane likely FINISHED (it self-deletes on
+            # exit) but flyctl stayed attached past the wait. Don't fail the run on this;
+            # verify via the API / `flyctl logs`. A genuinely stuck lane shows up there.
+            echo "::warning::flyctl stayed attached past ${LANE_TIMEOUT} and was stopped (exit 124)."
+            echo "::warning::The lane usually completed — confirm with: curl https://dealroute-api.fly.dev/api/candidates"
+            exit 0
+          fi
+          # Any other non-zero is a real lane/launch failure — propagate it.
+          exit "$rc"
