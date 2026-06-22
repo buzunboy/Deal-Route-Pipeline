@@ -1,15 +1,34 @@
 # DealRoute — Post-P3 audit & next-steps handoff
 
+> # ⛔ SUPERSEDED (2026-06-22) — DO NOT use as the current next-steps brief.
+> This doc has been **merged into `docs/DealRoute_Status_and_Roadmap.md`** (the single
+> living status + roadmap source-of-truth), together with the former roadmap doc. Read
+> that instead. This file is kept **only for its design-rationale + as-shipped audit
+> trail** (the per-step "Original plan below, retained for context" records and the
+> 2026-06-20 invariant audit). Its forward-looking "what's next" is now stale by design.
+
 _Self-contained next-steps brief for a FRESH Claude Code session. Originally written
 after a full audit on **2026-06-20**; **kept current** as work merged. `master` is at
-**`e22635d`** (review-API edit/promote/manual-capture/filters + schema v5, 2026-06-21;
-was `849caee` at the best-effort-read policy merge). **ALL post-C Steps 1–6 are DONE + merged
-(1 public API, 2 GDPR/affiliate disclosure, 3 reliability ranking, 4 scheduler, 5 observability,
-6 multi-country foundation). The pipeline is post-C FEATURE-COMPLETE for DE v1** — no
-roadmap step remains; what's left is the deferred-findings register (`docs/KNOWN_ISSUES.md`)
-+ (only when expanding) actually enabling a 2nd country (data/config behind the now-extensible
-seams). This supersedes
-`docs/DealRoute_PostC_Handoff.md` (kept, banner-marked). (`NEXT_SESSION_HANDOFF.md` was deleted.)_
+**`5d2c781`** (CI/deploy: manual Fly API deploy workflow, **2026-06-22**; the API is
+LIVE on Fly — see §5). Notable predecessors: `d09ade0` (admin-panel contract fixes
+ACR-13/14/15/3 + migration `0015`), `e22635d` (review-API edit/promote/manual-capture/
+filters + schema v5), `849caee` (best-effort-read policy). **ALL post-C Steps 1–6 are
+DONE + merged (1 public API, 2 GDPR/affiliate disclosure, 3 reliability ranking, 4
+scheduler, 5 observability, 6 multi-country foundation), the admin `/api/*` surface is
+extended + contract-aligned with the panel, AND the always-on API is DEPLOYED to Fly.io
+(`https://dealroute-api.fly.dev`). The pipeline is post-C FEATURE-COMPLETE for DE v1 and
+running in the cloud** — no roadmap step remains. What's left is: the admin-panel
+**new-endpoint** requests (ACR-5→ACR-12 — counts/dashboard/audit/published/team/settings,
+logged in `docs/KNOWN_ISSUES.md`), the **post-deploy hardening** to-dos (rotate the
+chat-exposed creds, make the GHCR image private, pin the `:edge` tag, set
+`ADMIN_CORS_ORIGIN` — `KNOWN_ISSUES.md`), the rest of the deferred-findings register,
+and (only when expanding) actually enabling a 2nd country (data/config behind the
+now-extensible seams). This supersedes `docs/DealRoute_PostC_Handoff.md` (kept,
+banner-marked). (`NEXT_SESSION_HANDOFF.md` was deleted.)
+Deal-record `schema_version` is **5** (`CURRENT_SCHEMA_VERSION`); latest migration is
+**`drizzle/0015`** (0014 = `sources.url` unique for idempotent upsert; 0015 = source
+`proposal_reason`). Baseline verified 2026-06-22: `npm run check` green — **755 unit/
+contract tests pass, 1 skipped**, lint + typecheck clean._
 
 > **⚠️ POLICY CHANGE since the audit (`849caee`, 2026-06-21):** the **"public pages only"
 > non-negotiable invariant was REVERSED** to **best-effort read any page** (owner decision).
@@ -61,7 +80,27 @@ seams). This supersedes
 > Deal-record schema **v5**, migration **`0013`**: additive `human_edited: string[]` (default `[]`, never
 > LLM-proposed, surfaced in the public DTO). 3 deferred items logged in `KNOWN_ISSUES.md` (manual-capture
 > upload channel, `target:"field"` promotion, the keep-grounding stale-quote residual risk).
-> Deal-record `schema_version` is now **5**; latest migration is now **`drizzle/0013`**.
+> · **Admin-panel contract fixes** (merge **`d09ade0`**, 2026-06-22 — NOT a numbered roadmap step;
+> contract alignment with the admin panel's cross-repo change log) — `ACR-13` `GET /api/candidates`
+> evidence now carries resolved `evidence_screenshot_url`/`evidence_html_url` (from `S3_CDN_BASE_URL`)
+> beside the raw store refs (new `admin-evidence-dto`; `ReviewApi` takes `evidenceCdnBaseUrl`; shared
+> `resolveEvidenceUrl` in the domain `evidence-layout`, public-dto refactored to reuse it); `ACR-14`
+> the OpenAPI `EditCandidateBody.patch` now enumerates the exact `PATCHABLE_FIELDS` (+ Price/Condition/
+> Eligibility/Validity component schemas); `ACR-15` Source gains `proposal_reason` (additive/nullable,
+> **migration `0015`**; the Lane-B discovery rationale is carried onto the proposed source + surfaced on
+> `GET /api/sources/pending`); `ACR-3` OpenAPI `FieldProposalRecord.status` enum reconciled to the live
+> `[open, promoted, rejected]`. +11 tests; OpenAPI + Postman regenerated.
+> · **Cloud deploy — the API is LIVE on Fly.io** (the deploy track merged 2026-06-22, head **`5d2c781`**):
+> `deploy/fly/` (fly.toml + service-setup README), a committed AWS IAM policy + S3 setup script for the
+> evidence bucket, an idempotent `sources.upsert` on `url` (**migration `0014`** — collapse dup URLs, then
+> a unique index; re-seed no longer duplicates rows), 2 GB lane machines (512 MB OOMs the crawl's Chromium),
+> a Playwright base image matched to the pinned lib version, a one-click "Run lane on Fly" workflow, and a
+> manual Fly-API deploy workflow (replacing the inert SSH scaffold). Deployed to region `fra`: Postgres
+> `dealroute-db` attached, `REVIEW_API_TOKEN` + `S3_*` Fly secrets, GHCR image; health/CORS/auth verified.
+> Post-deploy hardening to-dos (rotate the chat-exposed AWS key + GitHub PAT, make the image private, pin
+> `:edge`→sha, set `ADMIN_CORS_ORIGIN` when the panel deploys) are logged in `KNOWN_ISSUES.md`.
+> Deal-record `schema_version` is now **5** (`CURRENT_SCHEMA_VERSION`); latest migration is now
+> **`drizzle/0015`**.
 
 > Binding rules still govern: `CLAUDE.md` + `.claude/rules/`
 > (`architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`).
@@ -75,8 +114,8 @@ seams). This supersedes
 
 1. Read `CLAUDE.md` + the auto-loaded `.claude/rules/` — **binding**.
 2. Green baseline from YOUR OWN worktree: `git rev-parse --abbrev-ref HEAD`, then
-   **`npm install && npm run check && npm run build`**. Expect ~733 unit/contract tests +
-   lint + typecheck green. (A fresh worktree has no `node_modules` — `npm install`
+   **`npm install && npm run check && npm run build`**. Expect ~755 unit/contract tests
+   (1 skipped) + lint + typecheck green (verified 2026-06-22). (A fresh worktree has no `node_modules` — `npm install`
    first; `@aws-sdk/client-s3` is a declared dep, its absence means install didn't run.)
    The Postgres integration tier self-skips without `DATABASE_URL_TEST` (CI runs it).
 3. Re-read the **workflow/environment gotchas** in §8 — they bit earlier sessions
@@ -493,7 +532,7 @@ interactive multi-step BrowserAgent ("Option B").
   rejected if origin advanced mid-flight — `git fetch`, `git rebase origin/master`, re-run
   `npm run check`, then push. The main worktree's local `master` then needs a `git pull`.
 - **Migrations:** edit `schema.ts` → `npm run db:generate` → commit the generated
-  `drizzle/*.sql` + `drizzle/meta/*` (in `.prettierignore` — don't reformat). Latest is `0010`.
+  `drizzle/*.sql` + `drizzle/meta/*` (in `.prettierignore` — don't reformat). Latest is `0015`.
 - **No `Co-Authored-By` trailer** on commits (global user rule). Husky pre-commit runs
   prettier + eslint + typecheck on staged files.
 - **ultracode pattern:** drive each trust-critical change as a Workflow (implement →
@@ -502,18 +541,37 @@ interactive multi-step BrowserAgent ("Option B").
 
 ## 9. First moves for the fresh session
 1. Confirm orientation reads + green baseline (`npm install && npm run check && npm run build`).
-   **ALL post-C steps (1–6) are DONE — the pipeline is post-C feature-complete for DE v1.** No
-   roadmap step is pending; no foundation repair pending.
-2. **There is no next roadmap step.** Forward work, when the business calls for it:
+   **ALL post-C steps (1–6) are DONE, the admin `/api/*` surface is extended + contract-aligned,
+   and the API is LIVE on Fly — the pipeline is post-C feature-complete for DE v1 and running in
+   the cloud.** No roadmap step is pending; no foundation repair pending. (Baseline 2026-06-22:
+   755 unit/contract tests pass, 1 skipped; lint + typecheck clean.)
+2. **There is no next roadmap step.** The concrete forward work, highest-value first:
+   - **Admin-panel new endpoints (ACR-5 → ACR-12)** — the panel ships placeholder UI for screens the
+     pipeline has no endpoint for (`docs/KNOWN_ISSUES.md` → "Admin-panel new-endpoint requests"). The
+     panel is NOT blocked, but these are the real next features. Cheapest real wins first: **ACR-5**
+     `GET /api/candidates/counts` (a `countCandidates(filters)` on `DealRepository` + a date-bounded
+     "rejected today") and **ACR-12** `POST /api/manual-capture-tasks` (a thin `completeManualCapture`
+     variant that mints task+candidate in one call). Then the keystone: **ACR-7** the `reviews`-backed
+     **audit feed** (actor/entity/since filters — it backs both the Dashboard recent-activity card and
+     the Audit-log screen). ACR-6/8/9 (throughput/freshness/alerts) need a metrics/aggregation layer
+     that doesn't exist yet; ACR-10 (Published/Sources/Team/Settings/Metrics) needs new tables. Treat
+     **ACR-11** (profile/team) as a **design decision first** — reviewer identity currently lives in the
+     panel's allow-list, not the pipeline; confirm with the owner before building.
+   - **Post-deploy hardening** (`docs/KNOWN_ISSUES.md` → "Cloud-deployment follow-ups") — the API is
+     live + working, but the owner parked: **rotate** the chat-exposed AWS key + GitHub PAT (do this
+     before going past dev/staging), make the GHCR image private, **pin** the `:edge` image tag to a
+     `:sha-…`, and set **`ADMIN_CORS_ORIGIN`** when the admin panel deploys. Plus the deploy-time CDN
+     scoping gate (expose ONLY `screenshot.png`, not the whole evidence bundle).
+   - **Work down `docs/KNOWN_ISSUES.md`** — the deferred-findings register (e.g. the dormant Postgres
+     contract-suite CI gap [medium], the manual-capture upload channel [medium], the per-request
+     active-source scan, the raw-IDN suffix normalisation, the pg-boss pool bound if/when pg-boss is
+     wired). Pick by the listed fix-when triggers.
    - **Enable a real 2nd country** (Step 6 built the foundation): add a `MARKETS` row
      (`src/domain/markets/markets.ts`) + the country's seed sources, catalog vocab, deny-list, and
      Tier-4 intent queries (all data, behind the now-extensible seams). NO logic change. See the
      KNOWN_ISSUES "multi-country enablement" entry. Ask the owner before enabling (it's a scope call).
-   - **Work down `docs/KNOWN_ISSUES.md`** — the deferred-findings register (e.g. the Postgres
-     contract-suite CI gap, the per-request active-source scan, the raw-IDN suffix normalisation,
-     the pg-boss pool bound if/when pg-boss is wired). Pick by the listed fix-when triggers.
    - **Operate / curate**: real seed-list curation + live tests (the per-source fetcher-selection
-     findings), the deploy-time CDN scoping gate, etc.
+     findings, the dead mydealz RSS feed), etc.
 4. Every change: unit + integration tests (live for new external edges); `code-reviewer` +
    an adversarial-verify pass on anything trust/publish/schema; docs updated (CLAUDE.md
    Commands + Repo layout, README, ARCHITECTURE, roadmap §5; **and `docs/testing/LIVE_TEST_TEMPLATE.md`

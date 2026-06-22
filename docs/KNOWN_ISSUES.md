@@ -31,6 +31,15 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### Ingest-community: a failed triage call's LLM cost is not credited to the budget tally
+- **Severity**: low
+- **Area**: ingest / cost
+- **Location**: `src/application/ingest/ingest-community.ts` (the per-item `try/catch` ~`:186-204`; `costEur` is incremented only on a successful `resp.usage.costEur` and on successful extraction outcomes ~`:210`).
+- **What**: when a triage LLM call throws, the item is counted as `failedItems++` but the cost of that failed call is NOT added to the run's `costEur`. So a run whose items repeatedly fail triage can spend slightly more LLM budget than the `costEur` it reports — a bounded undershoot of the per-run/daily budget guard.
+- **Why deferred**: harmless at current scale — the overshoot is at most a few failed triage calls' worth of tokens per run, the daily ceiling still stops the batch, and nothing auto-publishes. Migrated here from the (now-retired) PostP3 handoff §5, where it was the one finding without a KNOWN_ISSUES home.
+- **Fix-when**: if ingest cost accuracy becomes material (high failure rates or a tight daily ceiling) — credit the failed call's usage in the `catch` (the LLM port returns usage even on a parse failure; on a hard throw, estimate or surface it) so `costEur` reflects all spend.
+- **Logged**: 2026-06-22
+
 ### Cloud-deployment follow-ups (API is live on Fly; these are post-deploy hardening)
 - **Severity**: medium (operational/security hygiene; the API is live + working at `https://dealroute-api.fly.dev`)
 - **Area**: deploy / ops / security

@@ -7,9 +7,8 @@ The crawl / LLM-extraction / verification / monitoring service for **DealRoute**
 Read this before reaching for any `docs/` file. **Statuses:** _LIVING_ = update as work changes · _EVERGREEN_ = founding reference, rarely changes · _HISTORICAL_ = a delivered build plan, do NOT treat as pending work. Detailed coding standards auto-load from `.claude/rules/` (`architecture.md`, `code-style.md`, `extraction-and-schema.md`, `testing.md`, `api-and-openapi.md`) — those are binding.
 
 **START HERE / source-of-truth (LIVING — keep current):**
-- `docs/DealRoute_PostP3_Handoff.md` — **the next-steps brief.** What's built, what's next, the env/workflow gotchas. Currently: Steps 1 (P3 public API) + 2 (GDPR/affiliate disclosure) DONE; **next = Step 3 (reliability ranking)**. _Update it whenever a step ships (state, sha, next step)._
-- `docs/DealRoute_Phase_C_and_Roadmap.md` — **the product roadmap.** §5 is the authoritative post-C step list (Steps 3–6). _Mark a step DONE in §5 when it ships._
-- `docs/KNOWN_ISSUES.md` — **the deferred-findings register** (open + resolved). _Append on every deferred finding; move to Resolved when fixed (see Working habits)._
+- `docs/DealRoute_Status_and_Roadmap.md` — **the ONE living status + roadmap doc.** What's built, what's left, the env/workflow gotchas — merges the former PostP3 handoff + the Phase-C roadmap. Currently: **all post-C Steps 1–6 DONE + merged, the admin `/api/*` surface extended + contract-aligned, and the API LIVE on Fly** — no roadmap step remains; everything outstanding lives in `docs/KNOWN_ISSUES.md`. _Update §2 (built) + §3 (left) whenever work ships._
+- `docs/KNOWN_ISSUES.md` — **the deferred-findings register** (open + resolved) — the actual to-do list now. _Append on every deferred finding; move to Resolved when fixed (see Working habits)._
 - `docs/testing/LIVE_TEST_TEMPLATE.md` — **the live-test results template** (+ filled runs in `docs/testing/results/`). _Use for every real/live test; EXTEND it when a feature adds a recordable field (see Working habits → Live testing)._
 
 **Reference (EVERGREEN — read on demand):**
@@ -17,7 +16,8 @@ Read this before reaching for any `docs/` file. **Statuses:** _LIVING_ = update 
 - `docs/DealRoute_Seed_List_DE.md` — the DE seed sources (provider/bundler/community URLs).
 - `docs/Firecrawl_Integration_Reference.md` — Firecrawl (search+scrape vendor behind ports; v2; Tier-4 backend). Key lives in gitignored `.env` only.
 
-**Historical build records (DELIVERED — banner-marked ✅; NOT pending work):**
+**Historical build records (DELIVERED / SUPERSEDED — banner-marked; NOT pending work):**
+- `docs/DealRoute_PostP3_Handoff.md` + `docs/DealRoute_Phase_C_and_Roadmap.md` — **SUPERSEDED (2026-06-22)** by `docs/DealRoute_Status_and_Roadmap.md`; kept for their per-step "as-shipped" rationale + the Phase-C / agentic-discovery design.
 - `docs/DealRoute_P3_PublicAPI_Handoff.md` (P3 = Step 1), `docs/DealRoute_Phase_C_Plan.md` (C-1/C-2), `docs/DealRoute_Hardening_Plan.md` (post-C-1 hardening), `docs/DealRoute_PostC_Handoff.md` (post-C audit). Kept for design rationale; their "next steps" are stale by design.
 
 **Doc-hygiene rule (do this, don't let docs rot):** when you ship work, update the LIVING docs above in the same change; banner a build plan ✅ DELIVERED once its work merges; never leave two docs claiming to be "the current next step." Keep this map accurate when you add/retire a doc.

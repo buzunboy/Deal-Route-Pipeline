@@ -1,12 +1,19 @@
 # DealRoute — Phase C plan & roadmap to the product goal
 
-> **📍 SOURCE OF TRUTH: the product roadmap (LIVING — keep §5 current).** The
-> sequencing here is the long-range plan to the "verified search engine for
-> subscription bundles" goal. **§5 (post-C steps) is the authoritative step list** —
-> update it whenever a step ships. Phase C itself (C-1 + C-2) is DONE; for the
-> immediate next-steps brief read `docs/DealRoute_PostP3_Handoff.md`. (The older body
-> below — written at the Phase A+B audit — is kept for its sequencing rationale; trust
-> §5 + the active handoff for current status, not any inline "master @ …" snapshot.)_
+> # ⛔ SUPERSEDED (2026-06-22) — no longer the living roadmap.
+> This doc has been **merged into `docs/DealRoute_Status_and_Roadmap.md`** (the single
+> living status + roadmap source-of-truth), together with the former PostP3 handoff. Read
+> that instead. **All numbered roadmap steps (1–6) are DONE + merged** — the pipeline is
+> post-C feature-complete for DE v1 and live in the cloud. This file is kept **only for its
+> Phase-C sequencing rationale + the §4 agentic-discovery design** (the "why it's built this
+> way" history). Its "what's next" framing is stale by design.
+
+> **📍 (historical) SOURCE OF TRUTH: the product roadmap.** The sequencing here is the
+> long-range plan to the "verified search engine for subscription bundles" goal. §5 (post-C
+> steps) was the authoritative step list; all of those steps now show DONE. Phase C itself
+> (C-1 + C-2) is DONE. (The older body below — written at the Phase A+B audit — is kept for
+> its sequencing rationale; trust the consolidated doc for current status, not any inline
+> "master @ …" snapshot.)_
 
 > **The goal (recap).** A trust-first pipeline that turns web sources into
 > evidence-backed _candidate_ deal records a human approves before publish.
@@ -320,6 +327,24 @@ scripted fake → candidates + proposed sources persisted) + a gated live smoke
   dark by default, no schema/trust impact. Datadog/CloudWatch metrics-push adapters are deferred
   (the recipe to build them via the same port is in `docs/DealRoute_Observability.md`). Pull-only
   `stats` over `crawl_runs` still complements it; dashboards/queue-depth come with a metrics backend.
+
+**Post-roadmap (NOT numbered steps — admin-surface + deployment milestones):**
+- **Review-API extension — DONE (`e22635d`, 2026-06-21).** Four gated `/api/*` review actions:
+  `PATCH /api/candidates/:id` reviewer edit (allowlist + `human_edited` tagging), `POST
+  /api/field-proposals/:key/promote`, `POST /api/manual-capture-tasks/:id/complete`, `GET
+  /api/candidates` filters/pagination. Schema **v5**, migration **0013** (`human_edited`).
+- **Admin-panel contract fixes — DONE (`d09ade0`, 2026-06-22).** ACR-13 (resolved evidence URLs on
+  `GET /api/candidates`), ACR-14 (OpenAPI `PATCHABLE_FIELDS` enumerated), ACR-15 (Source
+  `proposal_reason`, migration **0015**), ACR-3 (proposal-status enum reconciled). The admin panel's
+  **new-endpoint** requests (ACR-5 → ACR-12: counts/dashboard/audit/published/team/settings) remain —
+  logged in `docs/KNOWN_ISSUES.md` as the concrete next admin work.
+- **Cloud deploy — DONE (the API is LIVE, head `5d2c781`, 2026-06-22).** The always-on `serve` API is
+  deployed to Fly.io (`https://dealroute-api.fly.dev`, region `fra`): managed Postgres attached, S3
+  evidence bucket + scoped IAM, GHCR image, `REVIEW_API_TOKEN`/`S3_*` Fly secrets; health/CORS/auth
+  verified. Idempotent `sources.upsert` on `url` (migration **0014**), 2 GB lane machines, Playwright
+  base-image pin, and one-click/manual Fly deploy workflows shipped with it. Post-deploy hardening
+  (rotate exposed creds, private image, pin the `:edge` tag, set `ADMIN_CORS_ORIGIN`) is logged in
+  `docs/KNOWN_ISSUES.md`.
 
 ---
 

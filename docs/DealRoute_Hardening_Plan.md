@@ -4,7 +4,7 @@
 > describes (monitor daily-budget guard, LLM-truncation flag, Firecrawl size caps,
 > robots hardening) is **done and on `master`** — its slices are marked ✅ DONE
 > inline below. Kept as the historical build/design record. **NOT pending work.**
-> For current next-steps read `docs/DealRoute_PostP3_Handoff.md`.
+> For current next-steps read `docs/DealRoute_Status_and_Roadmap.md`.
 
 _Standalone build plan for a fresh session. Phase A, B, Pre-C-1/2/3, the
 monitor-reliability fix, **and Phase C C-1** (search-API-first Tier-4 broad

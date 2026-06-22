@@ -5,7 +5,7 @@
 > **built and on `master`**, and **C-2** (the render-capable fetcher) shipped too.
 > The Firecrawl search backend has since been refactored to **v2** (see
 > `docs/Firecrawl_Integration_Reference.md`). Kept as the historical build/design
-> record. **NOT pending work.** For current next-steps read `docs/DealRoute_PostP3_Handoff.md`.
+> record. **NOT pending work.** For current next-steps read `docs/DealRoute_Status_and_Roadmap.md`.
 >
 > **NB (policy reversed 2026-06-21):** this doc's "public-only via PoliteFetcher; blocked/login
 > → manual capture" framing predates the **best-effort-read** policy — robots now defaults off and
