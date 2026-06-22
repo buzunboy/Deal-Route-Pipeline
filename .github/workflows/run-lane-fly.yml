@@ -99,10 +99,12 @@ jobs:
             EXTRA_ENV+=(-e AGENT=search -e SEARCH_PROVIDER=api)
           fi
 
-          echo "Running '$LANE' → fly machine run $IMAGE -- ${{ steps.cmd.outputs.args }}"
-          # `--rm` self-deletes the machine on exit. The `--` separates fly's flags
-          # from the container command (without it, fly parses `--due` as its own flag).
-          fly machine run "$IMAGE" \
+          echo "Running '$LANE' → flyctl machine run $IMAGE -- ${{ steps.cmd.outputs.args }}"
+          # Use `flyctl` (the canonical binary the setup action installs — `fly` is not
+          # guaranteed on PATH in the run step). `--rm` self-deletes the machine on exit.
+          # The `--` separates flyctl's flags from the container command (without it,
+          # flyctl parses `--due` as its own flag).
+          flyctl machine run "$IMAGE" \
             -a "$APP" --region "$REGION" --rm \
             "${EXTRA_ENV[@]}" \
             -- ${{ steps.cmd.outputs.args }}
