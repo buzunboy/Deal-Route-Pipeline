@@ -1130,6 +1130,127 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       });
     });
 
+    // ── deals.countCandidates (ACR-5 review-queue counts) ────────────────────
+    describe('deals.countCandidates', () => {
+      it('counts reviewable deals: total, low-confidence (<=0.5 inclusive), human_edited, by route', async () => {
+        // The shared Postgres DB persists rows across cases, and countCandidates has
+        // no filter — so assert DELTAS (after − before) over a known insert set, not
+        // absolute totals. Both adapters must report the same deltas (LSP).
+        const db = await makeDb();
+        const before = await db.deals.countCandidates();
+
+        // 2 candidate bundles (one low-confidence + human-edited, one high-conf),
+        // 1 in_review promo at the 0.5 boundary (inclusive ⇒ low), and a published
+        // bundle that must NOT be counted (terminal state).
+        await db.deals.insert(
+          dealRecord({
+            status: 'candidate',
+            route_type: 'bundle',
+            confidence: 0.3,
+            human_edited: ['price'],
+          }),
+        );
+        await db.deals.insert(
+          dealRecord({
+            status: 'candidate',
+            route_type: 'bundle',
+            confidence: 0.9,
+            human_edited: [],
+          }),
+        );
+        await db.deals.insert(
+          dealRecord({
+            status: 'in_review',
+            route_type: 'promo',
+            confidence: 0.5,
+            human_edited: [],
+          }),
+        );
+        await db.deals.insert(
+          dealRecord({
+            status: 'published',
+            route_type: 'bundle',
+            confidence: 0.1,
+            human_edited: ['headline'],
+          }),
+        );
+
+        const after = await db.deals.countCandidates();
+        expect(after.all_pending - before.all_pending).toBe(3); // 2 candidate + 1 in_review
+        expect(after.low_confidence - before.low_confidence).toBe(2); // 0.3 + the 0.5 boundary
+        expect(after.human_edited - before.human_edited).toBe(1); // only the reviewable edited one
+        expect(after.by_route.bundle - before.by_route.bundle).toBe(2);
+        expect(after.by_route.promo - before.by_route.promo).toBe(1);
+        expect(after.by_route.standalone - before.by_route.standalone).toBe(0);
+      });
+    });
+
+    // ── reviews.countByActionSince + listRecent (ACR-5 rejected_today / ACR-7) ─
+    describe('reviews.countByActionSince + listRecent', () => {
+      it('countByActionSince counts only that action at/after since (inclusive)', async () => {
+        const db = await makeDb();
+        const since = new Date('2330-01-10T00:00:00.000Z');
+        const before = await db.reviews.countByActionSince('reject', since);
+        const mkReview = (action: 'approve' | 'reject', at: string) => ({
+          id: randomUUID(),
+          deal_id: randomUUID(),
+          action,
+          approver: 'r',
+          reason: null,
+          decided_at: at,
+        });
+        await db.reviews.insert(mkReview('reject', '2330-01-09T23:00:00.000Z')); // before → excluded
+        await db.reviews.insert(mkReview('reject', '2330-01-10T00:00:00.000Z')); // == since → included
+        await db.reviews.insert(mkReview('reject', '2330-01-10T08:00:00.000Z')); // after → included
+        await db.reviews.insert(mkReview('approve', '2330-01-10T09:00:00.000Z')); // wrong action
+        const after = await db.reviews.countByActionSince('reject', since);
+        expect(after - before).toBe(2);
+      });
+
+      it('listRecent returns newest-first across deals, filtered by actor/entity/since, capped', async () => {
+        const db = await makeDb();
+        const actor = `actor-${randomUUID()}`;
+        const dealId = randomUUID();
+        const since = new Date('2331-03-01T00:00:00.000Z');
+        const mk = (
+          deal_id: string,
+          approver: string,
+          action: 'approve' | 'reject',
+          at: string,
+        ) => ({
+          id: randomUUID(),
+          deal_id,
+          action,
+          approver,
+          reason: null,
+          decided_at: at,
+        });
+        await db.reviews.insert(mk(dealId, actor, 'approve', '2331-03-02T00:00:00.000Z'));
+        await db.reviews.insert(mk(dealId, actor, 'reject', '2331-03-05T00:00:00.000Z'));
+        await db.reviews.insert(
+          mk(randomUUID(), actor, 'edit' as 'approve', '2331-03-04T00:00:00.000Z'),
+        );
+        await db.reviews.insert(mk(dealId, 'someone-else', 'approve', '2331-03-06T00:00:00.000Z'));
+
+        // Scoped to this actor + window, newest first.
+        const byActor = await db.reviews.listRecent({ approver: actor, since, limit: 10 });
+        expect(byActor.map((r) => r.decided_at)).toEqual([
+          '2331-03-05T00:00:00.000Z',
+          '2331-03-04T00:00:00.000Z',
+          '2331-03-02T00:00:00.000Z',
+        ]);
+        // Scoped to one entity (deal) — all three rows on `dealId`, newest first:
+        // someone-else approve (03-06), actor reject (03-05), actor approve (03-02).
+        const byEntity = await db.reviews.listRecent({ dealId, since, limit: 10 });
+        expect(byEntity.every((r) => r.deal_id === dealId)).toBe(true);
+        expect(byEntity.map((r) => r.action)).toEqual(['approve', 'reject', 'approve']);
+        // limit caps.
+        const capped = await db.reviews.listRecent({ approver: actor, since, limit: 1 });
+        expect(capped).toHaveLength(1);
+        expect(capped[0]!.decided_at).toBe('2331-03-05T00:00:00.000Z');
+      });
+    });
+
     // ── deals.update round-trips human_edited + re-derives the dedupe key ─────
     it('deals.update persists human_edited and re-derives the dedupe key when a key field changes', async () => {
       const db = await makeDb();

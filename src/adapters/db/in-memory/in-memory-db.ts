@@ -8,6 +8,11 @@ import {
   buildReliabilityIndex,
   capByPrimary,
   rankPublished,
+  LOW_CONFIDENCE_MAX,
+  zeroByRoute,
+  isRouteType,
+  type CandidateDealCounts,
+  type ReviewAction,
   type Source,
   type DealRecord,
   type CrawlRun,
@@ -176,6 +181,24 @@ class InMemoryDealRepo implements DealRepository {
       .sort((a, b) => a.confidence - b.confidence || a.id.localeCompare(b.id))
       .slice(query.offset, query.offset + query.limit)
       .map((d) => ({ ...d }));
+  }
+  async countCandidates(): Promise<CandidateDealCounts> {
+    // One pass over the reviewable deals (candidate + in_review), mirroring the
+    // Postgres adapter's filtered aggregates exactly (LSP). low_confidence is
+    // INCLUSIVE on LOW_CONFIDENCE_MAX; human_edited counts a non-empty array.
+    const reviewable = new Set<DealStatus>(REVIEWABLE_STATUSES);
+    const by_route = zeroByRoute();
+    let all_pending = 0;
+    let low_confidence = 0;
+    let human_edited = 0;
+    for (const d of this.store.values()) {
+      if (!reviewable.has(d.status)) continue;
+      all_pending++;
+      if (d.confidence <= LOW_CONFIDENCE_MAX) low_confidence++;
+      if (d.human_edited.length > 0) human_edited++;
+      if (isRouteType(d.route_type)) by_route[d.route_type]++;
+    }
+    return { all_pending, low_confidence, human_edited, by_route };
   }
   async findByDedupeKey(key: string): Promise<DealRecord | null> {
     // Return the highest-confidence non-rejected match, matching PgDealRepo's
@@ -437,6 +460,36 @@ class InMemoryReviewRepo implements ReviewRepository {
       .filter((e) => e.review.deal_id === dealId)
       .sort((a, b) => b.review.decided_at.localeCompare(a.review.decided_at) || b.seq - a.seq)
       .slice(0, limit)
+      .map((e) => ({ ...e.review }));
+  }
+  async countByActionSince(action: ReviewAction, since: Date): Promise<number> {
+    // decided_at >= since (inclusive), matching the Postgres adapter's gte.
+    const sinceMs = since.getTime();
+    let n = 0;
+    for (const e of this.reviews) {
+      if (e.review.action === action && Date.parse(e.review.decided_at) >= sinceMs) n++;
+    }
+    return n;
+  }
+  async listRecent(filter: {
+    approver?: string;
+    dealId?: string;
+    since?: Date;
+    limit: number;
+  }): Promise<ReviewRecord[]> {
+    // Optional actor/entity/since filters, newest first (decided_at desc, seq desc as
+    // the equal-timestamp tiebreaker) — mirrors the Postgres adapter (id desc there;
+    // seq is the in-memory stand-in for monotonic insertion order).
+    const sinceMs = filter.since?.getTime();
+    return this.reviews
+      .filter((e) => {
+        if (filter.approver !== undefined && e.review.approver !== filter.approver) return false;
+        if (filter.dealId !== undefined && e.review.deal_id !== filter.dealId) return false;
+        if (sinceMs !== undefined && Date.parse(e.review.decided_at) < sinceMs) return false;
+        return true;
+      })
+      .sort((a, b) => b.review.decided_at.localeCompare(a.review.decided_at) || b.seq - a.seq)
+      .slice(0, filter.limit)
       .map((e) => ({ ...e.review }));
   }
 }

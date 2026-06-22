@@ -382,4 +382,45 @@ describe('ReviewUseCase', () => {
       expect(page[0]!.deal.confidence).toBe(0.3);
     });
   });
+
+  // ── candidateCounts (ACR-5) ──────────────────────────────────────────────
+  describe('candidateCounts', () => {
+    it('aggregates deal counts + rejected_today (UTC-day bounded)', async () => {
+      // FixedClock = 2026-06-19T00:00:00Z, so "today" = 2026-06-19.
+      await makeCandidate(db, randomUUID(), {
+        status: 'candidate',
+        route_type: 'bundle',
+        confidence: 0.3,
+        human_edited: ['price'],
+      });
+      await makeCandidate(db, randomUUID(), {
+        status: 'in_review',
+        route_type: 'promo',
+        confidence: 0.9,
+      });
+      // A published deal is NOT pending and must not be counted.
+      await makeCandidate(db, randomUUID(), { status: 'published', route_type: 'bundle' });
+
+      // Two rejects today + one yesterday (excluded).
+      const mkReject = (at: string) =>
+        db.reviews.insert({
+          id: randomUUID(),
+          deal_id: randomUUID(),
+          action: 'reject',
+          approver: 'r',
+          reason: null,
+          decided_at: at,
+        });
+      await mkReject('2026-06-19T08:00:00.000Z');
+      await mkReject('2026-06-19T20:00:00.000Z');
+      await mkReject('2026-06-18T23:59:59.000Z'); // yesterday → excluded
+
+      const counts = await uc.candidateCounts();
+      expect(counts.all_pending).toBe(2);
+      expect(counts.low_confidence).toBe(1); // only the 0.3 candidate
+      expect(counts.human_edited).toBe(1);
+      expect(counts.by_route).toEqual({ bundle: 1, standalone: 0, promo: 1, regional: 0 });
+      expect(counts.rejected_today).toBe(2);
+    });
+  });
 });

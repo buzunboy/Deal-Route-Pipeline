@@ -28,7 +28,7 @@
     "seed:import": "tsx --env-file-if-exists=.env src/adapters/cli/main.ts seed-import",
     "dry-run-extract": "tsx --env-file-if-exists=.env src/adapters/cli/main.ts dry-run-extract",
     "api:lint": "redocly lint docs/api/openapi.yaml",
-    "api:postman": "openapi-to-postmanv2 -s docs/api/openapi.yaml -o docs/api/dealroute.postman_collection.json -p -O folderStrategy=Tags && node scripts/postman-finalize.mjs",
+    "api:postman": "openapi2postmanv2 -s docs/api/openapi.yaml -o docs/api/dealroute.postman_collection.json -p -O folderStrategy=Tags && node scripts/postman-finalize.mjs",
     "prepare": "husky || true"
   },
   "dependencies": {

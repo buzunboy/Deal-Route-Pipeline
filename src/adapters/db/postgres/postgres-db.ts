@@ -29,6 +29,9 @@ import {
   rankPublished,
   PUBLISHED_FETCH_CAP,
   REVIEWABLE_STATUSES,
+  LOW_CONFIDENCE_MAX,
+  zeroByRoute,
+  isRouteType,
 } from '../../../domain/index.js';
 import type {
   Source,
@@ -46,7 +49,9 @@ import type {
   PublishedQuery,
   PublishedFilters,
   CandidateQuery,
+  CandidateDealCounts,
   VocabularyEntry,
+  ReviewAction,
 } from '../../../domain/index.js';
 import type { Logger } from '../../../application/ports/index.js';
 import * as schema from './schema.js';
@@ -398,6 +403,40 @@ class PgDealRepo extends PgRepo implements DealRepository {
         .offset(query.offset),
     );
     return rows.map(rowToDeal);
+  }
+  async countCandidates(): Promise<CandidateDealCounts> {
+    // One grouped pass over the reviewable statuses: per route_type, the total +
+    // the low-confidence + human-edited subsets. The JS reduce below folds the
+    // grouped rows into the totals + the by-route map, mirroring the in-memory
+    // adapter's single-pass tally exactly (LSP). low_confidence is INCLUSIVE on
+    // LOW_CONFIDENCE_MAX; human_edited counts a non-empty jsonb array.
+    const rows = await this.run('deals.countCandidates', () =>
+      this.db
+        .select({
+          routeType: schema.deals.routeType,
+          total: sql<number>`count(*)::int`,
+          low: sql<number>`count(*) filter (where ${schema.deals.confidence} <= ${LOW_CONFIDENCE_MAX})::int`,
+          edited: sql<number>`count(*) filter (where jsonb_array_length(${schema.deals.humanEdited}) > 0)::int`,
+        })
+        .from(schema.deals)
+        .where(inArray(schema.deals.status, [...REVIEWABLE_STATUSES]))
+        .groupBy(schema.deals.routeType),
+    );
+    const by_route = zeroByRoute();
+    let all_pending = 0;
+    let low_confidence = 0;
+    let human_edited = 0;
+    for (const r of rows) {
+      const total = Number(r.total);
+      all_pending += total;
+      low_confidence += Number(r.low);
+      human_edited += Number(r.edited);
+      // A stored route_type outside the known enum can't reach a typed bucket; it
+      // still counts toward all_pending (matching the in-memory adapter, where an
+      // unknown route increments all_pending but no by_route key).
+      if (isRouteType(r.routeType)) by_route[r.routeType] += total;
+    }
+    return { all_pending, low_confidence, human_edited, by_route };
   }
 }
 
@@ -771,17 +810,56 @@ class PgReviewRepo extends PgRepo implements ReviewRepository {
         .limit(limit),
     );
     // Re-validate the free-text `action` column at the boundary (matches rowToChange).
-    return rows.map((r) =>
-      ReviewRecordSchema.parse({
-        id: r.id,
-        deal_id: r.dealId,
-        action: r.action,
-        approver: r.approver,
-        reason: r.reason,
-        decided_at: isoTimestamp(r.decidedAt),
-      }),
-    );
+    return rows.map((r) => rowToReview(r));
   }
+  async countByActionSince(action: ReviewAction, since: Date): Promise<number> {
+    const rows = await this.run('reviews.countByActionSince', () =>
+      this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.reviews)
+        .where(
+          and(
+            eq(schema.reviews.action, action),
+            gte(schema.reviews.decidedAt, since.toISOString()),
+          ),
+        ),
+    );
+    return rows[0]?.n ?? 0;
+  }
+  async listRecent(filter: {
+    approver?: string;
+    dealId?: string;
+    since?: Date;
+    limit: number;
+  }): Promise<ReviewRecord[]> {
+    const predicates: SQL[] = [];
+    if (filter.approver !== undefined)
+      predicates.push(eq(schema.reviews.approver, filter.approver));
+    if (filter.dealId !== undefined) predicates.push(eq(schema.reviews.dealId, filter.dealId));
+    if (filter.since) predicates.push(gte(schema.reviews.decidedAt, filter.since.toISOString()));
+    const where = predicates.length > 0 ? and(...predicates) : undefined;
+    const rows = await this.run('reviews.listRecent', () =>
+      this.db
+        .select()
+        .from(schema.reviews)
+        .where(where)
+        .orderBy(desc(schema.reviews.decidedAt), desc(schema.reviews.id))
+        .limit(filter.limit),
+    );
+    return rows.map((r) => rowToReview(r));
+  }
+}
+
+/** Re-validate a reviews row at the boundary (the free-text `action` column). */
+function rowToReview(r: typeof schema.reviews.$inferSelect): ReviewRecord {
+  return ReviewRecordSchema.parse({
+    id: r.id,
+    deal_id: r.dealId,
+    action: r.action,
+    approver: r.approver,
+    reason: r.reason,
+    decided_at: isoTimestamp(r.decidedAt),
+  });
 }
 
 class PgSourceReviewRepo extends PgRepo implements SourceReviewRepository {

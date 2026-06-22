@@ -178,4 +178,36 @@ suite('review edit / promote / manual-capture (Container + Postgres)', () => {
     expect(page).toHaveLength(1);
     expect(page[0]!.deal.confidence).toBe(0.3); // lowest-confidence first
   });
+
+  it('candidateCounts aggregates deal counts + rejected_today over real SQL (ACR-5)', async () => {
+    container = makeContainer(overrides);
+    const before = await container.review.candidateCounts();
+
+    await seedCandidate({
+      status: 'candidate',
+      route_type: 'bundle',
+      confidence: 0.3,
+      human_edited: ['price'],
+    });
+    await seedCandidate({ status: 'in_review', route_type: 'promo', confidence: 0.95 });
+    await seedCandidate({ status: 'published', route_type: 'bundle', confidence: 0.1 }); // not pending
+
+    // A reject decided "now" → counts under rejected_today (the real clock's UTC day).
+    await container.db.reviews.insert({
+      id: randomUUID(),
+      deal_id: randomUUID(),
+      action: 'reject',
+      approver: 'r',
+      reason: null,
+      decided_at: new Date().toISOString(),
+    });
+
+    const after = await container.review.candidateCounts();
+    expect(after.all_pending - before.all_pending).toBe(2);
+    expect(after.low_confidence - before.low_confidence).toBe(1); // only the 0.3
+    expect(after.human_edited - before.human_edited).toBe(1);
+    expect(after.by_route.bundle - before.by_route.bundle).toBe(1); // published bundle excluded
+    expect(after.by_route.promo - before.by_route.promo).toBe(1);
+    expect(after.rejected_today - before.rejected_today).toBe(1);
+  });
 });

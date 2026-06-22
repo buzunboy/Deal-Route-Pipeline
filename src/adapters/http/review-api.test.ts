@@ -82,6 +82,35 @@ describe('ReviewApi (HTTP integration)', () => {
     expect(items[0]!.evidence).not.toBeNull();
   });
 
+  it('GET /api/candidates/counts returns the aggregate review-queue counts (ACR-5)', async () => {
+    await seedCandidate({ route_type: 'bundle', confidence: 0.3, human_edited: ['price'] });
+    await seedCandidate({ status: 'in_review', route_type: 'promo', confidence: 0.9 });
+    // A reject decided "now" (this UTC day) so rejected_today counts it under SystemClock.
+    await db.reviews.insert({
+      id: randomUUID(),
+      deal_id: randomUUID(),
+      action: 'reject',
+      approver: 'r',
+      reason: null,
+      decided_at: new Date().toISOString(),
+    });
+    const res = await fetch(`${base}/api/candidates/counts`);
+    expect(res.status).toBe(200);
+    const counts = (await res.json()) as {
+      all_pending: number;
+      low_confidence: number;
+      human_edited: number;
+      rejected_today: number;
+      by_route: Record<string, number>;
+    };
+    expect(counts.all_pending).toBe(2);
+    expect(counts.low_confidence).toBe(1);
+    expect(counts.human_edited).toBe(1);
+    expect(counts.rejected_today).toBe(1);
+    expect(counts.by_route.bundle).toBe(1);
+    expect(counts.by_route.promo).toBe(1);
+  });
+
   it('POST approve publishes the deal (with approver)', async () => {
     const deal = await seedCandidate();
     const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {

@@ -14,7 +14,9 @@ import type {
   PublishedQuery,
   PublishedFilters,
   CandidateQuery,
+  CandidateDealCounts,
   VocabularyEntry,
+  ReviewAction,
 } from '../../domain/index.js';
 
 /**
@@ -81,6 +83,15 @@ export interface DealRepository {
    * order identically (LSP).
    */
   listCandidates(query: CandidateQuery): Promise<DealRecord[]>;
+  /**
+   * The deal-derived slice of the review-queue counts (ACR-5): over the reviewable
+   * statuses (`candidate` + `in_review`), tally the total, the low-confidence subset
+   * (`confidence <= LOW_CONFIDENCE_MAX`), the human-edited subset (`human_edited`
+   * non-empty), and a per-route breakdown — in ONE pass. `rejected_today` is NOT
+   * here (it comes from the reviews audit log, date-bounded). Both adapters MUST
+   * return identical numbers for the same data (LSP).
+   */
+  countCandidates(): Promise<CandidateDealCounts>;
 }
 
 export interface CrawlRunRepository {
@@ -175,6 +186,25 @@ export interface ReviewRepository {
   insert(review: ReviewRecord): Promise<void>;
   /** Decision history for one deal, newest first. */
   listForDeal(dealId: string, limit: number): Promise<ReviewRecord[]>;
+  /**
+   * Count review decisions of a given `action` whose `decided_at` is at/after
+   * `since` (inclusive). Powers ACR-5's `rejected_today` (action `reject`, `since`
+   * = UTC midnight) — a true date-bounded count the deal row can't express. Both
+   * adapters MUST agree for the same data (LSP).
+   */
+  countByActionSince(action: ReviewAction, since: Date): Promise<number>;
+  /**
+   * Recent review decisions across ALL deals (the audit feed, ACR-7), newest first.
+   * Optional filters: `approver` (exact actor), `dealId` (exact entity), `since`
+   * (decided_at >= since). Capped at `limit`. Ordering is `decided_at` desc then
+   * `id` desc (deterministic tiebreaker) — both adapters identical (LSP).
+   */
+  listRecent(filter: {
+    approver?: string;
+    dealId?: string;
+    since?: Date;
+    limit: number;
+  }): Promise<ReviewRecord[]>;
 }
 
 export interface SourceReviewRepository {

@@ -65,6 +65,7 @@ export interface ReviewApiOptions {
  * publishes automatically — `approve` requires an approver identity.
  *
  *   GET   /api/health
+ *   GET   /api/candidates/counts          → CandidateCounts  (queue view-cards, ACR-5)
  *   GET   /api/candidates                 → [{ deal, evidence }]
  *           ?status=&service=&confidence_max=&limit=&offset=  (filters + pagination)
  *   PATCH /api/candidates/:id             { approver, patch }     → { deal }  (reviewer edit)
@@ -146,6 +147,12 @@ export class ReviewApi {
 
     if (method === 'GET' && path === '/') return this.servePage(res);
     if (method === 'GET' && path === '/api/health') return sendJson(res, 200, { ok: true });
+
+    // Aggregate review-queue counts (ACR-5). Exact path — must precede the
+    // `/api/candidates/:id...` patterns + the `/api/candidates` list below.
+    if (method === 'GET' && path === '/api/candidates/counts') {
+      return sendJson(res, 200, await this.review.candidateCounts());
+    }
 
     if (method === 'GET' && path === '/api/candidates') {
       const parsed = parseCandidateQuery(url.searchParams);

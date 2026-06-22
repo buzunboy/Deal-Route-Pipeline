@@ -192,6 +192,24 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/candidates/counts:
+    get:
+      tags: [Candidates]
+      summary: Aggregate review-queue counts for the view-cards + filter rail (ACR-5)
+      operationId: getCandidateCounts
+      description: |
+        One call returns the queue's headline counts: `all_pending` (reviewable
+        deals), `low_confidence` (confidence ≤ 0.5), `human_edited`, a per-route
+        breakdown, and `rejected_today` (rejections on the current UTC day, from the
+        reviews audit log — a true date-bounded count). Read endpoint — not gated.
+      security: []
+      responses:
+        '200':
+          description: The aggregate counts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CandidateCounts' }
+
   /api/candidates/{id}:
     patch:
       tags: [Candidates]
@@ -783,6 +801,38 @@ components:
           oneOf:
             - { $ref: '#/components/schemas/Evidence' }
             - { type: 'null' }
+    CandidateCounts:
+      type: object
+      description: Aggregate review-queue counts (ACR-5). All counts are non-negative integers.
+      required: [all_pending, low_confidence, human_edited, rejected_today, by_route]
+      properties:
+        all_pending:
+          type: integer
+          minimum: 0
+          description: Reviewable deals (status `candidate` + `in_review`).
+        low_confidence:
+          type: integer
+          minimum: 0
+          description: Reviewable deals with confidence ≤ 0.5 (inclusive).
+        human_edited:
+          type: integer
+          minimum: 0
+          description: Reviewable deals a human has corrected (`human_edited` non-empty).
+        rejected_today:
+          type: integer
+          minimum: 0
+          description: Deals rejected on the current UTC day (from the reviews audit log).
+        by_route:
+          type: object
+          description: Reviewable counts per route type — every key present (0 when none).
+          required: [bundle, standalone, promo, regional]
+          properties:
+            bundle: { type: integer, minimum: 0 }
+            standalone: { type: integer, minimum: 0 }
+            promo: { type: integer, minimum: 0 }
+            regional: { type: integer, minimum: 0 }
+          additionalProperties: false
+      additionalProperties: false
     ReviewRecord:
       type: object
       required: [action, approver, decided_at]

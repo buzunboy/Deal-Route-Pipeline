@@ -21,6 +21,7 @@ import {
   CANDIDATES_DEFAULT_LIMIT,
   CANDIDATES_MAX_LIMIT,
   CANDIDATES_MAX_OFFSET,
+  type CandidateCounts,
   type DealRecord,
   type Evidence,
   type ManualCaptureTask,
@@ -115,6 +116,21 @@ export class ReviewUseCase {
         evidence: deal.evidence_id ? await this.db.evidence.getById(deal.evidence_id) : null,
       })),
     );
+  }
+
+  /**
+   * Aggregate counts for the review-queue view-cards + filter rail (ACR-5). Combines
+   * the deal-derived counts (over the reviewable statuses) with `rejected_today` from
+   * the reviews audit log, date-bounded to the current UTC day. One read per source —
+   * no per-card filtered list reads, and a true "today" bound the deal row can't give.
+   */
+  async candidateCounts(): Promise<CandidateCounts> {
+    const dealCounts = await this.db.deals.countCandidates();
+    const rejectedToday = await this.db.reviews.countByActionSince(
+      'reject',
+      utcMidnight(this.clock.now()),
+    );
+    return { ...dealCounts, rejected_today: rejectedToday };
   }
 
   /**
@@ -488,6 +504,11 @@ const MANUAL_CAPTURE_HUMAN_FIELDS: readonly string[] = [
 /** Clamp `n` into [min, max] — a floor guard for paging values reaching the repo. */
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+/** Midnight (00:00:00.000Z) of the UTC day containing `at` — the "today" bound. */
+function utcMidnight(at: Date): Date {
+  return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
 }
 
 /** Union two path lists preserving the existing order, appending new ones once. */
