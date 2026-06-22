@@ -1,6 +1,9 @@
 # DealRoute pipeline — runs as scheduled jobs + an on-demand trigger.
 # Uses Playwright's image so the default fetcher's Chromium + system deps are present.
-FROM mcr.microsoft.com/playwright:v1.49.1-jammy AS base
+# ⚠️ This tag MUST match the `playwright` version in package.json EXACTLY — the image
+# ships only the Chromium build for its own version, so a mismatch makes
+# `browserType.launch` fail with "Executable doesn't exist". Bump both together.
+FROM mcr.microsoft.com/playwright:v1.61.0-jammy AS base
 WORKDIR /app
 # NOTE: NODE_ENV is intentionally NOT set to production here. This `base` stage
 # feeds `deps`/`build`, which need devDependencies (TypeScript) — with
