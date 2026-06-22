@@ -423,4 +423,48 @@ describe('ReviewUseCase', () => {
       expect(counts.rejected_today).toBe(2);
     });
   });
+
+  // ── auditFeed (ACR-7) ─────────────────────────────────────────────────────
+  describe('auditFeed', () => {
+    it('projects recent review rows newest-first, filtered by actor/entity, capped', async () => {
+      const dealId = randomUUID();
+      const mk = (deal_id: string, approver: string, action: 'approve' | 'reject', at: string) =>
+        db.reviews.insert({
+          id: randomUUID(),
+          deal_id,
+          action,
+          approver,
+          reason: action === 'reject' ? 'no good' : null,
+          decided_at: at,
+        });
+      await mk(dealId, 'alice@dealroute', 'approve', '2026-06-19T01:00:00.000Z');
+      await mk(dealId, 'alice@dealroute', 'reject', '2026-06-19T05:00:00.000Z');
+      await mk(randomUUID(), 'bob@dealroute', 'approve', '2026-06-19T06:00:00.000Z');
+
+      const all = await uc.auditFeed();
+      expect(all.map((e) => e.at)).toEqual([
+        '2026-06-19T06:00:00.000Z',
+        '2026-06-19T05:00:00.000Z',
+        '2026-06-19T01:00:00.000Z',
+      ]);
+      // Projected shape: initials + entity_id + detail.
+      expect(all[0]!.initials).toBe('BO');
+      expect(all[1]!.detail).toBe('no good');
+      expect(all[1]!.entity_id).toBe(dealId);
+
+      // Filtered by actor.
+      const byAlice = await uc.auditFeed({ actor: 'alice@dealroute' });
+      expect(byAlice.every((e) => e.actor === 'alice@dealroute')).toBe(true);
+      expect(byAlice).toHaveLength(2);
+
+      // Filtered by entity.
+      const byDeal = await uc.auditFeed({ entityId: dealId });
+      expect(byDeal.every((e) => e.entity_id === dealId)).toBe(true);
+
+      // limit caps.
+      const one = await uc.auditFeed({ limit: 1 });
+      expect(one).toHaveLength(1);
+      expect(one[0]!.at).toBe('2026-06-19T06:00:00.000Z');
+    });
+  });
 });

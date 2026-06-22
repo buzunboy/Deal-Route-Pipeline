@@ -42,6 +42,8 @@ tags:
     description: Human-driven evidence capture tasks. (admin)
   - name: Sources
     description: Source-promotion loop — approve/reject proposed crawl sources. (admin)
+  - name: Audit
+    description: Cross-deal audit feed of recent review decisions. (admin)
   - name: Test page
     description: Built-in HTML review harness.
 
@@ -300,6 +302,52 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ReviewRecord' }
+
+  /api/audit:
+    get:
+      tags: [Audit]
+      summary: Cross-deal audit feed of recent review decisions (ACR-7)
+      operationId: getAuditFeed
+      description: |
+        Recent human review decisions across all deals, newest first — backs the
+        Dashboard "recent activity" card and the Audit-log screen. Only the persisted
+        review actions appear (`approve` · `reject` · `edit`); `promote`/`extract` are
+        not yet recorded as audit rows (deferred). Read endpoint — not gated.
+      security: []
+      parameters:
+        - name: actor
+          in: query
+          description: Filter to one reviewer identity (approver).
+          schema: { type: string, minLength: 1 }
+        - name: entity_id
+          in: query
+          description: Filter to one entity (deal id).
+          schema: { type: string, format: uuid }
+        - name: since
+          in: query
+          description: Only decisions at/after this ISO-8601 instant.
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: The recent-activity entries (newest first).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEntry' }
+                additionalProperties: false
+        '400':
+          description: Out-of-range limit or an unparseable `since`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/field-proposals:
     get:
@@ -832,6 +880,25 @@ components:
             promo: { type: integer, minimum: 0 }
             regional: { type: integer, minimum: 0 }
           additionalProperties: false
+      additionalProperties: false
+    AuditEntry:
+      type: object
+      description: |
+        One entry in the cross-deal audit feed (ACR-7), projected from a review row.
+        `action` is currently limited to the persisted review decisions
+        (`approve` · `reject` · `edit`); the panel additionally models `promote` /
+        `extract`, which are not yet emitted (deferred).
+      required: [id, initials, actor, action, detail, entity_id, at]
+      properties:
+        id: { type: string }
+        initials:
+          type: string
+          description: 1–2 letter uppercase initials derived from the actor (avatar chip).
+        actor: { type: string }
+        action: { $ref: '#/components/schemas/ReviewAction' }
+        detail: { type: [string, 'null'] }
+        entity_id: { type: string, format: uuid }
+        at: { type: string, format: date-time }
       additionalProperties: false
     ReviewRecord:
       type: object

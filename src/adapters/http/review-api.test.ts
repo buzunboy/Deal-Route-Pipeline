@@ -111,6 +111,38 @@ describe('ReviewApi (HTTP integration)', () => {
     expect(counts.by_route.promo).toBe(1);
   });
 
+  it('GET /api/audit returns the recent-activity feed, filterable (ACR-7)', async () => {
+    const dealId = randomUUID();
+    const insertReview = (approver: string, action: 'approve' | 'reject', at: string) =>
+      db.reviews.insert({
+        id: randomUUID(),
+        deal_id: dealId,
+        action,
+        approver,
+        reason: null,
+        decided_at: at,
+      });
+    await insertReview('alice@dealroute', 'approve', '2026-06-19T01:00:00.000Z');
+    await insertReview('bob@dealroute', 'reject', '2026-06-19T05:00:00.000Z');
+
+    const res = await fetch(`${base}/api/audit?limit=10`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      entries: { actor: string; initials: string; action: string; entity_id: string; at: string }[];
+    };
+    expect(body.entries.map((e) => e.at)).toEqual([
+      '2026-06-19T05:00:00.000Z',
+      '2026-06-19T01:00:00.000Z',
+    ]);
+    expect(body.entries[0]!.initials).toBe('BO');
+
+    // actor filter + a bad `since` → 400.
+    const filtered = await fetch(`${base}/api/audit?actor=alice@dealroute`);
+    const filteredBody = (await filtered.json()) as { entries: { actor: string }[] };
+    expect(filteredBody.entries.every((e) => e.actor === 'alice@dealroute')).toBe(true);
+    expect((await fetch(`${base}/api/audit?since=not-a-date`)).status).toBe(400);
+  });
+
   it('POST approve publishes the deal (with approver)', async () => {
     const deal = await seedCandidate();
     const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {

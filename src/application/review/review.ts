@@ -21,7 +21,11 @@ import {
   CANDIDATES_DEFAULT_LIMIT,
   CANDIDATES_MAX_LIMIT,
   CANDIDATES_MAX_OFFSET,
+  AUDIT_DEFAULT_LIMIT,
+  AUDIT_MAX_LIMIT,
+  toAuditEntry,
   type CandidateCounts,
+  type AuditEntry,
   type DealRecord,
   type Evidence,
   type ManualCaptureTask,
@@ -131,6 +135,33 @@ export class ReviewUseCase {
       utcMidnight(this.clock.now()),
     );
     return { ...dealCounts, rejected_today: rejectedToday };
+  }
+
+  /**
+   * The cross-deal audit feed (ACR-7) — recent human review decisions, newest first,
+   * projected to the panel's audit-entry shape. Backs both the Dashboard
+   * "recent activity" card (latest slice) and the Audit-log screen (with filters).
+   * Optional filters: `actor` (approver), `entityId` (deal), `since`. The page size
+   * is clamped to the domain caps (a floor guard; the HTTP boundary 400s an over-cap
+   * limit). Only the persisted review actions (`approve|reject|edit`) appear — see
+   * {@link toAuditEntry}.
+   */
+  async auditFeed(
+    opts: {
+      actor?: string;
+      entityId?: string;
+      since?: Date;
+      limit?: number;
+    } = {},
+  ): Promise<AuditEntry[]> {
+    const limit = clamp(opts.limit ?? AUDIT_DEFAULT_LIMIT, 1, AUDIT_MAX_LIMIT);
+    const rows = await this.db.reviews.listRecent({
+      approver: opts.actor,
+      dealId: opts.entityId,
+      since: opts.since,
+      limit,
+    });
+    return rows.map(toAuditEntry);
   }
 
   /**

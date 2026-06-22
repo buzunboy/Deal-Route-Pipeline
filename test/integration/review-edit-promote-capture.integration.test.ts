@@ -210,4 +210,23 @@ suite('review edit / promote / manual-capture (Container + Postgres)', () => {
     expect(after.by_route.promo - before.by_route.promo).toBe(1);
     expect(after.rejected_today - before.rejected_today).toBe(1);
   });
+
+  it('auditFeed projects approve/reject/edit rows newest-first over real SQL (ACR-7)', async () => {
+    container = makeContainer(overrides);
+    // Drive REAL review actions so the reviews audit rows are written by the use-case.
+    const deal = await seedCandidate({ headline: 'before' });
+    await container.review.editCandidate(deal.id, 'alice@dealroute', { headline: 'after' });
+    await container.review.approve(deal.id, 'bob@dealroute');
+
+    const feed = await container.review.auditFeed({ entityId: deal.id });
+    // newest-first: approve (later) before edit (earlier); both scoped to the deal.
+    expect(feed.map((e) => e.action)).toEqual(['approve', 'edit']);
+    expect(feed.every((e) => e.entity_id === deal.id)).toBe(true);
+    expect(feed.find((e) => e.action === 'approve')!.initials).toBe('BO');
+
+    // actor filter narrows to one reviewer.
+    const byAlice = await container.review.auditFeed({ actor: 'alice@dealroute' });
+    expect(byAlice.every((e) => e.actor === 'alice@dealroute')).toBe(true);
+    expect(byAlice.some((e) => e.entity_id === deal.id && e.action === 'edit')).toBe(true);
+  });
 });

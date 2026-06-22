@@ -20,6 +20,8 @@ import {
   CANDIDATES_DEFAULT_LIMIT,
   CANDIDATES_MAX_LIMIT,
   CANDIDATES_MAX_OFFSET,
+  AUDIT_DEFAULT_LIMIT,
+  AUDIT_MAX_LIMIT,
   type CandidateFilters,
 } from '../../domain/index.js';
 
@@ -73,6 +75,8 @@ export interface ReviewApiOptions {
  *   POST  /api/candidates/:id/reject      { approver, reason? }   → { deal }
  *   GET   /api/candidates/:id/reviews     → [ReviewRecord]   (audit history)
  *   GET   /api/field-proposals            → [FieldProposalRecord]
+ *   GET   /api/audit                      → { entries: [AuditEntry] }   (ACR-7)
+ *           ?actor=&entity_id=&since=&limit=
  *   POST  /api/field-proposals/:key/promote
  *           { approver, canonical_key, label, target } → { vocabulary_entry }
  *   GET   /api/manual-capture-tasks       → [ManualCaptureTask]
@@ -170,6 +174,14 @@ export class ReviewApi {
     }
     if (method === 'GET' && path === '/api/field-proposals') {
       return sendJson(res, 200, await this.review.listFieldProposals());
+    }
+    // Cross-deal audit feed (ACR-7): backs the Dashboard recent-activity card +
+    // the Audit-log screen. Optional actor/entity_id/since filters + limit.
+    if (method === 'GET' && path === '/api/audit') {
+      const parsed = parseAuditQuery(url.searchParams);
+      if (!parsed.ok) return sendError(res, 400, parsed.error);
+      const entries = await this.review.auditFeed(parsed.value);
+      return sendJson(res, 200, { entries });
     }
     if (method === 'GET' && path === '/api/manual-capture-tasks') {
       return sendJson(res, 200, await this.review.listManualCaptureTasks());
@@ -539,4 +551,30 @@ function parseIntParam(raw: string | null, fallback: number): number | null {
   if (raw === null || raw === '') return fallback;
   if (!/^-?\d+$/.test(raw)) return null;
   return Number.parseInt(raw, 10);
+}
+
+/**
+ * Parse the GET /api/audit query into bounded audit-feed options (ACR-7). Optional
+ * `actor`, `entity_id`, `since` (ISO-8601 → Date), and a `limit` clamped to the
+ * domain caps (an over-cap / non-integer limit or an unparseable `since` is a 400).
+ */
+function parseAuditQuery(
+  params: URLSearchParams,
+): ParseResult<{ actor?: string; entityId?: string; since?: Date; limit: number }> {
+  const limit = parseIntParam(params.get('limit'), AUDIT_DEFAULT_LIMIT);
+  if (limit === null || limit < 1 || limit > AUDIT_MAX_LIMIT) {
+    return { ok: false, error: `limit must be 1..${AUDIT_MAX_LIMIT}` };
+  }
+  const value: { actor?: string; entityId?: string; since?: Date; limit: number } = { limit };
+  const actor = params.get('actor');
+  if (actor !== null && actor !== '') value.actor = actor;
+  const entityId = params.get('entity_id');
+  if (entityId !== null && entityId !== '') value.entityId = entityId;
+  const sinceRaw = params.get('since');
+  if (sinceRaw !== null && sinceRaw !== '') {
+    const ms = Date.parse(sinceRaw);
+    if (Number.isNaN(ms)) return { ok: false, error: 'since must be an ISO-8601 timestamp' };
+    value.since = new Date(ms);
+  }
+  return { ok: true, value };
 }
