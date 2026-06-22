@@ -17,6 +17,7 @@ export function makeSource(overrides: Partial<Source> = {}): Source {
     next_due: null,
     resolved_url: null,
     registrable_domain: null,
+    proposal_reason: null,
     ...overrides,
   };
   // Step 6: every production source-create path pins registrable_domain (the eTLD+1

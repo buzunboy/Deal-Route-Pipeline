@@ -125,6 +125,9 @@ export class LaneBSupport {
         // Pin the registrable domain now (we already resolved it for the dedupe
         // check above) so the reliability join works the moment it's crawled.
         registrable_domain: domain,
+        // Carry the discovery rationale onto the source so the human reviewing the
+        // promotion queue sees WHY this domain was proposed (ACR-15).
+        proposal_reason: p.rationale,
       };
       await this.db.sources.upsert(source);
       this.logger.info('lane-b: proposed novel source (pending approval)', { url: p.url });

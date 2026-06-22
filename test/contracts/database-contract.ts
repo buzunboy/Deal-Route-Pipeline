@@ -87,6 +87,27 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect((await db.sources.getById(unresolved.id))!.resolved_url).toBe('https://www.x.de/r');
     });
 
+    it('sources: proposal_reason round-trips — a set value and a null both survive (ACR-15)', async () => {
+      const db = await makeDb();
+      const proposed = makeSource({
+        url: 'https://p.de',
+        status: 'pending_approval',
+        proposal_reason: 'Linked from telekom.de during discovery',
+      });
+      const seeded = makeSource({ url: 'https://s.de', proposal_reason: null });
+      await db.sources.upsert(proposed);
+      await db.sources.upsert(seeded);
+      expect((await db.sources.getById(proposed.id))!.proposal_reason).toBe(
+        'Linked from telekom.de during discovery',
+      );
+      expect((await db.sources.getById(seeded.id))!.proposal_reason).toBeNull();
+      // it also survives the listByStatus path the promotion queue reads through.
+      const pending = await db.sources.listByStatus('pending_approval');
+      expect(pending.find((s) => s.id === proposed.id)!.proposal_reason).toBe(
+        'Linked from telekom.de during discovery',
+      );
+    });
+
     it('sources: upsert is idempotent on url — re-importing the same URL does NOT duplicate', async () => {
       // Regression: seed-import mints a fresh id per run, so an id-keyed upsert
       // INSERTed a duplicate row on every re-seed (observed 49 -> 98 in prod). The

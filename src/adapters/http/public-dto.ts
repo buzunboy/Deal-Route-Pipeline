@@ -1,4 +1,9 @@
-import { evidenceScreenshotRef, type Condition, type DealRecord } from '../../domain/index.js';
+import {
+  evidenceScreenshotRef,
+  resolveEvidenceUrl,
+  type Condition,
+  type DealRecord,
+} from '../../domain/index.js';
 
 /**
  * The PUBLIC projection of a deal — the load-bearing trust contract of the public
@@ -225,7 +230,5 @@ function sanitizeValue(value: Record<string, unknown>): Record<string, unknown> 
  * persisted bundle has a non-empty `screenshot.png`.
  */
 function resolveScreenshotUrl(evidenceId: string, cdnBaseUrl?: string): string | null {
-  if (cdnBaseUrl === undefined) return null;
-  const base = cdnBaseUrl.replace(/\/+$/, '');
-  return `${base}/${evidenceScreenshotRef(evidenceId)}`;
+  return resolveEvidenceUrl(evidenceScreenshotRef(evidenceId), cdnBaseUrl);
 }

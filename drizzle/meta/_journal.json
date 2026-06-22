@@ -106,6 +106,13 @@
       "when": 1782120275240,
       "tag": "0014_bouncy_stature",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1782150169661,
+      "tag": "0015_solid_wonder_man",
+      "breakpoints": true
     }
   ]
 }

@@ -25,3 +25,26 @@ export const EVIDENCE_META_FILE = 'evidence.json';
 export function evidenceScreenshotRef(bundleId: string): string {
   return `${bundleId}/${EVIDENCE_SCREENSHOT_FILE}`;
 }
+
+/**
+ * The stored `html_ref` for a bundle id (the archived raw HTML snapshot). Same
+ * deterministic-layout contract as {@link evidenceScreenshotRef}.
+ */
+export function evidenceHtmlRef(bundleId: string): string {
+  return `${bundleId}/${EVIDENCE_HTML_FILE}`;
+}
+
+/**
+ * Resolve a public/CDN URL for a stored evidence artifact `ref` (a store key like
+ * `<id>/screenshot.png`) against a CDN base, or `null` when no base is configured
+ * (e.g. local-fs evidence has no public URL — never leak a relative/broken path).
+ * Pure + deterministic; joins without doubling slashes. Shared by the public read
+ * DTO and the gated admin evidence projection so the screenshot a reviewer sees and
+ * the one a consumer sees resolve through one rule.
+ */
+export function resolveEvidenceUrl(ref: string, cdnBaseUrl: string | undefined): string | null {
+  if (cdnBaseUrl === undefined || cdnBaseUrl === '') return null;
+  const base = cdnBaseUrl.replace(/\/+$/, '');
+  const path = ref.replace(/^\/+/, '');
+  return `${base}/${path}`;
+}

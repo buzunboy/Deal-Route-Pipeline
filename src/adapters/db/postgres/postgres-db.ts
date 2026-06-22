@@ -917,6 +917,7 @@ function toSourceRow(s: Source): typeof schema.sources.$inferInsert {
     nextDue: s.next_due,
     resolvedUrl: s.resolved_url,
     registrableDomain: s.registrable_domain,
+    proposalReason: s.proposal_reason,
   };
 }
 function fromSourceRow(r: typeof schema.sources.$inferSelect): Source {
@@ -934,6 +935,7 @@ function fromSourceRow(r: typeof schema.sources.$inferSelect): Source {
     next_due: isoTimestampOrNull(r.nextDue),
     resolved_url: r.resolvedUrl,
     registrable_domain: r.registrableDomain,
+    proposal_reason: r.proposalReason,
   };
 }
 function toRunRow(r: CrawlRun): typeof schema.crawlRuns.$inferInsert {

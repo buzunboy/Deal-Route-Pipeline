@@ -47,6 +47,9 @@ export const sources = pgTable(
     // (Step 6). A deal copies this onto source_registrable_domain so the reliability
     // join matches by identical strings. Nullable (no backfill; self-heals on re-crawl).
     registrableDomain: text('registrable_domain'),
+    // The discovery/ingest "why proposed" rationale, surfaced on the source-promotion
+    // queue (ACR-15). Nullable; only set for proposal-loop sources (no backfill).
+    proposalReason: text('proposal_reason'),
   },
   (t) => ({
     dueIdx: index('sources_due_idx').on(t.status, t.nextDue),

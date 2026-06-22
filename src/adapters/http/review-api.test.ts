@@ -201,6 +201,22 @@ describe('ReviewApi (HTTP integration)', () => {
     expect(history[0]!.action).toBe('approve');
   });
 
+  it('GET /api/sources/pending surfaces the proposal_reason (ACR-15)', async () => {
+    const src = makeSource({
+      status: 'pending_approval',
+      type: 'discovered',
+      tier: 4,
+      proposal_reason: 'Linked from telekom.de bundle page; mentions Disney+',
+    });
+    await db.sources.upsert(src);
+    const pending = (await (await fetch(`${base}/api/sources/pending`)).json()) as {
+      id: string;
+      proposal_reason: string | null;
+    }[];
+    const got = pending.find((s) => s.id === src.id)!;
+    expect(got.proposal_reason).toBe('Linked from telekom.de bundle page; mentions Disney+');
+  });
+
   it('rejecting a source → rejected (not re-crawled / re-proposed)', async () => {
     const src = makeSource({ status: 'pending_approval', type: 'discovered', tier: 4 });
     await db.sources.upsert(src);
@@ -307,6 +323,48 @@ describe('ReviewApi (HTTP integration)', () => {
   it('GET /api/candidates with an over-cap limit is a 400', async () => {
     const res = await fetch(`${base}/api/candidates?limit=99999`);
     expect(res.status).toBe(400);
+  });
+
+  // ── ACR-13: resolved evidence screenshot/html URLs on the admin evidence ──
+  it('GET /api/candidates resolves evidence URLs from the configured CDN base', async () => {
+    const deal = await seedCandidate();
+    const ev = (await db.evidence.getById(deal.evidence_id))!;
+    const withCdn = new ReviewApi(
+      new ReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'), tldtsSuffixOracle),
+      new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error')),
+      new ConsoleLogger('error'),
+      { evidenceCdnBaseUrl: 'https://cdn.dealroute.example' },
+    );
+    await withCdn.listen(0);
+    try {
+      // @ts-expect-error reach into the underlying server for the assigned port
+      const port = (withCdn['server'].address() as AddressInfo).port;
+      const items = (await (await fetch(`http://localhost:${port}/api/candidates`)).json()) as {
+        evidence: {
+          screenshot_ref: string;
+          evidence_screenshot_url: string | null;
+          evidence_html_url: string | null;
+        } | null;
+      }[];
+      const got = items[0]!.evidence!;
+      // the raw store ref is still present (reviewer console isn't an allow-list)…
+      expect(got.screenshot_ref).toBe(ev.screenshot_ref);
+      // …and the resolvable CDN URLs are added (ACR-13).
+      expect(got.evidence_screenshot_url).toBe(
+        `https://cdn.dealroute.example/${ev.screenshot_ref}`,
+      );
+      expect(got.evidence_html_url).toBe(`https://cdn.dealroute.example/${ev.html_ref}`);
+    } finally {
+      await withCdn.close();
+    }
+  });
+
+  it('GET /api/candidates evidence URLs are null when no CDN base is configured', async () => {
+    await seedCandidate();
+    const items = (await (await fetch(`${base}/api/candidates`)).json()) as {
+      evidence: { evidence_screenshot_url: string | null } | null;
+    }[];
+    expect(items[0]!.evidence!.evidence_screenshot_url).toBeNull();
   });
 
   // ── POST /api/field-proposals/:key/promote ───────────────────────────────

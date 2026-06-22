@@ -135,6 +135,9 @@ function makeSource(
     // container's oracle right before upsert (it must — else seeds join to neutral
     // reliability). See seed-import.ts. Null here is just the pre-pin placeholder.
     registrable_domain: null,
+    // Seed sources are curated by hand, not surfaced through the discovery proposal
+    // loop, so they carry no "why proposed" rationale (ACR-15).
+    proposal_reason: null,
   };
 }
 

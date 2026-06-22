@@ -157,7 +157,9 @@ paths:
       operationId: listCandidates
       description: |
         Lowest-confidence first. Defaults to the reviewable pair (`candidate` +
-        `in_review`) when `status` is omitted. Read endpoint — not gated.
+        `in_review`) when `status` is omitted. Read endpoint — not gated. Each item's
+        `evidence` carries resolved `evidence_screenshot_url` / `evidence_html_url`
+        when a CDN base is configured (ACR-13).
       security: []
       parameters:
         - name: status
@@ -568,6 +570,53 @@ components:
       type: string
       description: Market-driven. EUR for v1.
       enum: [EUR]
+    Price:
+      type: object
+      description: A deal price (src/domain/deal-record/price.ts).
+      required: [amount, currency, billing]
+      properties:
+        amount: { type: number, minimum: 0 }
+        currency: { $ref: '#/components/schemas/Currency' }
+        billing: { $ref: '#/components/schemas/Billing' }
+        prepaid_months:
+          type: integer
+          minimum: 1
+          description: 'For `billing: prepaid` only — months the up-front `amount` covers.'
+    Condition:
+      type: object
+      description: A long-tail eligibility/validity condition mapped to the vocabulary.
+      required: [key, label]
+      properties:
+        key: { type: string, minLength: 1 }
+        label: { type: string, minLength: 1 }
+        value:
+          type: [object, 'null']
+          additionalProperties: true
+        source_quote: { type: string }
+    Eligibility:
+      type: object
+      description: Eligibility core flags + long-tail conditions (src/domain/deal-record/eligibility.ts).
+      required: [new_customer_only, residency_kyc, plan_tier_required, min_spend, stackable]
+      properties:
+        new_customer_only: { type: [boolean, 'null'] }
+        residency_kyc: { type: [boolean, 'null'] }
+        plan_tier_required: { type: [string, 'null'] }
+        min_spend: { type: [number, 'null'], minimum: 0 }
+        stackable: { type: [boolean, 'null'] }
+        conditions:
+          type: array
+          items: { $ref: '#/components/schemas/Condition' }
+    Validity:
+      type: object
+      description: Validity window + long-tail conditions (src/domain/deal-record/validity.ts).
+      required: [start, end, recheck_days]
+      properties:
+        start: { type: [string, 'null'] }
+        end: { type: [string, 'null'] }
+        recheck_days: { type: integer, minimum: 1 }
+        conditions:
+          type: array
+          items: { $ref: '#/components/schemas/Condition' }
     PublishedSort:
       type: string
       enum: [cost_asc, verified_desc]
@@ -683,13 +732,7 @@ components:
         route_type: { $ref: '#/components/schemas/RouteType' }
         provider: { type: [string, 'null'] }
         headline: { type: [string, 'null'] }
-        price:
-          type: object
-          properties:
-            amount: { type: number }
-            currency: { $ref: '#/components/schemas/Currency' }
-            billing: { $ref: '#/components/schemas/Billing' }
-            prepaid_months: { type: integer }
+        price: { $ref: '#/components/schemas/Price' }
         true_cost_monthly: { type: number }
         country: { $ref: '#/components/schemas/Country' }
         status: { $ref: '#/components/schemas/DealStatus' }
@@ -706,16 +749,30 @@ components:
       additionalProperties: true
     Evidence:
       type: object
-      description: Evidence bundle metadata (src/domain/evidence). Screenshot/html/terms by reference.
+      description: |
+        Evidence bundle as projected into a gated `/api/candidates` item
+        (src/adapters/http/admin-evidence-dto.ts). The raw store pointers
+        (`screenshot_ref`/`html_ref`/`terms_ref`) are kept — this is the reviewer
+        console, not the public allow-list — and resolved CDN URLs are ADDED so the
+        panel can render the captured screenshot / link the archived HTML directly
+        (ACR-13). `evidence_screenshot_url` / `evidence_html_url` are `null` when no
+        CDN base (`S3_CDN_BASE_URL`) is configured (e.g. local-fs evidence).
       properties:
         id: { type: string, format: uuid }
         source_url: { type: string, format: uri }
         screenshot_ref: { type: string }
         html_ref: { type: string }
         terms_ref: { type: string }
-        terms_text: { type: string }
         captured_at: { type: string, format: date-time }
         content_hash: { type: string }
+        evidence_screenshot_url:
+          type: [string, 'null']
+          format: uri
+          description: Resolved CDN URL of the screenshot, or null when no CDN base is set.
+        evidence_html_url:
+          type: [string, 'null']
+          format: uri
+          description: Resolved CDN URL of the archived HTML, or null when no CDN base is set.
       additionalProperties: true
     CandidateView:
       type: object
@@ -741,12 +798,18 @@ components:
       type: object
       description: A recurring novel condition key the LLM proposed (src/domain/proposals).
       properties:
+        id: { type: string, format: uuid }
         suggested_key: { type: string }
         label: { type: string }
         rationale: { type: string }
         example_quote: { type: string }
         count: { type: integer }
-        status: { type: string, enum: [pending, promoted] }
+        # Mirrors the domain enum (FieldProposalRecordSchema): an untriaged proposal
+        # is `open` (NOT `pending`); a human promotion/rejection moves it to
+        # `promoted`/`rejected`. (ACR-3: the spec previously drifted to [pending, promoted].)
+        status: { type: string, enum: [open, promoted, rejected] }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
       additionalProperties: true
     ConditionVocabularyEntry:
       type: object
@@ -768,16 +831,26 @@ components:
       additionalProperties: true
     Source:
       type: object
-      description: A crawl source (src/domain/entities). Only key fields enumerated.
+      description: A crawl source (src/domain/source). Only key fields enumerated.
       properties:
         id: { type: string, format: uuid }
         url: { type: string, format: uri }
-        kind: { type: string }
-        tier: { type: integer }
-        status: { type: string }
-        reliability_score: { type: number }
-        registrable_domain: { type: string }
+        type:
+          type: string
+          enum: [provider, bundler, community, discovered, aggregator]
+        tier: { type: integer, enum: [1, 2, 3, 4] }
+        status:
+          type: string
+          enum: [active, pending_approval, disabled, rejected]
+        reliability_score: { type: number, minimum: 0, maximum: 1 }
+        registrable_domain: { type: [string, 'null'] }
         resolved_url: { type: [string, 'null'], format: uri }
+        proposal_reason:
+          type: [string, 'null']
+          description: |
+            Short "why this domain was proposed" rationale, set when the source was
+            surfaced by the discovery/ingest proposal loop and shown on the
+            promotion queue (ACR-15). Null for seed/manually-added sources.
       additionalProperties: true
     SourceReviewRecord:
       type: object
@@ -815,12 +888,36 @@ components:
       required: [approver, patch]
       properties:
         approver: { type: string, minLength: 1 }
-        patch:
+        patch: { $ref: '#/components/schemas/CandidatePatch' }
+    CandidatePatch:
+      type: object
+      description: |
+        The exact allow-listed set of reviewer-editable fields (ACR-14) — the
+        `PATCHABLE_FIELDS` enforced by the domain `applyCandidatePatch`
+        (src/domain/rules/candidate-patch.ts). Every property is OPTIONAL (send only
+        what changed). Any property NOT listed here (id, evidence_id, source_url,
+        status, schema_version, confidence, grounding, verified_by/at, …) is rejected
+        with 400 — identity / provenance / lifecycle are never editable. A price edit
+        re-derives `true_cost_monthly` server-side; every changed path is tagged into
+        the deal's `human_edited`.
+      additionalProperties: false
+      properties:
+        price: { $ref: '#/components/schemas/Price' }
+        true_cost_monthly:
+          type: number
+          minimum: 0
+          description: Re-derived from `price` when price is also patched; an explicit value only sticks when price is untouched.
+        country: { $ref: '#/components/schemas/Country' }
+        route_type: { $ref: '#/components/schemas/RouteType' }
+        headline: { type: string, minLength: 1 }
+        eligibility: { $ref: '#/components/schemas/Eligibility' }
+        validity: { $ref: '#/components/schemas/Validity' }
+        included_items:
+          type: array
+          items: { type: string }
+        attributes:
           type: object
           additionalProperties: true
-          description: |
-            Allowlisted fields only (enforced by the domain `applyCandidatePatch` —
-            PATCHABLE_FIELDS). Identity/provenance/status are rejected.
     PromoteBody:
       type: object
       required: [approver, canonical_key, label]

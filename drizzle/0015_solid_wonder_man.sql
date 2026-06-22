@@ -1,0 +1,1 @@
+ALTER TABLE "sources" ADD COLUMN "proposal_reason" text;

@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { ReviewUseCase, SourceReviewUseCase } from '../../application/index.js';
 import type { Logger } from '../../application/ports/index.js';
+import { toAdminEvidence } from './admin-evidence-dto.js';
 import {
   DealNotFoundError,
   NotReviewableError,
@@ -43,6 +44,15 @@ export interface ReviewApiOptions {
    * is credentialed and state-changing, so the caller pins it to the panel's origin.
    */
   corsAllowOrigin?: string;
+  /**
+   * Public CDN base URL for evidence artifacts (config.evidence.s3.cdnBaseUrl). When
+   * set, each `GET /api/candidates` item's evidence carries resolved
+   * `evidence_screenshot_url` / `evidence_html_url` so the panel can render the
+   * captured screenshot directly (ACR-13). Unset (e.g. local-fs evidence) ⇒ those
+   * URLs are null and the panel shows its "no screenshot" placeholder. Mirrors the
+   * `cdnBaseUrl` the public API already uses for its screenshot URL.
+   */
+  evidenceCdnBaseUrl?: string;
 }
 
 /**
@@ -77,6 +87,7 @@ export class ReviewApi {
   private readonly staticPageHtml?: string;
   private readonly authToken?: string;
   private readonly corsAllowOrigin?: string;
+  private readonly evidenceCdnBaseUrl?: string;
 
   constructor(
     private readonly review: ReviewUseCase,
@@ -87,6 +98,7 @@ export class ReviewApi {
     this.staticPageHtml = options.staticPageHtml;
     this.authToken = options.authToken;
     this.corsAllowOrigin = options.corsAllowOrigin;
+    this.evidenceCdnBaseUrl = options.evidenceCdnBaseUrl;
   }
 
   listen(port: number): Promise<void> {
@@ -138,7 +150,16 @@ export class ReviewApi {
     if (method === 'GET' && path === '/api/candidates') {
       const parsed = parseCandidateQuery(url.searchParams);
       if (!parsed.ok) return sendError(res, 400, parsed.error);
-      return sendJson(res, 200, await this.review.listCandidates(parsed.value));
+      const views = await this.review.listCandidates(parsed.value);
+      // Project each evidence bundle to the admin DTO — adding resolved CDN URLs so
+      // the panel can render the captured screenshot (ACR-13), not just an opaque
+      // store key. The deal is passed through unchanged (the review console sees the
+      // full internal record; only the public DTO is an allow-list).
+      const body = views.map((view) => ({
+        deal: view.deal,
+        evidence: toAdminEvidence(view.evidence, this.evidenceCdnBaseUrl),
+      }));
+      return sendJson(res, 200, body);
     }
     if (method === 'GET' && path === '/api/field-proposals') {
       return sendJson(res, 200, await this.review.listFieldProposals());

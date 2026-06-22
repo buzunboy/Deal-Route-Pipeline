@@ -64,5 +64,15 @@ export const SourceSchema = z.object({
    * crawl; there is NO data backfill (migration 0012 only adds the column).
    */
   registrable_domain: z.string().nullable().default(null),
+  /**
+   * Short human-readable "why this domain was proposed" rationale, captured at
+   * discovery/ingest time (the Lane-B `ProposedDomain.rationale`) and surfaced on
+   * the source-promotion queue (`GET /api/sources/pending`) so a reviewer sees why
+   * they're being asked to trust a new domain (ACR-15) — distinct from the
+   * `reliability_score`. Null for seed/manually-added sources and for any source
+   * not surfaced through the proposal loop. Additive + nullable so existing rows
+   * parse unchanged; no backfill.
+   */
+  proposal_reason: z.string().nullable().default(null),
 });
 export type Source = z.infer<typeof SourceSchema>;

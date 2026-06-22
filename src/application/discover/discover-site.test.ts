@@ -77,6 +77,11 @@ describe('DiscoverSiteUseCase', () => {
     expect(pending).toHaveLength(1);
     expect(pending[0]!.type).toBe('discovered');
     expect(pending[0]!.tier).toBe(4);
+    // ACR-15: the discovery rationale is carried onto the source's proposal_reason so
+    // the human reviewing the promotion queue sees WHY the domain was proposed.
+    const offProposal = result.proposedSources.find((p) => p.url === OFF_DOMAIN)!;
+    expect(pending[0]!.proposal_reason).toBe(offProposal.rationale);
+    expect(pending[0]!.proposal_reason).toMatch(/discovery/i);
   });
 
   it('follows an already-active allowlisted domain but still proposes truly-novel ones', async () => {

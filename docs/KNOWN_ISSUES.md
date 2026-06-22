@@ -640,6 +640,15 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   `npx tsc -p tsconfig.test.json --noEmit` (must be clean).
 - **Logged**: 2026-06-21
 
+### Admin-panel new-endpoint requests (ACR-5 → ACR-12) — not yet built
+- **Severity**: medium (the panel ships working placeholders; no pipeline data is wrong, the screens are just informational/P2 until wired)
+- **Area**: api / db
+- **Location**: the admin panel's `docs/API_CHANGE_REQUESTS.md` (separate repo, `buzunboy/Deal-Route-Pipeline` consumer); would land in `src/adapters/http/review-api.ts` + new use-cases/repos/tables.
+- **What**: the admin panel has built UI for screens the pipeline has **no endpoint** for, and asks for them in its change log: **ACR-5** `GET /api/candidates/counts` (incl. a real date-bounded "rejected today"); **ACR-6/7/8/9** Dashboard cards (throughput · recent-activity/audit feed · alerts + bell open-count · queue-freshness); **ACR-10** read/write endpoints for Published · Sources-registry · Audit · Team · Settings · Metrics; **ACR-11** `PATCH /api/profile { name }`; **ACR-12** `POST /api/manual-capture-tasks` ad-hoc create (no backing task). Each ACR states the exact request/response the panel expects.
+- **Why deferred**: this change shipped the **contract fixes on existing endpoints** (ACR-13 resolvable evidence URLs, ACR-14 PATCHABLE_FIELDS in OpenAPI, ACR-15 pending-source `proposal_reason`, ACR-3 status-enum drift) — small, self-contained, well-tested. The new endpoints are a larger build: most need **new DB tables + migrations + repositories + use-cases + integration tests** (audit feed, alerts, team, settings), and several (ACR-6/7/9 throughput/freshness/recent-activity) need a metrics/aggregation layer that doesn't exist yet. ACR-11 (profile/team) is also an **architectural question**: reviewer identity currently lives in the **panel's** server-side allow-list, not the pipeline — a pipeline-side profile/team store may be the wrong home (see the panel's ACR-11 open question). The panel ships zod-parsed placeholders for all of these and is **not blocked**.
+- **Fix-when**: schedule per-ACR. Start with the cheapest real wins that reuse existing repos: **ACR-5** counts (a `countCandidates(filters)` on `DealRepository` + a date-bounded "rejected today" via the reviews/audit timestamp) and **ACR-12** ad-hoc capture (a thin variant of `completeManualCapture` that mints the task+candidate in one call). The **audit feed (ACR-7)** is the keystone — it backs both the Dashboard recent-activity card AND the Audit-log screen, and a real `reviews`-table-backed query (with `actor`/`entity`/`since` filters) unlocks the most panel value. Treat ACR-11 (profile/team) as a **design decision** before building — confirm with the owner whether reviewer identity moves into the pipeline or stays the panel's allow-list. **Ask the owner before** any change that touches the deal-record schema or trust rules (none of these should, but the audit/metrics shape is worth confirming).
+- **Logged**: 2026-06-22
+
 ---
 
 ## Resolved
