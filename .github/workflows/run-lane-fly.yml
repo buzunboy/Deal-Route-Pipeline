@@ -38,6 +38,10 @@ on:
         description: 'Max wait for the lane before stopping the attached CLI (e.g. 20m, 40m)'
         required: false
         default: 20m
+      vm_memory:
+        description: 'Lane machine memory in MB (Chromium needs headroom; 512 OOMs on a full crawl)'
+        required: false
+        default: '2048'
 
 concurrency:
   # Never overlap a lane run with itself (no source-level advisory lock yet — see
@@ -59,6 +63,7 @@ jobs:
       IMAGE: ghcr.io/buzunboy/deal-route-pipeline:${{ inputs.image_tag }}
       LANE: ${{ inputs.lane }}
       LANE_TIMEOUT: ${{ inputs.lane_timeout }}
+      VM_MEMORY: ${{ inputs.vm_memory }}
     steps:
       - name: Guard — require the Fly token
         run: |
@@ -122,6 +127,7 @@ jobs:
           set +e
           timeout "$LANE_TIMEOUT" flyctl machine run "$IMAGE" \
             -a "$APP" --region "$REGION" --rm \
+            --vm-memory "$VM_MEMORY" \
             "${EXTRA_ENV[@]}" \
             -- ${{ steps.cmd.outputs.args }}
           rc=$?
