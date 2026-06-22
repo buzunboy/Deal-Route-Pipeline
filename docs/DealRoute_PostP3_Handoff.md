@@ -430,6 +430,18 @@ country wired, per the owner decision). Three parts:_
   `ghcr.io/buzunboy/deal-route-pipeline` even though the repo is mixed-case), and `fly secrets set`
   for the secrets table. Local counterpart: `docs/LOCAL_DEV.md`. The OpenAPI contract the panel
   codes against: `docs/api/openapi.yaml` (+ Postman collection) — see `.claude/rules/api-and-openapi.md`.
+- **✅ API IS LIVE (2026-06-22): `https://dealroute-api.fly.dev`.** Deployed to Fly (region `fra`):
+  Postgres `dealroute-db` attached (→ `DATABASE_URL`), `REVIEW_API_TOKEN` + `S3_*` set as Fly secrets,
+  image pulled from the (currently public) GHCR package. Health/CORS/auth verified
+  (`/api/health`, `/v1/health`, `/v1/deals`, gated-write→401 all pass). Deploy gotchas that bit and
+  are now fixed/recorded: `[http_service]` needs `processes = ["app"]` (single-process binding);
+  the DB machine must be healthy before attach (256 MB can fail to boot — bump to 512 MB);
+  `fly deploy` with `--image` sidesteps a zero-machine config-merge quirk; GHCR returns
+  "Authentication required" for BOTH private AND nonexistent images (the image was public, deploy
+  then worked). **Post-deploy hardening to-dos** (rotate the chat-exposed AWS key + GitHub PAT, make
+  the image private, pin the `:edge` tag to a sha, set `ADMIN_CORS_ORIGIN` when the panel deploys)
+  are logged in `docs/KNOWN_ISSUES.md` → "Cloud-deployment follow-ups". The OpenAPI `servers:` now
+  lists the Fly URL as production.
 
 **MEDIUM — promote when their trigger nears (currently deferred):**
 - **Postgres `Database` contract suite never runs in CI + not isolated** (`postgres-db.test.ts`,
