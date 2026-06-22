@@ -24,10 +24,10 @@ info:
   license:
     name: UNLICENSED (private)
 servers:
+  - url: https://dealroute-api.fly.dev
+    description: Production (Fly.io, region fra) — deployed 2026-06-22
   - url: http://localhost:3000
     description: Local dev (npm run cli -- serve)
-  - url: https://api.dealroute.example
-    description: Production (placeholder — set when deployed)
 
 tags:
   - name: Public feed

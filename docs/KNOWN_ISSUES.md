@@ -31,6 +31,19 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### Cloud-deployment follow-ups (API is live on Fly; these are post-deploy hardening)
+- **Severity**: medium (operational/security hygiene; the API is live + working at `https://dealroute-api.fly.dev`)
+- **Area**: deploy / ops / security
+- **Location**: Fly app `dealroute-api` (region `fra`); `deploy/fly/fly.toml`; `.env` (local); GHCR package `ghcr.io/buzunboy/deal-route-pipeline`.
+- **What**: the always-on `serve` API was deployed to Fly.io on 2026-06-22 (Postgres `dealroute-db` attached → `DATABASE_URL`; `REVIEW_API_TOKEN` + `S3_*` set as Fly secrets; image pulled from GHCR). Health/CORS/auth all verified. Open items the owner deliberately deferred to the end of the implementation phase:
+  1. **Rotate exposed secrets.** During setup these were pasted into a chat and must be considered compromised: the **AWS access key** `AKIAYNW2LJGBMC65AXEH` (IAM user `dealroute-pipeline`) and a **GitHub PAT** `ghp_…` (classic, `read:packages`). Rotate the AWS key (new key → update the Fly secret + local `.env` → delete old) and delete the PAT (github.com/settings/tokens). The unused `FLY_REGISTRY_AUTH_TOKEN` Fly secret can also be unset (the image is public, so it isn't needed).
+  2. **GHCR image is currently PUBLIC.** Fine for now (image holds only compiled code, no secrets) and lets `fly deploy` pull with no auth. To make it private later: GitHub → Packages → `deal-route-pipeline` → Package settings → Change visibility → Private, THEN wire a pull credential for Fly — either keep a classic PAT with `read:packages` as the `FLY_REGISTRY_AUTH_TOKEN` secret, or use a GitHub org/Actions token; fine-grained PATs do NOT support GHCR. Re-test a deploy after flipping.
+  3. **`fly.toml` pins the image to `:edge` (rolling).** Every master push moves `:edge`, so a redeploy isn't reproducible. For prod, pin to an immutable `:sha-xxxxxxx` tag (or a released `vX.Y.Z`) in `deploy/fly/fly.toml` `[build] image`.
+  4. **`ADMIN_CORS_ORIGIN` is unset.** The admin panel isn't deployed yet, so no browser origin is allowed on `/api/*`. When the panel has a URL: `fly secrets set -a dealroute-api ADMIN_CORS_ORIGIN="https://<panel-origin>"` (exact origin, never `*`; the app auto-restarts).
+- **Why deferred**: the API runs correctly without them; the owner chose to finish the implementation phase first and harden (rotate creds, lock the image, pin the tag, wire CORS) at the end.
+- **Fix-when**: rotate creds + pin the tag before going past dev/staging; set `ADMIN_CORS_ORIGIN` when the panel deploys; make the image private if/when the repo's exposure posture requires it.
+- **Logged**: 2026-06-22
+
 ### A malformed (non-UUID) `:id` on an HTTP route 500s instead of 404
 - **Severity**: low
 - **Area**: api / db
