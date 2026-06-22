@@ -1306,6 +1306,122 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       });
     });
 
+    // ── reviews.listDecisionLatenciesSince (ACR-6 throughput avg_review) ──────
+    describe('reviews.listDecisionLatenciesSince', () => {
+      it('returns each decision since (inclusive) with the capture→decision latency in seconds', async () => {
+        const db = await makeDb();
+        const since = new Date('2332-05-10T00:00:00.000Z');
+        // A deal whose evidence was captured at a known instant; two decisions on it
+        // (one before `since` → excluded, one after → included with a real latency).
+        const ev = {
+          id: randomUUID(),
+          source_url: 'https://lat.de',
+          screenshot_ref: 's',
+          html_ref: 'h',
+          terms_ref: 't',
+          captured_at: '2332-05-10T10:00:00.000Z',
+          content_hash: 'LAT_A',
+        };
+        await db.evidence.insert(ev);
+        const deal = dealRecord({ evidence_id: ev.id, status: 'candidate' });
+        await db.deals.insert(deal);
+        const mk = (action: 'approve' | 'reject' | 'edit', at: string) => ({
+          id: randomUUID(),
+          deal_id: deal.id,
+          action,
+          approver: `lat-${randomUUID()}`,
+          reason: null,
+          decided_at: at,
+        });
+        await db.reviews.insert(mk('approve', '2332-05-09T23:00:00.000Z')); // before since → out
+        await db.reviews.insert(mk('approve', '2332-05-10T10:30:00.000Z')); // +30min = 1800s
+        await db.reviews.insert(mk('edit', '2332-05-10T11:00:00.000Z')); // +60min = 3600s
+
+        const rows = (await db.reviews.listDecisionLatenciesSince(since)).filter(
+          (r) => r.latencySeconds === 1800 || r.latencySeconds === 3600,
+        );
+        const byLatency = new Map(rows.map((r) => [r.latencySeconds, r.action]));
+        expect(byLatency.get(1800)).toBe('approve');
+        expect(byLatency.get(3600)).toBe('edit');
+      });
+
+      it('yields a null latency when the decision has no resolvable deal/evidence (still counted)', async () => {
+        const db = await makeDb();
+        const since = new Date('2333-07-01T00:00:00.000Z');
+        const orphanApprover = `orphan-${randomUUID()}`;
+        // A review on a deal_id that has no deal/evidence row → latency null.
+        await db.reviews.insert({
+          id: randomUUID(),
+          deal_id: randomUUID(),
+          action: 'reject',
+          approver: orphanApprover,
+          reason: null,
+          decided_at: '2333-07-02T00:00:00.000Z',
+        });
+        const rows = await db.reviews.listDecisionLatenciesSince(since);
+        const orphan = rows.filter((r) => r.action === 'reject' && r.latencySeconds === null);
+        // At least our orphan reject is present with a null latency.
+        expect(orphan.length).toBeGreaterThanOrEqual(1);
+      });
+    });
+
+    // ── deals.pendingQueueSignals (ACR-9 freshness + ACR-10 confidence dist) ──
+    describe('deals.pendingQueueSignals', () => {
+      it('lists reviewable deals with their evidence captured_at + confidence; excludes terminal states', async () => {
+        const db = await makeDb();
+        const ev = {
+          id: randomUUID(),
+          source_url: 'https://sig.de',
+          screenshot_ref: 's',
+          html_ref: 'h',
+          terms_ref: 't',
+          captured_at: '2334-02-02T00:00:00.000Z',
+          content_hash: `SIG_${randomUUID()}`,
+        };
+        await db.evidence.insert(ev);
+        const reviewable = dealRecord({
+          evidence_id: ev.id,
+          status: 'candidate',
+          confidence: 0.42,
+        });
+        await db.deals.insert(reviewable);
+        // A published (terminal) deal linked to a DISTINCT, sentinel captured_at — it
+        // must NOT appear in the signals. We key the exclusion on that unique
+        // captured_at (not a confidence value) so the shared-DB accumulation across
+        // cases can't make this assertion flaky.
+        const publishedEv = { ...ev, id: randomUUID(), captured_at: '2335-03-03T00:00:00.000Z' };
+        await db.evidence.insert(publishedEv);
+        await db.deals.insert(
+          dealRecord({ evidence_id: publishedEv.id, status: 'published', confidence: 0.42 }),
+        );
+
+        const signals = await db.deals.pendingQueueSignals();
+        const mine = signals.find(
+          (s) => s.confidence === 0.42 && s.capturedAt === '2334-02-02T00:00:00.000Z',
+        );
+        expect(mine).toBeDefined();
+        // The published deal's evidence (its distinct captured_at) is never surfaced.
+        expect(signals.some((s) => s.capturedAt === '2335-03-03T00:00:00.000Z')).toBe(false);
+      });
+
+      it('yields capturedAt null for a reviewable deal whose evidence row is missing', async () => {
+        const db = await makeDb();
+        // A reviewable deal pointing at a non-existent evidence id → capturedAt null,
+        // but still listed with its confidence (the LEFT JOIN keeps it).
+        const orphanConfidence = 0.137; // a distinctive value to find our row
+        const deal = dealRecord({
+          evidence_id: randomUUID(),
+          status: 'in_review',
+          confidence: orphanConfidence,
+        });
+        await db.deals.insert(deal);
+        const signals = await db.deals.pendingQueueSignals();
+        const mine = signals.find((s) => s.confidence === orphanConfidence);
+        expect(mine).toBeDefined();
+        expect(mine!.capturedAt).toBeNull();
+      });
+    });
+
     // ── deals.update round-trips human_edited + re-derives the dedupe key ─────
     it('deals.update persists human_edited and re-derives the dedupe key when a key field changes', async () => {
       const db = await makeDb();

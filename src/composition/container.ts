@@ -223,7 +223,7 @@ export class Container {
       config.fetcher.timeoutMs,
       this.alerting,
     );
-    this.metrics = new MetricsUseCase(this.db, this.logger);
+    this.metrics = new MetricsUseCase(this.db, this.clock, this.logger);
     this.dailyBudgetGuard = new DailyBudgetGuard(
       this.db,
       this.clock,

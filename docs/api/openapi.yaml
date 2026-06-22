@@ -50,6 +50,8 @@ tags:
     description: Reviewer registry + profile (the pipeline is the identity system of record). (admin)
   - name: Alerts
     description: Persisted alerts — list, acknowledge, resolve (source reliability / budget). (admin)
+  - name: Metrics
+    description: Dashboard rollups — today's throughput, queue freshness, KPIs/cost/confidence. (admin)
   - name: Test page
     description: Built-in HTML review harness.
 
@@ -217,6 +219,26 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CandidateCounts' }
+
+  /api/candidates/freshness:
+    get:
+      tags: [Candidates, Metrics]
+      summary: Pending-queue freshness age-buckets (ACR-9)
+      operationId: getCandidateFreshness
+      description: |
+        The share of the pending review queue (`candidate` + `in_review`) in each age
+        band, where age is `now − evidence.captured_at`. The three bands are always
+        returned, summing to 100 (an empty queue returns all three at 0). Backs the
+        Dashboard "Queue freshness" card. Read endpoint — not gated.
+      security: []
+      responses:
+        '200':
+          description: The three freshness bands (freshest first).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FreshnessBand' }
 
   /api/candidates/{id}:
     patch:
@@ -894,6 +916,52 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '413': { $ref: '#/components/responses/TooLarge' }
 
+  # ───────────────────────────── METRICS ────────────────────────────────────
+  /api/metrics/throughput:
+    get:
+      tags: [Metrics]
+      summary: Today's reviewer-throughput summary (ACR-6)
+      operationId: getThroughput
+      description: |
+        Counts of today's (UTC) approve/reject/edit decisions plus the mean
+        capture→decision latency (`avg_review_seconds`, or null when no decision today
+        has a resolvable capture time). Backs the Dashboard "Today's throughput" card.
+        Read endpoint — not gated.
+      security: []
+      parameters:
+        - name: period
+          in: query
+          description: The window. Only `today` is supported in v1; any other value is a 400.
+          schema: { type: string, enum: [today], default: today }
+      responses:
+        '200':
+          description: Today's throughput summary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThroughputSummary' }
+        '400':
+          description: An unsupported `period`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/metrics:
+    get:
+      tags: [Metrics]
+      summary: Metrics screen rollup — KPIs / cost-per-day / confidence (ACR-10 Metrics)
+      operationId: getMetrics
+      description: |
+        KPI cards, the last 14 UTC days of crawl cost, and the pending-queue confidence
+        distribution — all derived from real pipeline data (`crawl_runs` + the `reviews`
+        log + the pending `deals`). Backs the Metrics screen. Read endpoint — not gated.
+      security: []
+      responses:
+        '200':
+          description: The dashboard-metrics rollup.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardMetrics' }
+
   # ───────────────────────────── TEST PAGE ──────────────────────────────────
   /:
     get:
@@ -1289,6 +1357,93 @@ components:
           description: |
             Panel lifecycle status. `published` → `live`; `expired` → `unpublished`.
             `re-review` is reserved (no single backing pipeline status today).
+      additionalProperties: false
+    ThroughputSummary:
+      type: object
+      description: |
+        Today's reviewer-throughput summary (ACR-6). `approved`/`rejected`/`edited`
+        count the review decisions taken on the current UTC day. `avg_review_seconds`
+        is the mean `decided_at − evidence.captured_at` over those decisions, in whole
+        seconds, or `null` when no decision today has a resolvable capture time.
+      required: [approved, rejected, edited, avg_review_seconds]
+      properties:
+        approved: { type: integer, minimum: 0 }
+        rejected: { type: integer, minimum: 0 }
+        edited: { type: integer, minimum: 0 }
+        avg_review_seconds: { type: [integer, 'null'], minimum: 0 }
+      additionalProperties: false
+    FreshnessBand:
+      type: object
+      description: |
+        One pending-queue freshness band (ACR-9): the share of reviewable candidates
+        whose age (`now − evidence.captured_at`) falls in this band. The three bands are
+        always returned, summing to 100 (an empty queue returns all three at 0).
+      required: [bucket, percent]
+      properties:
+        bucket:
+          type: string
+          enum: ['<24h', '1-3d', '>3d']
+        percent: { type: integer, minimum: 0, maximum: 100 }
+      additionalProperties: false
+    MetricKpi:
+      type: object
+      description: One KPI card on the Metrics screen (ACR-10 Metrics).
+      required: [key, label, value, trend, direction]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        value:
+          type: string
+          description: 'Pre-formatted value (e.g. "€164", "72%", "0.83").'
+        trend:
+          type: string
+          description: Trend caption; empty string when none.
+        direction:
+          type: string
+          enum: [up-good, up-bad, down-good, down-bad, flat]
+      additionalProperties: false
+    CostBar:
+      type: object
+      description: One bar in the cost-per-day chart (ACR-10 Metrics).
+      required: [day, cost, highlight]
+      properties:
+        day:
+          type: string
+          description: 'UTC day-of-month label (e.g. "08").'
+        cost:
+          type: number
+          minimum: 0
+          description: Crawl cost in euros for that UTC day.
+        highlight:
+          type: boolean
+          description: Whether this is one of the recent highlighted days.
+      additionalProperties: false
+    ConfidenceBand:
+      type: object
+      description: One confidence-distribution band (ACR-10 Metrics), colored by trust level.
+      required: [label, percent, level]
+      properties:
+        label: { type: string }
+        percent: { type: integer, minimum: 0, maximum: 100 }
+        level: { type: string, enum: [success, warning, danger] }
+      additionalProperties: false
+    DashboardMetrics:
+      type: object
+      description: |
+        The Metrics screen rollup (ACR-10 Metrics): KPI cards, the cost-per-day chart,
+        and the pending-queue confidence distribution. Every value is derived from real
+        pipeline data (`crawl_runs` + the `reviews` log + the pending `deals`).
+      required: [kpis, cost_per_day, confidence_distribution]
+      properties:
+        kpis:
+          type: array
+          items: { $ref: '#/components/schemas/MetricKpi' }
+        cost_per_day:
+          type: array
+          items: { $ref: '#/components/schemas/CostBar' }
+        confidence_distribution:
+          type: array
+          items: { $ref: '#/components/schemas/ConfidenceBand' }
       additionalProperties: false
     SourceRegistryEntry:
       type: object

@@ -6,6 +6,7 @@ import {
   SourceReviewUseCase,
   TeamUseCase,
   AlertsUseCase,
+  MetricsUseCase,
 } from '../../application/index.js';
 import { DealStatus, type DealRecord } from '../../domain/index.js';
 import { makeSource } from '../../../test/factories/source.js';
@@ -59,7 +60,8 @@ describe('ReviewApi (HTTP integration)', () => {
     );
     const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const alerts = new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    api = new ReviewApi(review, sourceReview, team, alerts, new ConsoleLogger('error'), {
+    const metrics = new MetricsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    api = new ReviewApi(review, sourceReview, team, alerts, metrics, new ConsoleLogger('error'), {
       staticPageHtml: '<html>page</html>',
     });
     await api.listen(0);
@@ -173,6 +175,77 @@ describe('ReviewApi (HTTP integration)', () => {
 
     // out-of-range limit → 400.
     expect((await fetch(`${base}/api/published?limit=9999`)).status).toBe(400);
+  });
+
+  it('GET /api/candidates/freshness returns the queue age distribution (ACR-9)', async () => {
+    // Two pending candidates, captured years ago (2026-06-19) → both land in >3d
+    // under SystemClock; the three bands always sum to 100.
+    await seedCandidate();
+    await seedCandidate({ status: 'in_review' });
+
+    const res = await fetch(`${base}/api/candidates/freshness`);
+    expect(res.status).toBe(200);
+    const bands = (await res.json()) as { bucket: string; percent: number }[];
+    expect(bands.map((b) => b.bucket)).toEqual(['<24h', '1-3d', '>3d']);
+    expect(bands.reduce((a, b) => a + b.percent, 0)).toBe(100);
+    expect(bands.find((b) => b.bucket === '>3d')!.percent).toBe(100);
+  });
+
+  it("GET /api/metrics/throughput returns today's reviewer throughput (ACR-6)", async () => {
+    // A candidate whose evidence was captured well before the decision, decided NOW
+    // (this UTC day) so it counts under SystemClock; latency is a real positive number.
+    const deal = await seedCandidate();
+    await db.reviews.insert({
+      id: randomUUID(),
+      deal_id: deal.id,
+      action: 'approve',
+      approver: 'mara',
+      reason: null,
+      decided_at: new Date().toISOString(),
+    });
+
+    const res = await fetch(`${base}/api/metrics/throughput?period=today`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      approved: number;
+      rejected: number;
+      edited: number;
+      avg_review_seconds: number | null;
+    };
+    expect(body.approved).toBe(1);
+    expect(body.rejected).toBe(0);
+    expect(body.avg_review_seconds).toBeGreaterThan(0); // captured 2026-06-19 → years of latency
+
+    // An unsupported period → 400.
+    expect((await fetch(`${base}/api/metrics/throughput?period=week`)).status).toBe(400);
+  });
+
+  it('GET /api/metrics returns the KPI / cost / confidence rollup (ACR-10 Metrics)', async () => {
+    await seedCandidate({ confidence: 0.9 }); // pending → enters avg + distribution
+    await seedCandidate({ confidence: 0.5, status: 'in_review' });
+
+    const res = await fetch(`${base}/api/metrics`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      kpis: { key: string; value: string }[];
+      cost_per_day: { day: string; cost: number; highlight: boolean }[];
+      confidence_distribution: { label: string; percent: number; level: string }[];
+    };
+    // Four KPI cards present, the cost chart is the dense 14-day series, and the three
+    // confidence bands sum to 100.
+    expect(body.kpis.map((k) => k.key)).toEqual([
+      'crawl-cost',
+      'throughput',
+      'approval-rate',
+      'avg-confidence',
+    ]);
+    expect(body.cost_per_day).toHaveLength(14);
+    expect(body.confidence_distribution.reduce((a, b) => a + b.percent, 0)).toBe(100);
+    expect(body.confidence_distribution.map((b) => b.level)).toEqual([
+      'success',
+      'warning',
+      'danger',
+    ]);
   });
 
   it('POST approve publishes the deal (with approver)', async () => {
@@ -558,6 +631,7 @@ describe('ReviewApi (HTTP integration)', () => {
       new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error')),
       new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error')),
       new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error')),
+      new MetricsUseCase(db, new SystemClock(), new ConsoleLogger('error')),
       new ConsoleLogger('error'),
       { evidenceCdnBaseUrl: 'https://cdn.dealroute.example' },
     );
@@ -785,7 +859,8 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     const sourceReview = new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const alerts = new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
-    api = new ReviewApi(review, sourceReview, team, alerts, new ConsoleLogger('error'), {
+    const metrics = new MetricsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    api = new ReviewApi(review, sourceReview, team, alerts, metrics, new ConsoleLogger('error'), {
       authToken: 'secret-token',
     });
     await api.listen(0);
@@ -928,11 +1003,13 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
     const sourceReview = new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const team = new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const alerts = new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    const metrics = new MetricsUseCase(db, new SystemClock(), new ConsoleLogger('error'));
     const api = new ReviewApi(
       review,
       sourceReview,
       team,
       alerts,
+      metrics,
       new ConsoleLogger('error'),
       options,
     );

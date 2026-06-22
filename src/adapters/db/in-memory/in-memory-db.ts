@@ -73,7 +73,10 @@ export class InMemoryDb implements Database {
   fieldProposals: FieldProposalRepository = new InMemoryFieldProposalRepo();
   conditionVocabulary: ConditionVocabularyRepository = new InMemoryConditionVocabularyRepo();
   changes: ChangeRepository = new InMemoryChangeRepo();
-  reviews: ReviewRepository = new InMemoryReviewRepo();
+  // The review repo reaches the deal + evidence repos so it can join a decision to its
+  // deal's evidence capture time (ACR-6 throughput latency) — the same deal→evidence
+  // join the Postgres adapter does in SQL; LSP-identical.
+  reviews: ReviewRepository = new InMemoryReviewRepo(this.deals, this.evidence);
   sourceReviews: SourceReviewRepository = new InMemorySourceReviewRepo();
   catalog: SubscriptionCatalogRepository = new InMemoryCatalogRepo();
   team: TeamRepository = new InMemoryTeamRepo();
@@ -228,6 +231,19 @@ class InMemoryDealRepo implements DealRepository {
     let n = 0;
     for (const d of this.store.values()) if (set.has(d.status)) n++;
     return n;
+  }
+  async pendingQueueSignals(): Promise<{ capturedAt: string | null; confidence: number }[]> {
+    // The reviewable queue joined to evidence captured_at — mirrors the Postgres
+    // adapter's LEFT JOIN exactly (LSP): a deal whose evidence row is missing yields
+    // capturedAt null (can't be aged) but is still listed with its confidence.
+    const reviewable = new Set<DealStatus>(REVIEWABLE_STATUSES);
+    const out: { capturedAt: string | null; confidence: number }[] = [];
+    for (const d of this.store.values()) {
+      if (!reviewable.has(d.status)) continue;
+      const ev = await this.evidence.getById(d.evidence_id);
+      out.push({ capturedAt: ev?.captured_at ?? null, confidence: d.confidence });
+    }
+    return out;
   }
   async findByDedupeKey(key: string): Promise<DealRecord | null> {
     // Return the highest-confidence non-rejected match, matching PgDealRepo's
@@ -495,6 +511,10 @@ class InMemoryChangeRepo implements ChangeRepository {
 class InMemoryReviewRepo implements ReviewRepository {
   private reviews: { review: ReviewRecord; seq: number }[] = [];
   private seq = 0;
+  constructor(
+    private readonly deals: DealRepository,
+    private readonly evidence: EvidenceRepository,
+  ) {}
   async insert(r: ReviewRecord): Promise<void> {
     this.reviews.push({ review: { ...r }, seq: this.seq++ });
   }
@@ -542,6 +562,25 @@ class InMemoryReviewRepo implements ReviewRepository {
       counts.set(e.review.approver, (counts.get(e.review.approver) ?? 0) + 1);
     }
     return counts;
+  }
+  async listDecisionLatenciesSince(
+    since: Date,
+  ): Promise<{ action: ReviewAction; latencySeconds: number | null }[]> {
+    // decided_at >= since (inclusive), each joined to the deal's evidence captured_at
+    // to compute the capture→decision latency — mirrors the Postgres adapter's LEFT
+    // JOIN (LSP). A missing deal/evidence yields a null latency (still counted).
+    const sinceMs = since.getTime();
+    const out: { action: ReviewAction; latencySeconds: number | null }[] = [];
+    for (const e of this.reviews) {
+      const decidedMs = Date.parse(e.review.decided_at);
+      if (decidedMs < sinceMs) continue;
+      const deal = await this.deals.getById(e.review.deal_id);
+      const ev = deal ? await this.evidence.getById(deal.evidence_id) : null;
+      const latencySeconds =
+        ev === null ? null : Math.floor((decidedMs - Date.parse(ev.captured_at)) / 1000);
+      out.push({ action: e.review.action, latencySeconds });
+    }
+    return out;
   }
 }
 

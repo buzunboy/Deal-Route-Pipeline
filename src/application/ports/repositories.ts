@@ -109,6 +109,17 @@ export interface DealRepository {
   listAdminPublished(query: AdminPublishedQuery): Promise<DealRecord[]>;
   /** Total deals in the admin-published status set — for the screen's `total`. */
   countAdminPublished(): Promise<number>;
+  /**
+   * The pending review queue's age + confidence signals (ACR-9 + ACR-10 Metrics): for
+   * every reviewable deal (`candidate` + `in_review`), its linked evidence
+   * `captured_at` (the freshness "age" basis — `now − captured_at`) and its
+   * `confidence` (the confidence-distribution basis). A deal whose evidence row is
+   * missing yields `capturedAt: null` (it can't be aged) but is still listed with its
+   * confidence. One join over the queue; both adapters MUST return the same set (LSP).
+   * Unbounded by design — the reviewable queue is the human-review backlog (small);
+   * the same scale as {@link countCandidates}.
+   */
+  pendingQueueSignals(): Promise<{ capturedAt: string | null; confidence: number }[]>;
 }
 
 export interface CrawlRunRepository {
@@ -210,6 +221,18 @@ export interface ReviewRepository {
    * adapters MUST agree for the same data (LSP).
    */
   countByActionSince(action: ReviewAction, since: Date): Promise<number>;
+  /**
+   * Review decisions at/after `since` (inclusive), each joined to the decided deal's
+   * evidence `captured_at` so the use-case can compute the capture→decision latency
+   * (ACR-6 throughput's `avg_review_seconds`). Returns one entry per decision with its
+   * `action` and the `latencySeconds` (`decided_at − captured_at`, floored to whole
+   * seconds), or `latencySeconds: null` when the deal's evidence capture time can't be
+   * resolved (the decision still counts, but doesn't enter the latency average). Both
+   * adapters MUST return the same set + latencies for the same data (LSP).
+   */
+  listDecisionLatenciesSince(
+    since: Date,
+  ): Promise<{ action: ReviewAction; latencySeconds: number | null }[]>;
   /**
    * Recent review decisions across ALL deals (the audit feed, ACR-7), newest first.
    * Optional filters: `approver` (exact actor), `dealId` (exact entity), `since`

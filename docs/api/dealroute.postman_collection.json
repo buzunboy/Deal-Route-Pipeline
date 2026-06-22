@@ -5,7 +5,7 @@
       "description": "Unauthenticated read-only `/v1/*` surface (landing page / public consumers).",
       "item": [
         {
-          "id": "215cc65e-bf87-4031-9546-519dc4205dba",
+          "id": "03e11bd1-30ed-44f0-8daf-d174f9b01604",
           "name": "List published deals (filtered, sorted, paginated)",
           "request": {
             "name": "List published deals (filtered, sorted, paginated)",
@@ -47,7 +47,7 @@
                     "type": "text/plain"
                   },
                   "key": "route_type",
-                  "value": "regional"
+                  "value": "bundle"
                 },
                 {
                   "disabled": false,
@@ -102,7 +102,7 @@
           },
           "response": [
             {
-              "id": "d9a2021e-bdba-4a70-9bcd-b8b7a36b2302",
+              "id": "3d22f0d6-5465-4737-ae0b-3781a93272db",
               "name": "A page of published deals.",
               "originalRequest": {
                 "url": {
@@ -139,7 +139,7 @@
                         "type": "text/plain"
                       },
                       "key": "route_type",
-                      "value": "regional"
+                      "value": "bundle"
                     },
                     {
                       "disabled": false,
@@ -197,12 +197,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deals\": [\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"headline\": \"<string>\",\n      \"route_type\": \"regional\",\n      \"country\": \"DE\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"monthly\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"eligibility\": {\n        \"new_customer_only\": \"<boolean,null>\",\n        \"residency_kyc\": \"<boolean,null>\",\n        \"plan_tier_required\": \"<string,null>\",\n        \"min_spend\": \"<number,null>\",\n        \"stackable\": \"<boolean,null>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\",\n              \"key_1\": 7987.409425235436,\n              \"key_2\": 7203\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 6470,\n              \"key_1\": 676\n            }\n          }\n        ]\n      },\n      \"validity\": {\n        \"start\": \"<string,null>\",\n        \"end\": \"<string,null>\",\n        \"recheck_days\": \"<integer>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 8741\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": false,\n              \"key_1\": 5419,\n              \"key_2\": 5283\n            }\n          }\n        ]\n      },\n      \"included_items\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"trust\": \"recent\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"evidence_screenshot_url\": \"<string,null-uri>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"headline\": \"<string>\",\n      \"route_type\": \"standalone\",\n      \"country\": \"DE\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"annual\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"eligibility\": {\n        \"new_customer_only\": \"<boolean,null>\",\n        \"residency_kyc\": \"<boolean,null>\",\n        \"plan_tier_required\": \"<string,null>\",\n        \"min_spend\": \"<number,null>\",\n        \"stackable\": \"<boolean,null>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": true,\n              \"key_1\": 9199,\n              \"key_2\": 8751.388347303759,\n              \"key_3\": false\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 1799,\n              \"key_1\": \"string\"\n            }\n          }\n        ]\n      },\n      \"validity\": {\n        \"start\": \"<string,null>\",\n        \"end\": \"<string,null>\",\n        \"recheck_days\": \"<integer>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\",\n              \"key_1\": false\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\",\n              \"key_1\": 4510.065264683581\n            }\n          }\n        ]\n      },\n      \"included_items\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"trust\": \"recent\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"evidence_screenshot_url\": \"<string,null-uri>\"\n    }\n  ],\n  \"total\": \"<integer>\",\n  \"limit\": \"<integer>\",\n  \"offset\": \"<integer>\"\n}",
+              "body": "{\n  \"deals\": [\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"headline\": \"<string>\",\n      \"route_type\": \"promo\",\n      \"country\": \"DE\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"prepaid\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"eligibility\": {\n        \"new_customer_only\": \"<boolean,null>\",\n        \"residency_kyc\": \"<boolean,null>\",\n        \"plan_tier_required\": \"<string,null>\",\n        \"min_spend\": \"<number,null>\",\n        \"stackable\": \"<boolean,null>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\",\n              \"key_1\": 4724\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 7440\n            }\n          }\n        ]\n      },\n      \"validity\": {\n        \"start\": \"<string,null>\",\n        \"end\": \"<string,null>\",\n        \"recheck_days\": \"<integer>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 1357.7412834857216\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 284.2959498333153\n            }\n          }\n        ]\n      },\n      \"included_items\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"trust\": \"recent\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"evidence_screenshot_url\": \"<string,null-uri>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"headline\": \"<string>\",\n      \"route_type\": \"regional\",\n      \"country\": \"DE\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"annual\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"eligibility\": {\n        \"new_customer_only\": \"<boolean,null>\",\n        \"residency_kyc\": \"<boolean,null>\",\n        \"plan_tier_required\": \"<string,null>\",\n        \"min_spend\": \"<number,null>\",\n        \"stackable\": \"<boolean,null>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 3538\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 4057\n            }\n          }\n        ]\n      },\n      \"validity\": {\n        \"start\": \"<string,null>\",\n        \"end\": \"<string,null>\",\n        \"recheck_days\": \"<integer>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\",\n              \"key_1\": \"string\",\n              \"key_2\": 2140\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": true,\n              \"key_1\": false,\n              \"key_2\": 6687\n            }\n          }\n        ]\n      },\n      \"included_items\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"trust\": \"stale\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"evidence_screenshot_url\": \"<string,null-uri>\"\n    }\n  ],\n  \"total\": \"<integer>\",\n  \"limit\": \"<integer>\",\n  \"offset\": \"<integer>\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "1ff79b33-ba18-4daf-bebe-2289d33a8368",
+              "id": "5b4b84c4-e354-4c68-9ec9-211d4ea79d7f",
               "name": "Unknown query param, bad enum, non-numeric or over-cap value.",
               "originalRequest": {
                 "url": {
@@ -239,7 +239,7 @@
                         "type": "text/plain"
                       },
                       "key": "route_type",
-                      "value": "regional"
+                      "value": "bundle"
                     },
                     {
                       "disabled": false,
@@ -308,7 +308,7 @@
           }
         },
         {
-          "id": "bffdaf7d-506c-4e61-b5e2-145cbe5b7690",
+          "id": "35678a9f-5fb5-4557-adbe-202c8c08af01",
           "name": "Get one published deal",
           "request": {
             "name": "Get one published deal",
@@ -350,7 +350,7 @@
           },
           "response": [
             {
-              "id": "7da9e613-accb-4931-8a76-4202b3911295",
+              "id": "21ee77e1-c4ff-4456-bbc5-6cde459279ca",
               "name": "The deal (curated DTO).",
               "originalRequest": {
                 "url": {
@@ -393,12 +393,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"service\": \"<string>\",\n    \"provider\": \"<string>\",\n    \"headline\": \"<string>\",\n    \"route_type\": \"regional\",\n    \"country\": \"DE\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true\n          }\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": 4395.092767407468\n          }\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": \"string\",\n            \"key_2\": \"string\"\n          }\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": \"string\",\n            \"key_2\": true\n          }\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"trust\": \"recent\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"evidence_screenshot_url\": \"<string,null-uri>\"\n  }\n}",
+              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"service\": \"<string>\",\n    \"provider\": \"<string>\",\n    \"headline\": \"<string>\",\n    \"route_type\": \"bundle\",\n    \"country\": \"DE\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": 3565.524880568398,\n            \"key_2\": true,\n            \"key_3\": 3743\n          }\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 3665\n          }\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\"\n          }\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": false,\n            \"key_1\": true\n          }\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"trust\": \"recent\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"evidence_screenshot_url\": \"<string,null-uri>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "e2bf35d9-e6ba-46db-b1ed-7ca422735559",
+              "id": "ce6bd2d2-7120-4311-82a1-0db5e4800851",
               "name": "Missing OR not published (the two are indistinguishable by design).",
               "originalRequest": {
                 "url": {
@@ -458,7 +458,7 @@
       "description": "Liveness probes.",
       "item": [
         {
-          "id": "90c23650-aa9a-46b1-aad3-0208379d177b",
+          "id": "48736cc8-4bf8-4077-9ae8-19dd39b77027",
           "name": "Public feed liveness",
           "request": {
             "name": "Public feed liveness",
@@ -488,7 +488,7 @@
           },
           "response": [
             {
-              "id": "610ccff8-760e-42ee-bd85-712996f0095b",
+              "id": "36419f8c-2fff-482d-8948-cf6992506b38",
               "name": "OK",
               "originalRequest": {
                 "url": {
@@ -530,7 +530,7 @@
           }
         },
         {
-          "id": "342b6d6f-63c4-4705-bc90-470b133fc560",
+          "id": "d5479fad-f71a-400f-92e3-6594ab89f876",
           "name": "Admin API liveness",
           "request": {
             "name": "Admin API liveness",
@@ -560,7 +560,7 @@
           },
           "response": [
             {
-              "id": "d413697d-1ec8-44dd-8b87-59dbedc16766",
+              "id": "0d9ed78b-4657-4421-beb7-8382e4aacd5b",
               "name": "OK",
               "originalRequest": {
                 "url": {
@@ -608,7 +608,7 @@
       "description": "Review queue — list, edit, approve, reject, audit. (admin)",
       "item": [
         {
-          "id": "55275b32-e802-4db4-b59f-837d26032a04",
+          "id": "f1d10b45-1a18-4a74-a5ec-b1a15c87fd0a",
           "name": "List candidates awaiting review (filtered, paginated)",
           "request": {
             "name": "List candidates awaiting review (filtered, paginated)",
@@ -632,7 +632,7 @@
                     "type": "text/plain"
                   },
                   "key": "status",
-                  "value": "rejected"
+                  "value": "published"
                 },
                 {
                   "disabled": false,
@@ -687,7 +687,7 @@
           },
           "response": [
             {
-              "id": "1b340ff0-feee-4e70-a946-2345b1a2e493",
+              "id": "65596334-99f0-4237-996a-90567be74137",
               "name": "Candidates, each joined with its evidence bundle.",
               "originalRequest": {
                 "url": {
@@ -706,7 +706,7 @@
                         "type": "text/plain"
                       },
                       "key": "status",
-                      "value": "rejected"
+                      "value": "published"
                     },
                     {
                       "disabled": false,
@@ -764,12 +764,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"deal\": {\n      \"id\": \"<uuid>\",\n      \"schema_version\": \"<integer>\",\n      \"service\": \"<string>\",\n      \"route_type\": \"standalone\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"monthly\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"country\": \"DE\",\n      \"status\": \"in_review\",\n      \"provider\": \"<string,null>\",\n      \"headline\": \"<string,null>\",\n      \"confidence\": \"<number>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"verified_by\": \"<string,null>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"evidence_id\": \"<string,null-uuid>\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\"\n    },\n    \"evidence\": {\n      \"id\": \"<uuid>\",\n      \"source_url\": \"<uri>\",\n      \"screenshot_ref\": \"<string>\",\n      \"html_ref\": \"<string>\",\n      \"terms_ref\": \"<string>\",\n      \"captured_at\": \"<dateTime>\",\n      \"content_hash\": \"<string>\",\n      \"evidence_screenshot_url\": \"<string,null-uri>\",\n      \"evidence_html_url\": \"<string,null-uri>\"\n    }\n  },\n  {\n    \"deal\": {\n      \"id\": \"<uuid>\",\n      \"schema_version\": \"<integer>\",\n      \"service\": \"<string>\",\n      \"route_type\": \"promo\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"prepaid\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"country\": \"DE\",\n      \"status\": \"rejected\",\n      \"provider\": \"<string,null>\",\n      \"headline\": \"<string,null>\",\n      \"confidence\": \"<number>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"verified_by\": \"<string,null>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"evidence_id\": \"<string,null-uuid>\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\"\n    },\n    \"evidence\": {\n      \"id\": \"<uuid>\",\n      \"source_url\": \"<uri>\",\n      \"screenshot_ref\": \"<string>\",\n      \"html_ref\": \"<string>\",\n      \"terms_ref\": \"<string>\",\n      \"captured_at\": \"<dateTime>\",\n      \"content_hash\": \"<string>\",\n      \"evidence_screenshot_url\": \"<string,null-uri>\",\n      \"evidence_html_url\": \"<string,null-uri>\",\n      \"key_0\": 203,\n      \"key_1\": \"string\"\n    }\n  }\n]",
+              "body": "[\n  {\n    \"deal\": {\n      \"id\": \"<uuid>\",\n      \"schema_version\": \"<integer>\",\n      \"service\": \"<string>\",\n      \"route_type\": \"bundle\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"one_time\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"country\": \"DE\",\n      \"status\": \"published\",\n      \"provider\": \"<string,null>\",\n      \"headline\": \"<string,null>\",\n      \"confidence\": \"<number>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"verified_by\": \"<string,null>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"evidence_id\": \"<string,null-uuid>\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\"\n    },\n    \"evidence\": {\n      \"id\": \"<uuid>\",\n      \"source_url\": \"<uri>\",\n      \"screenshot_ref\": \"<string>\",\n      \"html_ref\": \"<string>\",\n      \"terms_ref\": \"<string>\",\n      \"captured_at\": \"<dateTime>\",\n      \"content_hash\": \"<string>\",\n      \"evidence_screenshot_url\": \"<string,null-uri>\",\n      \"evidence_html_url\": \"<string,null-uri>\"\n    }\n  },\n  {\n    \"deal\": {\n      \"id\": \"<uuid>\",\n      \"schema_version\": \"<integer>\",\n      \"service\": \"<string>\",\n      \"route_type\": \"regional\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"unknown\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"country\": \"DE\",\n      \"status\": \"published\",\n      \"provider\": \"<string,null>\",\n      \"headline\": \"<string,null>\",\n      \"confidence\": \"<number>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"verified_by\": \"<string,null>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"evidence_id\": \"<string,null-uuid>\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\"\n    },\n    \"evidence\": {\n      \"id\": \"<uuid>\",\n      \"source_url\": \"<uri>\",\n      \"screenshot_ref\": \"<string>\",\n      \"html_ref\": \"<string>\",\n      \"terms_ref\": \"<string>\",\n      \"captured_at\": \"<dateTime>\",\n      \"content_hash\": \"<string>\",\n      \"evidence_screenshot_url\": \"<string,null-uri>\",\n      \"evidence_html_url\": \"<string,null-uri>\"\n    }\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "d8062999-b4d8-4b13-b0a5-18598ce6dc3e",
+              "id": "473ce766-f6fa-4c0b-9587-a897517ecd5b",
               "name": "Invalid filter / out-of-range pagination.",
               "originalRequest": {
                 "url": {
@@ -788,7 +788,7 @@
                         "type": "text/plain"
                       },
                       "key": "status",
-                      "value": "rejected"
+                      "value": "published"
                     },
                     {
                       "disabled": false,
@@ -857,7 +857,7 @@
           }
         },
         {
-          "id": "e882dff6-c497-45c4-9069-95c0ef429cfa",
+          "id": "527c0045-c5a7-4911-9c0b-44b7a01b53cd",
           "name": "Aggregate review-queue counts for the view-cards + filter rail (ACR-5)",
           "request": {
             "name": "Aggregate review-queue counts for the view-cards + filter rail (ACR-5)",
@@ -891,7 +891,7 @@
           },
           "response": [
             {
-              "id": "3bc57a47-dd67-4af8-8605-022eb527be05",
+              "id": "50039ec3-48b9-4eb7-b9ad-33d114ea79ec",
               "name": "The aggregate counts.",
               "originalRequest": {
                 "url": {
@@ -934,7 +934,84 @@
           }
         },
         {
-          "id": "4280aeea-18a6-4317-b49c-3d6c5f113af1",
+          "id": "eea0f038-785b-43c3-a7f9-f6d81483812c",
+          "name": "Pending-queue freshness age-buckets (ACR-9)",
+          "request": {
+            "name": "Pending-queue freshness age-buckets (ACR-9)",
+            "description": {
+              "content": "The share of the pending review queue (`candidate` + `in_review`) in each age\nband, where age is `now − evidence.captured_at`. The three bands are always\nreturned, summing to 100 (an empty queue returns all three at 0). Backs the\nDashboard \"Queue freshness\" card. Read endpoint — not gated.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "candidates",
+                "freshness"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "id": "a7441791-951d-4e17-b542-9cdeb9a5d4c7",
+              "name": "The three freshness bands (freshest first).",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "api",
+                    "candidates",
+                    "freshness"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "GET",
+                "body": {}
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  {\n    \"bucket\": \">3d\",\n    \"percent\": \"<integer>\"\n  },\n  {\n    \"bucket\": \"1-3d\",\n    \"percent\": \"<integer>\"\n  }\n]",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            }
+          ],
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "id": "8476c6d5-0d4b-465e-883e-e7f4799600c3",
           "name": "Edit a candidate's reviewer-correctable fields (before approve)",
           "request": {
             "name": "Edit a candidate's reviewer-correctable fields (before approve)",
@@ -978,7 +1055,7 @@
             "method": "PATCH",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"regional\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 3390.281412623417,\n            \"key_1\": \"string\",\n            \"key_2\": 6380.026997364527,\n            \"key_3\": 1075\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 662.9821847883821,\n            \"key_1\": 3715.2496806086087,\n            \"key_2\": false\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3152.481992288726,\n      \"key_1\": 62\n    }\n  }\n}",
+              "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 7280,\n            \"key_1\": 8528.992885399783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": 2716.024117206719,\n            \"key_2\": 7620.173502867783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 4302.078634210812\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\",\n      \"key_1\": 260.2981093767853,\n      \"key_2\": \"string\",\n      \"key_3\": 2766.9087582761654,\n      \"key_4\": 4010\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -998,7 +1075,7 @@
           },
           "response": [
             {
-              "id": "643cc416-0c8c-48d3-9c67-3203534eedad",
+              "id": "75fa6459-23b2-466c-8ae3-f695cc0bc94b",
               "name": "The affected deal.",
               "originalRequest": {
                 "url": {
@@ -1045,7 +1122,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"regional\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 3390.281412623417,\n            \"key_1\": \"string\",\n            \"key_2\": 6380.026997364527,\n            \"key_3\": 1075\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 662.9821847883821,\n            \"key_1\": 3715.2496806086087,\n            \"key_2\": false\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3152.481992288726,\n      \"key_1\": 62\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 7280,\n            \"key_1\": 8528.992885399783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": 2716.024117206719,\n            \"key_2\": 7620.173502867783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 4302.078634210812\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\",\n      \"key_1\": 260.2981093767853,\n      \"key_2\": \"string\",\n      \"key_3\": 2766.9087582761654,\n      \"key_4\": 4010\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1062,12 +1139,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"in_review\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
+              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"regional\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"monthly\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"published\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "4a625f5d-31c2-41d7-acce-398c63678757",
+              "id": "8803d859-6ea7-4df0-8eab-14ae0813cb43",
               "name": "Malformed JSON body or failed validation.",
               "originalRequest": {
                 "url": {
@@ -1114,7 +1191,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"regional\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 3390.281412623417,\n            \"key_1\": \"string\",\n            \"key_2\": 6380.026997364527,\n            \"key_3\": 1075\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 662.9821847883821,\n            \"key_1\": 3715.2496806086087,\n            \"key_2\": false\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3152.481992288726,\n      \"key_1\": 62\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 7280,\n            \"key_1\": 8528.992885399783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": 2716.024117206719,\n            \"key_2\": 7620.173502867783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 4302.078634210812\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\",\n      \"key_1\": 260.2981093767853,\n      \"key_2\": \"string\",\n      \"key_3\": 2766.9087582761654,\n      \"key_4\": 4010\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1136,7 +1213,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "1503b56e-cf62-4ef0-9fc9-de5e73ab8515",
+              "id": "cfc54434-f67c-4081-9b0b-8216d1c69265",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -1183,7 +1260,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"regional\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 3390.281412623417,\n            \"key_1\": \"string\",\n            \"key_2\": 6380.026997364527,\n            \"key_3\": 1075\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 662.9821847883821,\n            \"key_1\": 3715.2496806086087,\n            \"key_2\": false\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3152.481992288726,\n      \"key_1\": 62\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 7280,\n            \"key_1\": 8528.992885399783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": 2716.024117206719,\n            \"key_2\": 7620.173502867783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 4302.078634210812\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\",\n      \"key_1\": 260.2981093767853,\n      \"key_2\": \"string\",\n      \"key_3\": 2766.9087582761654,\n      \"key_4\": 4010\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1205,7 +1282,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "4345821c-a132-4287-b9bd-1b135f67ff31",
+              "id": "c9b8e882-9ddd-4263-9637-27d9ecd2a522",
               "name": "Resource not found.",
               "originalRequest": {
                 "url": {
@@ -1252,7 +1329,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"regional\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 3390.281412623417,\n            \"key_1\": \"string\",\n            \"key_2\": 6380.026997364527,\n            \"key_3\": 1075\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 662.9821847883821,\n            \"key_1\": 3715.2496806086087,\n            \"key_2\": false\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3152.481992288726,\n      \"key_1\": 62\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 7280,\n            \"key_1\": 8528.992885399783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": 2716.024117206719,\n            \"key_2\": 7620.173502867783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 4302.078634210812\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\",\n      \"key_1\": 260.2981093767853,\n      \"key_2\": \"string\",\n      \"key_3\": 2766.9087582761654,\n      \"key_4\": 4010\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1274,7 +1351,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "4f7c59dd-0f37-4f74-89b9-8b2800b900dd",
+              "id": "23e2a526-5a82-4715-9b5f-8934134e87af",
               "name": "Resource is not in a state that allows this action (e.g. not reviewable).",
               "originalRequest": {
                 "url": {
@@ -1321,7 +1398,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"regional\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 3390.281412623417,\n            \"key_1\": \"string\",\n            \"key_2\": 6380.026997364527,\n            \"key_3\": 1075\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 662.9821847883821,\n            \"key_1\": 3715.2496806086087,\n            \"key_2\": false\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3152.481992288726,\n      \"key_1\": 62\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 7280,\n            \"key_1\": 8528.992885399783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": 2716.024117206719,\n            \"key_2\": 7620.173502867783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 4302.078634210812\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\",\n      \"key_1\": 260.2981093767853,\n      \"key_2\": \"string\",\n      \"key_3\": 2766.9087582761654,\n      \"key_4\": 4010\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1343,7 +1420,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "4cb453a5-9bd4-4031-ab78-4a87f2841afa",
+              "id": "6e598db6-08ab-463f-ac8b-d42bf1c10248",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -1390,7 +1467,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"regional\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 3390.281412623417,\n            \"key_1\": \"string\",\n            \"key_2\": 6380.026997364527,\n            \"key_3\": 1075\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 662.9821847883821,\n            \"key_1\": 3715.2496806086087,\n            \"key_2\": false\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3152.481992288726,\n      \"key_1\": 62\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 7280,\n            \"key_1\": 8528.992885399783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": 2716.024117206719,\n            \"key_2\": 7620.173502867783\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 4302.078634210812\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\",\n      \"key_1\": 260.2981093767853,\n      \"key_2\": \"string\",\n      \"key_3\": 2766.9087582761654,\n      \"key_4\": 4010\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1418,7 +1495,7 @@
           }
         },
         {
-          "id": "f5d0b035-34b5-4965-a449-2668087100c2",
+          "id": "7c5eec57-f07d-44ee-852e-5db38a881eaa",
           "name": "Approve a candidate → publish it",
           "request": {
             "name": "Approve a candidate → publish it",
@@ -1483,7 +1560,7 @@
           },
           "response": [
             {
-              "id": "4edb3562-c504-4c79-8917-073524fc75e7",
+              "id": "82888a88-866e-41ea-8794-426876e41a91",
               "name": "The affected deal.",
               "originalRequest": {
                 "url": {
@@ -1548,12 +1625,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"in_review\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
+              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"regional\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"monthly\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"published\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "316c0942-3549-4fc9-9db2-287f1887fd9d",
+              "id": "1517ada3-5500-4654-9920-d779f7f2f232",
               "name": "Malformed JSON body or failed validation.",
               "originalRequest": {
                 "url": {
@@ -1623,7 +1700,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "79093b8a-37d6-42f6-b73f-025e567bb377",
+              "id": "963fffb2-98ec-4ec8-b120-d6f2f5d8443b",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -1693,7 +1770,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "cae5024e-5d0a-4f62-b873-6dc7a6691c3a",
+              "id": "09727a81-a788-43ec-9f40-447491af3aca",
               "name": "Resource not found.",
               "originalRequest": {
                 "url": {
@@ -1763,7 +1840,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "c43b314d-3417-42e7-a1c4-0028d3f65eb3",
+              "id": "2adb436d-1e34-409f-bd1d-bd8ee49d9c32",
               "name": "Resource is not in a state that allows this action (e.g. not reviewable).",
               "originalRequest": {
                 "url": {
@@ -1833,7 +1910,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "23667000-9f64-4dec-9e0e-f815a90a4909",
+              "id": "a367fff1-f4ff-43d7-9fe6-a6baf7f6ac0a",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -1909,7 +1986,7 @@
           }
         },
         {
-          "id": "8c975824-0477-47c3-9b80-16fc306e5aba",
+          "id": "fb46fa70-f44e-4698-b6c5-6b075b131c6b",
           "name": "Reject a candidate",
           "request": {
             "name": "Reject a candidate",
@@ -1971,7 +2048,7 @@
           },
           "response": [
             {
-              "id": "b9a7b51f-02c0-4469-9341-ae709485d8da",
+              "id": "4098f875-b17b-4fb2-8691-2de9ca9cb835",
               "name": "The affected deal.",
               "originalRequest": {
                 "url": {
@@ -2036,12 +2113,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"in_review\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
+              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"regional\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"monthly\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"published\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "6f51af58-b2d3-4b47-bbb5-fc0b4538f1ac",
+              "id": "bb4a6d9b-1085-4601-86cb-a3c22432595d",
               "name": "Malformed JSON body or failed validation.",
               "originalRequest": {
                 "url": {
@@ -2111,7 +2188,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "dfb66d07-9e03-46f7-8e6b-c2cfb580c12f",
+              "id": "fa272ed7-c9ca-42c7-8851-fb3481e501b5",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -2181,7 +2258,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "199a13a5-e58c-472c-bf2a-bdca0fcb7354",
+              "id": "a49c9c97-53fc-4670-b240-e796cd2dc2be",
               "name": "Resource not found.",
               "originalRequest": {
                 "url": {
@@ -2251,7 +2328,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "5914bd4d-9610-4860-8316-644c18db94b8",
+              "id": "320e70c6-8ddc-4eaf-b32c-e739c7290321",
               "name": "Resource is not in a state that allows this action (e.g. not reviewable).",
               "originalRequest": {
                 "url": {
@@ -2321,7 +2398,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "c88a93c4-f55a-4c3f-9df2-abf72e7c16f1",
+              "id": "265616ac-b132-4121-ac4a-a5f46443043c",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -2397,7 +2474,7 @@
           }
         },
         {
-          "id": "d7f6c187-a92b-4f34-beaf-dd9d6007dcde",
+          "id": "1a1fb5c9-c456-434b-9b37-422280d9edcb",
           "name": "Audit history for a candidate",
           "request": {
             "name": "Audit history for a candidate",
@@ -2440,7 +2517,7 @@
           },
           "response": [
             {
-              "id": "681b725b-0fb6-4ddf-b067-12e5b0a7b2fa",
+              "id": "bcba6494-0dc2-4285-97be-8b4dff544df1",
               "name": "Immutable review/audit log (who decided what, when, why).",
               "originalRequest": {
                 "url": {
@@ -2484,7 +2561,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"action\": \"edit\",\n    \"approver\": \"<string>\",\n    \"decided_at\": \"<dateTime>\",\n    \"id\": \"<string>\",\n    \"deal_id\": \"<uuid>\",\n    \"reason\": \"<string,null>\"\n  },\n  {\n    \"action\": \"edit\",\n    \"approver\": \"<string>\",\n    \"decided_at\": \"<dateTime>\",\n    \"id\": \"<string>\",\n    \"deal_id\": \"<uuid>\",\n    \"reason\": \"<string,null>\"\n  }\n]",
+              "body": "[\n  {\n    \"action\": \"edit\",\n    \"approver\": \"<string>\",\n    \"decided_at\": \"<dateTime>\",\n    \"id\": \"<string>\",\n    \"deal_id\": \"<uuid>\",\n    \"reason\": \"<string,null>\"\n  },\n  {\n    \"action\": \"approve\",\n    \"approver\": \"<string>\",\n    \"decided_at\": \"<dateTime>\",\n    \"id\": \"<string>\",\n    \"deal_id\": \"<uuid>\",\n    \"reason\": \"<string,null>\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -2501,7 +2578,7 @@
       "description": "LLM-proposed novel condition keys awaiting promotion. (admin)",
       "item": [
         {
-          "id": "1c31e3b7-f733-4963-9c24-12c9541d1bbf",
+          "id": "58280cc5-7fee-4c72-9b62-1a36512a7706",
           "name": "List LLM field proposals (novel condition keys)",
           "request": {
             "name": "List LLM field proposals (novel condition keys)",
@@ -2531,7 +2608,7 @@
           },
           "response": [
             {
-              "id": "43edc5e5-2c42-4cce-91af-7748bc272702",
+              "id": "397a737c-76b3-43a9-b602-5baa88839c2f",
               "name": "Field proposals awaiting promotion.",
               "originalRequest": {
                 "url": {
@@ -2562,7 +2639,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"suggested_key\": \"<string>\",\n    \"label\": \"<string>\",\n    \"rationale\": \"<string>\",\n    \"example_quote\": \"<string>\",\n    \"count\": \"<integer>\",\n    \"status\": \"promoted\",\n    \"first_seen_at\": \"<dateTime>\",\n    \"last_seen_at\": \"<dateTime>\"\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"suggested_key\": \"<string>\",\n    \"label\": \"<string>\",\n    \"rationale\": \"<string>\",\n    \"example_quote\": \"<string>\",\n    \"count\": \"<integer>\",\n    \"status\": \"rejected\",\n    \"first_seen_at\": \"<dateTime>\",\n    \"last_seen_at\": \"<dateTime>\",\n    \"key_0\": \"string\"\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"suggested_key\": \"<string>\",\n    \"label\": \"<string>\",\n    \"rationale\": \"<string>\",\n    \"example_quote\": \"<string>\",\n    \"count\": \"<integer>\",\n    \"status\": \"rejected\",\n    \"first_seen_at\": \"<dateTime>\",\n    \"last_seen_at\": \"<dateTime>\"\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"suggested_key\": \"<string>\",\n    \"label\": \"<string>\",\n    \"rationale\": \"<string>\",\n    \"example_quote\": \"<string>\",\n    \"count\": \"<integer>\",\n    \"status\": \"promoted\",\n    \"first_seen_at\": \"<dateTime>\",\n    \"last_seen_at\": \"<dateTime>\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -2573,7 +2650,7 @@
           }
         },
         {
-          "id": "4be065d7-0d3d-44a9-9e15-bd5f96240358",
+          "id": "2cb9644f-69bb-440d-a103-3636730a7e26",
           "name": "Promote a field proposal into the condition vocabulary",
           "request": {
             "name": "Promote a field proposal into the condition vocabulary",
@@ -2638,7 +2715,7 @@
           },
           "response": [
             {
-              "id": "3c569d22-e937-4c05-bc4e-1dc70bca306d",
+              "id": "a8ed21a4-8889-4f42-a270-dbdbdb9ae6d3",
               "name": "The created vocabulary entry.",
               "originalRequest": {
                 "url": {
@@ -2703,12 +2780,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"vocabulary_entry\": {\n    \"key\": \"<string>\",\n    \"label\": \"<string>\",\n    \"aliases\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"key_0\": 242,\n    \"key_1\": 6725.186555916835\n  }\n}",
+              "body": "{\n  \"vocabulary_entry\": {\n    \"key\": \"<string>\",\n    \"label\": \"<string>\",\n    \"aliases\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"key_0\": false,\n    \"key_1\": 821.7502144477429,\n    \"key_2\": 3741.9532490949314\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "3926de82-b5e3-4b2c-96f0-9800f71feeee",
+              "id": "d3869149-52f0-4928-bc18-e63ebe2082d2",
               "name": "Validation failed, or `target:\"field\"` (not supported).",
               "originalRequest": {
                 "url": {
@@ -2778,7 +2855,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "fddb300d-ada5-4e37-ab1d-90a6ed199d33",
+              "id": "90b85531-290f-4c21-b1d7-1e9043efa943",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -2848,7 +2925,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "578c9011-df4d-4acb-872a-9741dd6e5662",
+              "id": "41411856-326f-41f5-abc8-953c0fda8085",
               "name": "Resource not found.",
               "originalRequest": {
                 "url": {
@@ -2918,7 +2995,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "ab495831-fbb4-4554-9a63-53df74c0f9dc",
+              "id": "99e17ac1-fd59-46b1-82bf-cb98793e1b3a",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -3000,7 +3077,7 @@
       "description": "Human-driven evidence capture tasks. (admin)",
       "item": [
         {
-          "id": "858885ce-9f8e-483b-a8ef-4899a2199c5a",
+          "id": "b3a4437b-b9a4-4075-83fd-8de9faf2f7f0",
           "name": "List open manual-capture tasks",
           "request": {
             "name": "List open manual-capture tasks",
@@ -3030,7 +3107,7 @@
           },
           "response": [
             {
-              "id": "e8913a84-768f-49f6-93a5-f4fc04fe433a",
+              "id": "3064038e-5f77-438f-a6c2-0dc3c02b80d7",
               "name": "Manual-capture tasks.",
               "originalRequest": {
                 "url": {
@@ -3061,7 +3138,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"status\": \"<string>\",\n    \"reason\": \"<string>\",\n    \"source_url\": \"<string,null-uri>\"\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"status\": \"<string>\",\n    \"reason\": \"<string>\",\n    \"source_url\": \"<string,null-uri>\",\n    \"key_0\": 4668\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"status\": \"<string>\",\n    \"reason\": \"<string>\",\n    \"source_url\": \"<string,null-uri>\",\n    \"key_0\": false\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"status\": \"<string>\",\n    \"reason\": \"<string>\",\n    \"source_url\": \"<string,null-uri>\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3072,7 +3149,7 @@
           }
         },
         {
-          "id": "b214ba93-0011-404d-ac9a-1c87c9a362e1",
+          "id": "d69b4b51-0e64-481f-b767-ef7b77d11b2e",
           "name": "Create a candidate from an ad-hoc manual capture (no backing task, ACR-12)",
           "request": {
             "name": "Create a candidate from an ad-hoc manual capture (no backing task, ACR-12)",
@@ -3104,7 +3181,7 @@
             "method": "POST",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+              "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -3124,7 +3201,7 @@
           },
           "response": [
             {
-              "id": "d55ea7d1-5fcd-4b00-a262-dd04c5a31e65",
+              "id": "af663d23-cafa-41ec-b2d3-b265b0cdff48",
               "name": "Candidate created.",
               "originalRequest": {
                 "url": {
@@ -3159,7 +3236,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3181,7 +3258,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "f4237f89-31bc-41bc-9430-b0784a624818",
+              "id": "d7f7be79-5cc9-46a4-9d53-10a6b26d9bf8",
               "name": "Missing approver/fields, or incomplete evidence bundle.",
               "originalRequest": {
                 "url": {
@@ -3216,7 +3293,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3238,7 +3315,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "3c94eac6-22eb-4221-b93c-9d15911c812c",
+              "id": "60f38b9e-2586-408b-a9d9-e2e8d6fae4c8",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -3273,7 +3350,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3295,7 +3372,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "a5eb5092-8b17-4bd7-badb-6aa614bdd303",
+              "id": "8338a01f-d8a8-4c3f-b290-3009940f2de3",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -3330,7 +3407,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3358,7 +3435,7 @@
           }
         },
         {
-          "id": "81cf961e-b4ea-4267-844c-fe402b5de7fd",
+          "id": "6dc960d6-4911-43f3-a034-b202436a3f8c",
           "name": "Complete a manual-capture task → mint an evidence-backed candidate",
           "request": {
             "name": "Complete a manual-capture task → mint an evidence-backed candidate",
@@ -3403,7 +3480,7 @@
             "method": "POST",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+              "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -3423,7 +3500,7 @@
           },
           "response": [
             {
-              "id": "0914711b-3caa-4098-aa3c-797324162167",
+              "id": "d562b158-1b7d-4cff-968b-1f3450458478",
               "name": "The affected deal.",
               "originalRequest": {
                 "url": {
@@ -3471,7 +3548,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3488,12 +3565,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"in_review\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
+              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"regional\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"monthly\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"published\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "9dedf43b-36ef-4138-b247-0d4355fade0d",
+              "id": "0f47f0c2-7a5a-41e6-b32f-1d4cba8152d0",
               "name": "Missing approver/fields, or incomplete evidence bundle.",
               "originalRequest": {
                 "url": {
@@ -3541,7 +3618,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3563,7 +3640,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "9947a904-be82-475d-a4a5-10afc9e53487",
+              "id": "9fe08b0e-bd8a-40cd-93d4-130752517a1c",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -3611,7 +3688,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3633,7 +3710,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "5db57e97-bc2a-4550-83b8-67af377ee5b4",
+              "id": "3c2413de-21a5-4595-91e8-7fb9c8f0f0d2",
               "name": "Resource not found.",
               "originalRequest": {
                 "url": {
@@ -3681,7 +3758,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3703,7 +3780,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "c4280ef5-468f-46b4-b1ff-3a845bd49085",
+              "id": "00ec1aaa-729f-4ff0-a5e3-2c33889fdcd9",
               "name": "Resource is not in a state that allows this action (e.g. not reviewable).",
               "originalRequest": {
                 "url": {
@@ -3751,7 +3828,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3773,7 +3850,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "6dfd1567-206a-4051-9428-008e0f52e034",
+              "id": "0e9be7c0-dec3-4f9b-9f58-b13ce881a826",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -3821,7 +3898,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": true,\n    \"key_1\": 9717.81090197673\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": \"string\",\n    \"key_1\": 7008.4591704453305\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3855,7 +3932,7 @@
       "description": "Source-promotion loop — approve/reject proposed crawl sources. (admin)",
       "item": [
         {
-          "id": "c5faf8e1-fa95-4159-9995-8165225ab093",
+          "id": "77ea0099-5ee8-47a9-9871-66f94c75a9a7",
           "name": "Sources registry — operational sources (active + disabled), ACR-10",
           "request": {
             "name": "Sources registry — operational sources (active + disabled), ACR-10",
@@ -3888,7 +3965,7 @@
           },
           "response": [
             {
-              "id": "c2095bdb-7ba3-46d1-b740-8f41606c98e3",
+              "id": "cdcc079f-7e7b-4955-bde6-d31f87b710da",
               "name": "The sources registry.",
               "originalRequest": {
                 "url": {
@@ -3919,7 +3996,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"sources\": [\n    {\n      \"id\": \"<uuid>\",\n      \"domain\": \"<string>\",\n      \"kind\": \"<string>\",\n      \"tier\": 3,\n      \"cadence\": \"<integer>\",\n      \"reliability\": \"<number>\",\n      \"last_seen_at\": \"<string,null-date-time>\",\n      \"status\": \"degraded\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"domain\": \"<string>\",\n      \"kind\": \"<string>\",\n      \"tier\": 3,\n      \"cadence\": \"<integer>\",\n      \"reliability\": \"<number>\",\n      \"last_seen_at\": \"<string,null-date-time>\",\n      \"status\": \"active\"\n    }\n  ]\n}",
+              "body": "{\n  \"sources\": [\n    {\n      \"id\": \"<uuid>\",\n      \"domain\": \"<string>\",\n      \"kind\": \"<string>\",\n      \"tier\": 4,\n      \"cadence\": \"<integer>\",\n      \"reliability\": \"<number>\",\n      \"last_seen_at\": \"<string,null-date-time>\",\n      \"status\": \"active\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"domain\": \"<string>\",\n      \"kind\": \"<string>\",\n      \"tier\": 1,\n      \"cadence\": \"<integer>\",\n      \"reliability\": \"<number>\",\n      \"last_seen_at\": \"<string,null-date-time>\",\n      \"status\": \"disabled\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3930,7 +4007,7 @@
           }
         },
         {
-          "id": "e0b35753-f758-48cf-afca-44abf83ab515",
+          "id": "a5d2cc9b-9ee6-4874-ba02-ee8e87193a82",
           "name": "Register a new operational source (the \"+ Add source\" flow, ACR-10)",
           "request": {
             "name": "Register a new operational source (the \"+ Add source\" flow, ACR-10)",
@@ -3962,7 +4039,7 @@
             "method": "POST",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+              "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -3982,7 +4059,7 @@
           },
           "response": [
             {
-              "id": "a113a0a3-6060-4b6c-ae21-028ce4afc5fb",
+              "id": "aac7ca5b-68a4-4f36-af45-30a00f3732f4",
               "name": "An EXISTING active/disabled source for this URL was updated in place\n(`created: false`, `id` = the existing row's id).",
               "originalRequest": {
                 "url": {
@@ -4017,7 +4094,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4039,7 +4116,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "276ffa36-fcaf-4e30-934e-612903f87f60",
+              "id": "dff71374-e44a-41ba-b748-d84cfff0a3ab",
               "name": "A NEW source was created (`created: true`).",
               "originalRequest": {
                 "url": {
@@ -4074,7 +4151,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4096,7 +4173,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "4d7c696d-c9e5-4a56-95e6-aab5baab5903",
+              "id": "0ff13edb-4cc0-42d9-8177-6ae6f5a483ec",
               "name": "Missing/invalid approver, domain, kind, tier, or country.",
               "originalRequest": {
                 "url": {
@@ -4131,7 +4208,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4153,7 +4230,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "307d3ac0-c08a-40d6-92bc-f163e66c1952",
+              "id": "6c05bfba-4f26-4c76-9d92-07955a6faae6",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -4188,7 +4265,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4210,7 +4287,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "4e09fdaf-febf-4878-bfe5-e69ebd8ea027",
+              "id": "f430acee-29a8-4945-84ed-9a34a018453b",
               "name": "A source for this URL already exists as `rejected` or `pending_approval` —\nuse the source-promotion loop, not register (governance guard).",
               "originalRequest": {
                 "url": {
@@ -4245,7 +4322,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4267,7 +4344,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "1b5722b1-e091-4da9-9951-a605c843e8f1",
+              "id": "4aaa2356-a36d-4a1d-8eda-43377d5fd87e",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -4302,7 +4379,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4330,7 +4407,7 @@
           }
         },
         {
-          "id": "5b700434-d2c9-4ff1-be74-a7f8f8bdc821",
+          "id": "6e2afd2a-1ced-45e5-aced-2794037d1a68",
           "name": "List proposed sources awaiting approval",
           "request": {
             "name": "List proposed sources awaiting approval",
@@ -4361,7 +4438,7 @@
           },
           "response": [
             {
-              "id": "22edec51-4e1e-4368-acee-7161f603fb9b",
+              "id": "8257683b-523a-4965-8ae9-ed138956c53c",
               "name": "Pending sources.",
               "originalRequest": {
                 "url": {
@@ -4393,7 +4470,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"bundler\",\n    \"tier\": 2,\n    \"status\": \"disabled\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"provider\",\n    \"tier\": 1,\n    \"status\": \"pending_approval\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\",\n    \"key_0\": \"string\",\n    \"key_1\": \"string\",\n    \"key_2\": false\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"provider\",\n    \"tier\": 4,\n    \"status\": \"rejected\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\",\n    \"key_0\": 3650,\n    \"key_1\": 9828,\n    \"key_2\": 5277.164379925988,\n    \"key_3\": true\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"aggregator\",\n    \"tier\": 2,\n    \"status\": \"active\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -4404,7 +4481,7 @@
           }
         },
         {
-          "id": "0aabc374-2aa3-41cd-9ad8-be5fdbebad6d",
+          "id": "941561ab-ff6b-46aa-ab53-560f3910fbb9",
           "name": "Approve a proposed source",
           "request": {
             "name": "Approve a proposed source",
@@ -4466,7 +4543,7 @@
           },
           "response": [
             {
-              "id": "8689edc9-f3e6-441c-9cbb-b2c8bfb2f806",
+              "id": "3060b487-3cba-4e93-ad1e-5c077ba0e93d",
               "name": "The affected source.",
               "originalRequest": {
                 "url": {
@@ -4531,12 +4608,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"source\": {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"community\",\n    \"tier\": 4,\n    \"status\": \"pending_approval\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  }\n}",
+              "body": "{\n  \"source\": {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"discovered\",\n    \"tier\": 3,\n    \"status\": \"active\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\",\n    \"key_0\": 9488.427054388909,\n    \"key_1\": true,\n    \"key_2\": 8808\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "fd5a5214-9a8d-426a-b305-b3833f55fbc8",
+              "id": "33431487-1eeb-4ee1-b572-d590c1014781",
               "name": "Malformed JSON body or failed validation.",
               "originalRequest": {
                 "url": {
@@ -4606,7 +4683,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "a6916820-16eb-4daa-b434-e5bcf35f379f",
+              "id": "032cf451-3603-4df2-a959-958e9797e8f7",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -4676,7 +4753,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "d5fe7efb-14f1-425d-baae-28e7c9b17095",
+              "id": "d86f2e49-f12c-4a53-b9d4-837d3e7bb3b0",
               "name": "Resource not found.",
               "originalRequest": {
                 "url": {
@@ -4746,7 +4823,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "037767bf-0464-4455-ba12-d413c5f6e970",
+              "id": "238b9981-4d0b-437b-b36e-fa393e874143",
               "name": "Resource is not in a state that allows this action (e.g. not reviewable).",
               "originalRequest": {
                 "url": {
@@ -4816,7 +4893,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "a8e7d9fa-453f-4c55-b46b-07b0d62928bd",
+              "id": "142e161d-96a0-4825-9666-d7098fc33e3e",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -4892,7 +4969,7 @@
           }
         },
         {
-          "id": "769212a4-279a-4903-9b14-3d9cc672ee1b",
+          "id": "d5d56b7f-f3fa-487e-9a5a-b1d9baba5773",
           "name": "Reject a proposed source",
           "request": {
             "name": "Reject a proposed source",
@@ -4954,7 +5031,7 @@
           },
           "response": [
             {
-              "id": "91ef43d4-a6a8-4c44-b9e6-dfd55c3aa47a",
+              "id": "95f06e59-1a48-4a0e-812f-7613af24f160",
               "name": "The affected source.",
               "originalRequest": {
                 "url": {
@@ -5019,12 +5096,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"source\": {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"community\",\n    \"tier\": 4,\n    \"status\": \"pending_approval\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  }\n}",
+              "body": "{\n  \"source\": {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"discovered\",\n    \"tier\": 3,\n    \"status\": \"active\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\",\n    \"key_0\": 9488.427054388909,\n    \"key_1\": true,\n    \"key_2\": 8808\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "142bf86f-46e7-4dc5-9280-bc6007d03342",
+              "id": "489063d9-fcd7-44a6-be29-0b351eb8f072",
               "name": "Malformed JSON body or failed validation.",
               "originalRequest": {
                 "url": {
@@ -5094,7 +5171,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "59e0b7ba-3210-4068-816d-7609a1045b2e",
+              "id": "1a2e8746-30bf-4b10-aa5e-642e699bfe7f",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -5164,7 +5241,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "ce55c9fb-a39d-4180-bf7c-22bea2b252f7",
+              "id": "ad72841b-4413-43f4-b10f-5b0ad8ecf7e4",
               "name": "Resource not found.",
               "originalRequest": {
                 "url": {
@@ -5234,7 +5311,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "2b1b4f7f-4fd1-43c3-b2dc-ea61b2fec127",
+              "id": "548d7ec8-da29-4fda-9431-fb90e984213a",
               "name": "Resource is not in a state that allows this action (e.g. not reviewable).",
               "originalRequest": {
                 "url": {
@@ -5304,7 +5381,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "1d7b0e3e-de7a-46e5-a071-540df55f8de5",
+              "id": "d6f4d0c4-9f22-4bd6-b529-fe8730202fc8",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -5380,7 +5457,7 @@
           }
         },
         {
-          "id": "85866d4f-6301-4f7b-8f02-3601caf5c308",
+          "id": "57be4b66-cba5-4a72-a356-20345be14828",
           "name": "Audit history for a source",
           "request": {
             "name": "Audit history for a source",
@@ -5423,7 +5500,7 @@
           },
           "response": [
             {
-              "id": "163df270-faff-49b5-b940-9e62873654dc",
+              "id": "56a8913f-db00-4ac3-bd27-bab93b437f20",
               "name": "Source review/audit log.",
               "originalRequest": {
                 "url": {
@@ -5467,7 +5544,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"<string>\",\n    \"source_id\": \"<uuid>\",\n    \"action\": \"approve\",\n    \"approver\": \"<string>\",\n    \"reason\": \"<string,null>\",\n    \"decided_at\": \"<dateTime>\",\n    \"key_0\": 6061,\n    \"key_1\": true,\n    \"key_2\": \"string\",\n    \"key_3\": true\n  },\n  {\n    \"id\": \"<string>\",\n    \"source_id\": \"<uuid>\",\n    \"action\": \"approve\",\n    \"approver\": \"<string>\",\n    \"reason\": \"<string,null>\",\n    \"decided_at\": \"<dateTime>\",\n    \"key_0\": 5648,\n    \"key_1\": 5430\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"<string>\",\n    \"source_id\": \"<uuid>\",\n    \"action\": \"approve\",\n    \"approver\": \"<string>\",\n    \"reason\": \"<string,null>\",\n    \"decided_at\": \"<dateTime>\",\n    \"key_0\": 2842,\n    \"key_1\": \"string\",\n    \"key_2\": false\n  },\n  {\n    \"id\": \"<string>\",\n    \"source_id\": \"<uuid>\",\n    \"action\": \"approve\",\n    \"approver\": \"<string>\",\n    \"reason\": \"<string,null>\",\n    \"decided_at\": \"<dateTime>\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -5484,7 +5561,7 @@
       "description": "Cross-deal audit feed of recent review decisions. (admin)",
       "item": [
         {
-          "id": "a34c83e1-9f4a-41d7-b320-1c95e2f89716",
+          "id": "def88195-f49b-4dd2-95d9-3aef11512fb0",
           "name": "Cross-deal audit feed of recent review decisions (ACR-7)",
           "request": {
             "name": "Cross-deal audit feed of recent review decisions (ACR-7)",
@@ -5554,7 +5631,7 @@
           },
           "response": [
             {
-              "id": "a62d9351-15ab-4fe0-8dcb-f826ff157656",
+              "id": "48de8d68-cff9-4bb9-8cd2-af055009aaef",
               "name": "The recent-activity entries (newest first).",
               "originalRequest": {
                 "url": {
@@ -5622,12 +5699,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"entries\": [\n    {\n      \"id\": \"<string>\",\n      \"initials\": \"<string>\",\n      \"actor\": \"<string>\",\n      \"action\": \"edit\",\n      \"detail\": \"<string,null>\",\n      \"entity_id\": \"<uuid>\",\n      \"at\": \"<dateTime>\"\n    },\n    {\n      \"id\": \"<string>\",\n      \"initials\": \"<string>\",\n      \"actor\": \"<string>\",\n      \"action\": \"edit\",\n      \"detail\": \"<string,null>\",\n      \"entity_id\": \"<uuid>\",\n      \"at\": \"<dateTime>\"\n    }\n  ]\n}",
+              "body": "{\n  \"entries\": [\n    {\n      \"id\": \"<string>\",\n      \"initials\": \"<string>\",\n      \"actor\": \"<string>\",\n      \"action\": \"edit\",\n      \"detail\": \"<string,null>\",\n      \"entity_id\": \"<uuid>\",\n      \"at\": \"<dateTime>\"\n    },\n    {\n      \"id\": \"<string>\",\n      \"initials\": \"<string>\",\n      \"actor\": \"<string>\",\n      \"action\": \"reject\",\n      \"detail\": \"<string,null>\",\n      \"entity_id\": \"<uuid>\",\n      \"at\": \"<dateTime>\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "13d02200-327d-4231-8fa2-c9873784e11a",
+              "id": "d328b7b6-0c1d-40cb-9ac7-58bf8e461870",
               "name": "Out-of-range limit or an unparseable `since`.",
               "originalRequest": {
                 "url": {
@@ -5712,7 +5789,7 @@
       "description": "Admin published-deals screen — publication history. (admin)",
       "item": [
         {
-          "id": "ee01c3bb-69f6-4752-b991-2d9eb2e19978",
+          "id": "c12245b5-9397-4902-8c89-4467c5e2a810",
           "name": "Admin \"Published deals\" screen — publication history (ACR-10)",
           "request": {
             "name": "Admin \"Published deals\" screen — publication history (ACR-10)",
@@ -5764,7 +5841,7 @@
           },
           "response": [
             {
-              "id": "714930b7-1ac4-457a-8429-c64d64ad38ca",
+              "id": "11c59f81-03bb-4ac6-afcf-937297cc3261",
               "name": "Published-screen rows + total.",
               "originalRequest": {
                 "url": {
@@ -5819,7 +5896,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "0a5b2a51-3c33-448a-972b-3a56e9e89b7d",
+              "id": "fee95b13-366f-4136-9515-3d02f46d5594",
               "name": "Out-of-range pagination.",
               "originalRequest": {
                 "url": {
@@ -5886,7 +5963,7 @@
       "description": "Reviewer registry + profile (the pipeline is the identity system of record). (admin)",
       "item": [
         {
-          "id": "e780f516-aa82-4cf1-854b-bf628c009e31",
+          "id": "d1ae887b-25ed-4811-be4a-2a19bfcc26c3",
           "name": "List team members with derived review counts (ACR-10)",
           "request": {
             "name": "List team members with derived review counts (ACR-10)",
@@ -5919,7 +5996,7 @@
           },
           "response": [
             {
-              "id": "93c66a91-eaa2-4e50-baf8-942c2273bebd",
+              "id": "aac80ae8-16cd-4533-ad37-c8bd5aa11b92",
               "name": "Team members.",
               "originalRequest": {
                 "url": {
@@ -5950,7 +6027,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"members\": [\n    {\n      \"id\": \"<uuid>\",\n      \"name\": \"<string>\",\n      \"email\": \"<email>\",\n      \"role\": \"admin\",\n      \"status\": \"invited\",\n      \"review_count\": \"<integer>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"name\": \"<string>\",\n      \"email\": \"<email>\",\n      \"role\": \"reviewer\",\n      \"status\": \"active\",\n      \"review_count\": \"<integer>\"\n    }\n  ]\n}",
+              "body": "{\n  \"members\": [\n    {\n      \"id\": \"<uuid>\",\n      \"name\": \"<string>\",\n      \"email\": \"<email>\",\n      \"role\": \"reviewer\",\n      \"status\": \"active\",\n      \"review_count\": \"<integer>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"name\": \"<string>\",\n      \"email\": \"<email>\",\n      \"role\": \"admin\",\n      \"status\": \"active\",\n      \"review_count\": \"<integer>\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -5961,7 +6038,7 @@
           }
         },
         {
-          "id": "093a45ba-ac89-4ec7-b7f0-2466e5c0b7a5",
+          "id": "94bc4ff9-4e6b-4ba2-9a6a-bebd4d63c5b7",
           "name": "Invite / register a team member (ACR-10)",
           "request": {
             "name": "Invite / register a team member (ACR-10)",
@@ -5993,7 +6070,7 @@
             "method": "POST",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approver\": \"<string>\",\n  \"name\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"admin\"\n}",
+              "raw": "{\n  \"approver\": \"<string>\",\n  \"name\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"reviewer\"\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -6013,7 +6090,7 @@
           },
           "response": [
             {
-              "id": "554f023c-4881-49e2-b897-e91708dae7c4",
+              "id": "8b56a0a7-26b1-4dfc-b012-2ab92bd6e2ee",
               "name": "Member invited/registered.",
               "originalRequest": {
                 "url": {
@@ -6048,7 +6125,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"name\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"admin\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"name\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"reviewer\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -6070,7 +6147,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "345f225e-c2f7-4175-93a2-58c276ea11cf",
+              "id": "e8bf2a48-7cf9-4f04-b888-cfa07d29984a",
               "name": "Missing/invalid approver, name, email, or role.",
               "originalRequest": {
                 "url": {
@@ -6105,7 +6182,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"name\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"admin\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"name\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"reviewer\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -6127,7 +6204,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "37e0271c-e84d-4636-9a34-e459ef781a3b",
+              "id": "ac501ac6-f82d-4431-b5d9-0bc32e32de33",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -6162,7 +6239,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"name\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"admin\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"name\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"reviewer\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -6184,7 +6261,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "816a97aa-7d94-458e-bac6-55045b45b099",
+              "id": "d1a045b8-8bb2-4299-bae6-7748d2b68bd2",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -6219,7 +6296,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"name\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"admin\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"name\": \"<string>\",\n  \"email\": \"<email>\",\n  \"role\": \"reviewer\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -6247,7 +6324,7 @@
           }
         },
         {
-          "id": "3bc68a3a-20e9-4167-bc59-18ea8a069ef9",
+          "id": "9392664a-6d3b-41e5-972e-41866b51ad82",
           "name": "Update the signed-in reviewer's own display name (ACR-11)",
           "request": {
             "name": "Update the signed-in reviewer's own display name (ACR-11)",
@@ -6299,7 +6376,7 @@
           },
           "response": [
             {
-              "id": "c782f1bf-5498-49b3-8aab-78797f07adf7",
+              "id": "cd081a3a-2f95-47e5-9cb3-0a6dcf956679",
               "name": "Profile updated.",
               "originalRequest": {
                 "url": {
@@ -6356,7 +6433,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "91b64b94-ad53-4b0e-8b36-65feb97384fa",
+              "id": "749b228e-bef8-4e93-b761-c5ef69d506b7",
               "name": "Missing approver/name, or no member for this approver.",
               "originalRequest": {
                 "url": {
@@ -6413,7 +6490,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "cb9bc965-b7c6-49c9-9d2f-b6da00f79624",
+              "id": "f88bd9b0-8c2f-4fab-be95-714f297add4f",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -6470,7 +6547,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "79b5a56e-db42-44e0-a481-2e87021502f1",
+              "id": "c3014757-0086-42aa-bcef-4d8b6c1474f3",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -6539,7 +6616,7 @@
       "description": "Persisted alerts — list, acknowledge, resolve (source reliability / budget). (admin)",
       "item": [
         {
-          "id": "005f9461-9f9a-48eb-b432-2ecd5583c005",
+          "id": "d9239a61-749e-48ca-811d-d38a1c72b424",
           "name": "List persisted alerts + the open count (ACR-8)",
           "request": {
             "name": "List persisted alerts + the open count (ACR-8)",
@@ -6582,7 +6659,7 @@
           },
           "response": [
             {
-              "id": "97ac8e80-20b7-4fa0-90c0-f8d900186fc0",
+              "id": "9b99c7d6-906b-4c16-9dfb-904b18ab0ce1",
               "name": "Alerts + open count.",
               "originalRequest": {
                 "url": {
@@ -6623,12 +6700,12 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"alerts\": [\n    {\n      \"id\": \"<uuid>\",\n      \"title\": \"<string>\",\n      \"body\": \"<string>\",\n      \"severity\": \"info\",\n      \"status\": \"open\",\n      \"at\": \"<dateTime>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"title\": \"<string>\",\n      \"body\": \"<string>\",\n      \"severity\": \"critical\",\n      \"status\": \"acknowledged\",\n      \"at\": \"<dateTime>\"\n    }\n  ],\n  \"open_count\": \"<integer>\"\n}",
+              "body": "{\n  \"alerts\": [\n    {\n      \"id\": \"<uuid>\",\n      \"title\": \"<string>\",\n      \"body\": \"<string>\",\n      \"severity\": \"warning\",\n      \"status\": \"resolved\",\n      \"at\": \"<dateTime>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"title\": \"<string>\",\n      \"body\": \"<string>\",\n      \"severity\": \"warning\",\n      \"status\": \"open\",\n      \"at\": \"<dateTime>\"\n    }\n  ],\n  \"open_count\": \"<integer>\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "34381825-b6d7-413d-b057-62f5f6ad47ac",
+              "id": "eb102bec-86bb-48d0-8180-e9d0eab9989e",
               "name": "Out-of-range limit.",
               "originalRequest": {
                 "url": {
@@ -6680,7 +6757,7 @@
           }
         },
         {
-          "id": "bf1fb8b5-e571-45e0-b2b8-544e64a58314",
+          "id": "b9b02846-d55b-4d86-ba5f-8c29059e7ce3",
           "name": "Acknowledge an alert (ACR-8)",
           "request": {
             "name": "Acknowledge an alert (ACR-8)",
@@ -6742,7 +6819,7 @@
           },
           "response": [
             {
-              "id": "494b3bfe-fa79-473e-8786-954d58abd368",
+              "id": "460466d0-76d3-416c-913c-d74eba682651",
               "name": "Acknowledged.",
               "originalRequest": {
                 "url": {
@@ -6812,7 +6889,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "cfaa8afd-6096-4d56-bcfe-010fb058f2d9",
+              "id": "85c3028d-a5f0-4ef5-a0fb-ac6816040803",
               "name": "Malformed JSON body or failed validation.",
               "originalRequest": {
                 "url": {
@@ -6882,7 +6959,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "8d4f2721-64a5-469d-abe4-7617275e46e4",
+              "id": "63d97c08-5a29-4e60-87fd-52ae20c02176",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -6952,7 +7029,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "c8b504df-e5f4-4b9c-addb-40d3d86587ed",
+              "id": "7d275d2a-67f6-44fd-ade9-fab93fc8b5b3",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -7028,7 +7105,7 @@
           }
         },
         {
-          "id": "a01fa9f6-8e4f-44c4-8b76-cde6610973de",
+          "id": "cb4482be-b0da-4eba-b64c-f9326907e171",
           "name": "Resolve an alert (ACR-8)",
           "request": {
             "name": "Resolve an alert (ACR-8)",
@@ -7090,7 +7167,7 @@
           },
           "response": [
             {
-              "id": "0c52303e-3bed-4540-9a05-aab6ae081028",
+              "id": "8d547c13-fc28-4cf6-becf-2fd1eb799a21",
               "name": "Resolved.",
               "originalRequest": {
                 "url": {
@@ -7160,7 +7237,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "6a6cb96c-1596-4a49-abb9-ff9b4b2b407b",
+              "id": "7e33b263-1253-4641-a87a-6874c5050f0c",
               "name": "Malformed JSON body or failed validation.",
               "originalRequest": {
                 "url": {
@@ -7230,7 +7307,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "6cc16bfd-6409-4aac-b3be-9409dfafee5d",
+              "id": "c20078b0-5020-4a36-88bb-b8274a4a015f",
               "name": "Missing or wrong Bearer token.",
               "originalRequest": {
                 "url": {
@@ -7300,7 +7377,7 @@
               "_postman_previewlanguage": "json"
             },
             {
-              "id": "bbdc2f9f-9cfb-42f2-ad34-869c99bb9efd",
+              "id": "8e1ff113-c9c3-4c3d-9d8f-15525c0d9abb",
               "name": "Request body exceeds the 64 KiB cap.",
               "originalRequest": {
                 "url": {
@@ -7378,11 +7455,313 @@
       ]
     },
     {
+      "name": "Metrics",
+      "description": "Dashboard rollups — today's throughput, queue freshness, KPIs/cost/confidence. (admin)",
+      "item": [
+        {
+          "id": "6ea61306-877f-450b-9df5-19ef93cc0df6",
+          "name": "Pending-queue freshness age-buckets (ACR-9)",
+          "request": {
+            "name": "Pending-queue freshness age-buckets (ACR-9)",
+            "description": {
+              "content": "The share of the pending review queue (`candidate` + `in_review`) in each age\nband, where age is `now − evidence.captured_at`. The three bands are always\nreturned, summing to 100 (an empty queue returns all three at 0). Backs the\nDashboard \"Queue freshness\" card. Read endpoint — not gated.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "candidates",
+                "freshness"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "id": "a3b54fc8-0434-4edc-8c42-e52f0860db7b",
+              "name": "The three freshness bands (freshest first).",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "api",
+                    "candidates",
+                    "freshness"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "GET",
+                "body": {}
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "[\n  {\n    \"bucket\": \">3d\",\n    \"percent\": \"<integer>\"\n  },\n  {\n    \"bucket\": \"1-3d\",\n    \"percent\": \"<integer>\"\n  }\n]",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            }
+          ],
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "id": "9edbd81e-1c6a-41e0-a81c-22f01ac60310",
+          "name": "Today's reviewer-throughput summary (ACR-6)",
+          "request": {
+            "name": "Today's reviewer-throughput summary (ACR-6)",
+            "description": {
+              "content": "Counts of today's (UTC) approve/reject/edit decisions plus the mean\ncapture→decision latency (`avg_review_seconds`, or null when no decision today\nhas a resolvable capture time). Backs the Dashboard \"Today's throughput\" card.\nRead endpoint — not gated.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "metrics",
+                "throughput"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [
+                {
+                  "disabled": false,
+                  "description": {
+                    "content": "The window. Only `today` is supported in v1; any other value is a 400. (This can only be one of today)",
+                    "type": "text/plain"
+                  },
+                  "key": "period",
+                  "value": "today"
+                }
+              ],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "id": "101a4364-0080-4080-84d5-c6017c5e2d54",
+              "name": "Today's throughput summary.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "api",
+                    "metrics",
+                    "throughput"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [
+                    {
+                      "disabled": false,
+                      "description": {
+                        "content": "The window. Only `today` is supported in v1; any other value is a 400. (This can only be one of today)",
+                        "type": "text/plain"
+                      },
+                      "key": "period",
+                      "value": "today"
+                    }
+                  ],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "GET",
+                "body": {}
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"approved\": \"<integer>\",\n  \"rejected\": \"<integer>\",\n  \"edited\": \"<integer>\",\n  \"avg_review_seconds\": \"<integer,null>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "id": "dc362021-0885-4198-94cb-4cdd39cbef76",
+              "name": "An unsupported `period`.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "api",
+                    "metrics",
+                    "throughput"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [
+                    {
+                      "disabled": false,
+                      "description": {
+                        "content": "The window. Only `today` is supported in v1; any other value is a 400. (This can only be one of today)",
+                        "type": "text/plain"
+                      },
+                      "key": "period",
+                      "value": "today"
+                    }
+                  ],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "GET",
+                "body": {}
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            }
+          ],
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "id": "488eb275-1a14-46c7-91de-a6298d139009",
+          "name": "Metrics screen rollup — KPIs / cost-per-day / confidence (ACR-10 Metrics)",
+          "request": {
+            "name": "Metrics screen rollup — KPIs / cost-per-day / confidence (ACR-10 Metrics)",
+            "description": {
+              "content": "KPI cards, the last 14 UTC days of crawl cost, and the pending-queue confidence\ndistribution — all derived from real pipeline data (`crawl_runs` + the `reviews`\nlog + the pending `deals`). Backs the Metrics screen. Read endpoint — not gated.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "api",
+                "metrics"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "id": "1a96c7ee-199f-4f52-914f-bdd9781b3642",
+              "name": "The dashboard-metrics rollup.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "api",
+                    "metrics"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "GET",
+                "body": {}
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"kpis\": [\n    {\n      \"key\": \"<string>\",\n      \"label\": \"<string>\",\n      \"value\": \"<string>\",\n      \"trend\": \"<string>\",\n      \"direction\": \"flat\"\n    },\n    {\n      \"key\": \"<string>\",\n      \"label\": \"<string>\",\n      \"value\": \"<string>\",\n      \"trend\": \"<string>\",\n      \"direction\": \"down-bad\"\n    }\n  ],\n  \"cost_per_day\": [\n    {\n      \"day\": \"<string>\",\n      \"cost\": \"<number>\",\n      \"highlight\": \"<boolean>\"\n    },\n    {\n      \"day\": \"<string>\",\n      \"cost\": \"<number>\",\n      \"highlight\": \"<boolean>\"\n    }\n  ],\n  \"confidence_distribution\": [\n    {\n      \"label\": \"<string>\",\n      \"percent\": \"<integer>\",\n      \"level\": \"warning\"\n    },\n    {\n      \"label\": \"<string>\",\n      \"percent\": \"<integer>\",\n      \"level\": \"danger\"\n    }\n  ]\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            }
+          ],
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
       "name": "Test page",
       "description": "Built-in HTML review harness.",
       "item": [
         {
-          "id": "df32e22b-1fac-4a6e-ace1-5b46d39d61d7",
+          "id": "230e1040-571c-4086-87d2-cab9af97553c",
           "name": "Built-in HTML review harness",
           "request": {
             "name": "Built-in HTML review harness",
@@ -7411,7 +7790,7 @@
           },
           "response": [
             {
-              "id": "124787ba-1088-44dc-b796-12ca76fc1729",
+              "id": "3d26410e-a7b7-4304-b35c-c63481d85596",
               "name": "The review test page (thin UI over `/api/*`).",
               "originalRequest": {
                 "url": {
@@ -7446,7 +7825,7 @@
               "_postman_previewlanguage": "text"
             },
             {
-              "id": "5c38dd81-ffce-40fe-bb44-7351752adfbc",
+              "id": "ae8be9cf-d6ca-4754-97d8-cc4b768b7b18",
               "name": "No static page configured.",
               "originalRequest": {
                 "url": {
@@ -7491,7 +7870,7 @@
     }
   ],
   "info": {
-    "_postman_id": "4555b551-b80f-4032-a4cb-2bef82517bdb",
+    "_postman_id": "28cab686-97e5-43a5-9f45-9c80d77403d8",
     "name": "DealRoute Pipeline API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "description": "[object Object]\n\nGenerated from docs/api/openapi.yaml — regenerate with `npm run api:postman` when the spec changes; do not hand-edit. Set {{bearerToken}} to your REVIEW_API_TOKEN."

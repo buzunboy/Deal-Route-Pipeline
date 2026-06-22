@@ -269,4 +269,59 @@ suite('review edit / promote / manual-capture (Container + Postgres)', () => {
     expect(byAlice.every((e) => e.actor === 'alice@dealroute')).toBe(true);
     expect(byAlice.some((e) => e.entity_id === deal.id && e.action === 'edit')).toBe(true);
   });
+
+  it('throughputToday counts today decisions + averages capture→decision latency over real SQL (ACR-6)', async () => {
+    container = makeContainer(overrides);
+    // A candidate captured well before its decision; a REAL approve drives the review
+    // row (the use-case writes decided_at = now). The latency join is reviews→deals→evidence.
+    const deal = await seedCandidate(); // evidence captured_at 2026-06-19 (years ago)
+    await container.review.approve(deal.id, 'mara@dealroute');
+
+    const out = await container.metrics.throughputToday();
+    expect(out.approved).toBe(1);
+    expect(out.rejected).toBe(0);
+    expect(out.edited).toBe(0);
+    // captured years before "now" → a large positive latency (proves the SQL join works).
+    expect(out.avg_review_seconds).not.toBeNull();
+    expect(out.avg_review_seconds!).toBeGreaterThan(0);
+  });
+
+  it('queueFreshness buckets the pending queue by evidence age over real SQL (ACR-9)', async () => {
+    container = makeContainer(overrides);
+    // Two pending candidates (evidence captured 2026-06-19, years ago → both >3d);
+    // a published deal must not enter the distribution.
+    await seedCandidate({ status: 'candidate' });
+    await seedCandidate({ status: 'in_review' });
+    await seedCandidate({ status: 'published' });
+
+    const bands = await container.metrics.queueFreshness();
+    expect(bands.map((b) => b.bucket)).toEqual(['<24h', '1-3d', '>3d']);
+    expect(bands.reduce((a, b) => a + b.percent, 0)).toBe(100);
+    // both pending candidates are years old → 100% in >3d (published excluded).
+    expect(bands.find((b) => b.bucket === '>3d')!.percent).toBe(100);
+  });
+
+  it('dashboardMetrics rolls up KPIs + dense cost series + confidence dist over real SQL (ACR-10 Metrics)', async () => {
+    container = makeContainer(overrides);
+    // Pending candidates → avg-confidence KPI + the distribution.
+    await seedCandidate({ status: 'candidate', confidence: 0.9 });
+    await seedCandidate({ status: 'in_review', confidence: 0.5 });
+    // A real approve → today's throughput + approval-rate KPIs.
+    const decided = await seedCandidate({ confidence: 0.8 });
+    await container.review.approve(decided.id, 'mara@dealroute');
+
+    const m = await container.metrics.dashboardMetrics();
+    expect(m.kpis.map((k) => k.key)).toEqual([
+      'crawl-cost',
+      'throughput',
+      'approval-rate',
+      'avg-confidence',
+    ]);
+    // Dense 14-day cost chart (zero-cost days included since no crawl_runs were logged).
+    expect(m.cost_per_day).toHaveLength(14);
+    expect(m.cost_per_day.every((b) => b.cost === 0)).toBe(true);
+    // Three confidence bands summing to 100 over the real pending queue.
+    expect(m.confidence_distribution.map((b) => b.level)).toEqual(['success', 'warning', 'danger']);
+    expect(m.confidence_distribution.reduce((a, b) => a + b.percent, 0)).toBe(100);
+  });
 });

@@ -20,6 +20,7 @@ export async function serve(config: Config): Promise<void> {
     container.sourceReview,
     container.team,
     container.alerts,
+    container.metrics,
     container.logger,
     {
       staticPageHtml: REVIEW_TEST_PAGE,

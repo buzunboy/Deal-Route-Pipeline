@@ -135,6 +135,19 @@ monitor, review, public API). **All hold.**
   `PATCHABLE_FIELDS`; **ACR-15** Source `proposal_reason` (additive/nullable, migration **0015**)
   surfaced on `GET /api/sources/pending`; **ACR-3** proposal-status enum reconciled to
   `[open, promoted, rejected]`. OpenAPI + Postman regenerated.
+- **Admin-panel new-endpoint set + metrics layer** (2026-06-22). The dashboard/governance reads the
+  panel had no contract for: **ACR-5** `GET /api/candidates/counts`, **ACR-7** `GET /api/audit`,
+  **ACR-10** `GET /api/published` + `GET/POST /api/sources`, **ACR-12** `POST /api/manual-capture-tasks`
+  (ad-hoc), **ACR-11/10-Team** `GET/POST /api/team` + `PATCH /api/profile` (`team_members`, migration
+  **0016**), **ACR-8** `GET /api/alerts` + ack/resolve (`alert_events`, migration **0017**). Then the
+  **metrics/aggregation layer** — **ACR-6** `GET /api/metrics/throughput` (today's reviewer counts +
+  `avg_review_seconds` = mean capture→decision latency), **ACR-9** `GET /api/candidates/freshness`
+  (pending-queue age buckets), **ACR-10 Metrics** `GET /api/metrics` (KPIs + 14-day cost-per-day +
+  confidence distribution) — all pure projections over `crawl_runs` + `reviews` + `deals` on the
+  `MetricsUseCase` (new ports `DealRepository.pendingQueueSignals`, `ReviewRepository.
+  listDecisionLatenciesSince`; NO schema/migration). Each with both-adapter parity + contract + unit +
+  integration + OpenAPI/Postman. ACR-6 emits the ACR-doc `avg_review_seconds` number; the panel-side
+  zod migration is handed off in `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`.
 - **Cloud deploy — the API is LIVE** (head `5d2c781`, 2026-06-22). Always-on `serve` deployed to
   Fly.io (`https://dealroute-api.fly.dev`, region `fra`): managed Postgres attached, S3 evidence
   bucket + scoped IAM, GHCR image, `REVIEW_API_TOKEN`/`S3_*` Fly secrets; health/CORS/auth verified.
@@ -152,16 +165,21 @@ shared contract suite enforcing LSP. The implementation is sound.
 
 No roadmap step remains. The concrete forward work, highest-value first:
 
-1. **Admin-panel new endpoints — mostly DONE (2026-06-22); a metrics layer is what's left.**
+1. **Admin-panel new endpoints — the metrics layer is now BUILT (2026-06-22); only Settings is left.**
    BUILT (both-adapter parity + contract + unit + integration + OpenAPI): **ACR-5** candidate counts,
    **ACR-7** audit feed (approve/reject/edit), **ACR-10** admin published + sources registry,
    **ACR-12** ad-hoc capture, **ACR-11 + ACR-10-Team** team/profile (pipeline is now the reviewer-
    identity system of record; `team_members`, migration 0016), **ACR-8** persisted alerts +
-   ack/resolve (`alert_events`, migration 0017, read-time auto-resolve). STILL deferred (need a
-   metrics/aggregation layer that doesn't exist yet): **ACR-6** throughput, **ACR-9** queue-freshness,
-   **ACR-10 Metrics** (KPIs/cost/confidence) and **ACR-10 Settings** (needs an owner call on
-   pipeline-owned vs env config). Plus the ACR-7 follow-up: persist `promote`/`extract` as audit rows.
-   Details + fix-when in `docs/KNOWN_ISSUES.md`. The panel renders placeholders for the deferred set.
+   ack/resolve (`alert_events`, migration 0017, read-time auto-resolve), and the **metrics/aggregation
+   layer** — **ACR-6** `GET /api/metrics/throughput` (today's approve/reject/edit + `avg_review_seconds`
+   = mean capture→decision latency), **ACR-9** `GET /api/candidates/freshness` (pending-queue age
+   buckets `<24h`/`1-3d`/`>3d`), **ACR-10 Metrics** `GET /api/metrics` (KPIs + 14-day cost-per-day +
+   confidence distribution). No schema/migration — pure projections over `crawl_runs` + `reviews` +
+   `deals` on the extended `MetricsUseCase`. STILL deferred: **ACR-10 Settings** (needs an owner call
+   on pipeline-owned vs env config). Plus the ACR-7 follow-up: persist `promote`/`extract` as audit
+   rows. NOTE — ACR-6 returns the ACR-doc `avg_review_seconds` (raw number); the panel's current zod
+   parses a formatted `avg_review` string, so a one-line panel-side migration is handed off in
+   `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`. Details in `docs/KNOWN_ISSUES.md`.
 2. **Post-deploy hardening** [medium] — the API is live + working, but parked: **rotate** the
    chat-exposed AWS key + GitHub PAT (before going past dev/staging), make the GHCR image private,
    **pin** `:edge` → `:sha-…`, set **`ADMIN_CORS_ORIGIN`** when the panel deploys. Plus the deploy-time

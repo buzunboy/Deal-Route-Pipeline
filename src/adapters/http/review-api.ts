@@ -6,6 +6,7 @@ import {
   type SourceReviewUseCase,
   type TeamUseCase,
   type AlertsUseCase,
+  type MetricsUseCase,
   ALERTS_DEFAULT_LIMIT,
   ALERTS_MAX_LIMIT,
 } from '../../application/index.js';
@@ -78,6 +79,7 @@ export interface ReviewApiOptions {
  *
  *   GET   /api/health
  *   GET   /api/candidates/counts          → CandidateCounts  (queue view-cards, ACR-5)
+ *   GET   /api/candidates/freshness       → [FreshnessBand]  (queue age-buckets, ACR-9)
  *   GET   /api/candidates                 → [{ deal, evidence }]
  *           ?status=&service=&confidence_max=&limit=&offset=  (filters + pagination)
  *   PATCH /api/candidates/:id             { approver, patch }     → { deal }  (reviewer edit)
@@ -107,6 +109,9 @@ export interface ReviewApiOptions {
  *   GET   /api/alerts                     → { alerts: [AlertView], open_count }   (ACR-8)
  *   POST  /api/alerts/:id/acknowledge     { approver } → { acknowledged }   (ACR-8)
  *   POST  /api/alerts/:id/resolve         { approver } → { resolved }   (ACR-8)
+ *   GET   /api/metrics/throughput         → ThroughputSummary   (today's reviewer throughput, ACR-6)
+ *           ?period=today
+ *   GET   /api/metrics                    → DashboardMetrics    (KPIs/cost/confidence, ACR-10)
  */
 export class ReviewApi {
   private server: Server | null = null;
@@ -120,6 +125,7 @@ export class ReviewApi {
     private readonly sourceReview: SourceReviewUseCase,
     private readonly team: TeamUseCase,
     private readonly alerts: AlertsUseCase,
+    private readonly metrics: MetricsUseCase,
     private readonly logger: Logger,
     options: ReviewApiOptions = {},
   ) {
@@ -181,6 +187,12 @@ export class ReviewApi {
       return sendJson(res, 200, await this.review.candidateCounts());
     }
 
+    // Pending-queue freshness age-buckets (ACR-9). Exact path — must precede the
+    // `/api/candidates/:id...` matchers + the `/api/candidates` list below.
+    if (method === 'GET' && path === '/api/candidates/freshness') {
+      return sendJson(res, 200, await this.metrics.queueFreshness());
+    }
+
     if (method === 'GET' && path === '/api/candidates') {
       const parsed = parseCandidateQuery(url.searchParams);
       if (!parsed.ok) return sendError(res, 400, parsed.error);
@@ -215,6 +227,19 @@ export class ReviewApi {
       );
       if (!parsed.ok) return sendError(res, 400, parsed.error);
       return sendJson(res, 200, await this.review.adminPublished(parsed.value));
+    }
+    // Today's reviewer throughput (ACR-6). `period` is `today` (the only supported
+    // window in v1); any other value is a 400 rather than silently ignored.
+    if (method === 'GET' && path === '/api/metrics/throughput') {
+      const period = url.searchParams.get('period');
+      if (period !== null && period !== '' && period !== 'today') {
+        return sendError(res, 400, "period must be 'today'");
+      }
+      return sendJson(res, 200, await this.metrics.throughputToday());
+    }
+    // Metrics screen rollup (ACR-10 Metrics): KPIs + cost-per-day + confidence dist.
+    if (method === 'GET' && path === '/api/metrics') {
+      return sendJson(res, 200, await this.metrics.dashboardMetrics());
     }
     if (method === 'GET' && path === '/api/manual-capture-tasks') {
       return sendJson(res, 200, await this.review.listManualCaptureTasks());

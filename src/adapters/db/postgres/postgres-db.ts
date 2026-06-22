@@ -21,6 +21,7 @@ import type {
 import {
   ChangeSchema,
   CrawlRunSchema,
+  ReviewAction,
   ReviewRecordSchema,
   SourceReviewRecordSchema,
   TeamMemberSchema,
@@ -60,7 +61,6 @@ import type {
   CandidateDealCounts,
   AdminPublishedQuery,
   VocabularyEntry,
-  ReviewAction,
 } from '../../../domain/index.js';
 import type { Logger } from '../../../application/ports/index.js';
 import * as schema from './schema.js';
@@ -480,6 +480,29 @@ class PgDealRepo extends PgRepo implements DealRepository {
     );
     return rows[0]?.n ?? 0;
   }
+  async pendingQueueSignals(): Promise<{ capturedAt: string | null; confidence: number }[]> {
+    // The reviewable queue LEFT JOINed to its evidence captured_at — mirrors the
+    // in-memory adapter (LSP): a deal with no evidence row yields capturedAt null but
+    // is still listed with its confidence. `mode: 'string'` returns captured_at as the
+    // stored ISO timestamp; confidence is a double.
+    const rows = await this.run('deals.pendingQueueSignals', () =>
+      this.db
+        .select({
+          capturedAt: schema.evidence.capturedAt,
+          confidence: schema.deals.confidence,
+        })
+        .from(schema.deals)
+        .leftJoin(schema.evidence, eq(schema.deals.evidenceId, schema.evidence.id))
+        .where(inArray(schema.deals.status, [...REVIEWABLE_STATUSES])),
+    );
+    // Normalise captured_at to canonical ISO-Z (node-postgres returns libpq text form)
+    // so the timestamp is byte-identical to the in-memory adapter — the freshness
+    // age math keys on a real Date, but LSP parity wants identical strings too.
+    return rows.map((r) => ({
+      capturedAt: isoTimestampOrNull(r.capturedAt),
+      confidence: Number(r.confidence),
+    }));
+  }
 }
 
 /**
@@ -898,6 +921,33 @@ class PgReviewRepo extends PgRepo implements ReviewRepository {
         .groupBy(schema.reviews.approver),
     );
     return new Map(rows.map((r) => [r.approver, Number(r.n)]));
+  }
+  async listDecisionLatenciesSince(
+    since: Date,
+  ): Promise<{ action: ReviewAction; latencySeconds: number | null }[]> {
+    // decided_at >= since (inclusive), each LEFT JOINed reviews→deals→evidence so the
+    // capture→decision latency is computed in SQL (epoch seconds, floored). A missing
+    // deal/evidence yields a null latency — mirrors the in-memory adapter (LSP). The
+    // join order matters: an INNER join would silently drop decisions whose deal was
+    // hard-deleted; LEFT keeps the count honest (the decision still counts).
+    const rows = await this.run('reviews.listDecisionLatenciesSince', () =>
+      this.db
+        .select({
+          action: schema.reviews.action,
+          latencySeconds: sql<
+            number | null
+          >`floor(extract(epoch from (${schema.reviews.decidedAt} - ${schema.evidence.capturedAt})))::int`,
+        })
+        .from(schema.reviews)
+        .leftJoin(schema.deals, eq(schema.reviews.dealId, schema.deals.id))
+        .leftJoin(schema.evidence, eq(schema.deals.evidenceId, schema.evidence.id))
+        .where(gte(schema.reviews.decidedAt, since.toISOString())),
+    );
+    return rows.map((r) => ({
+      // Re-validate the free-text `action` column at the boundary (matches rowToReview).
+      action: ReviewAction.parse(r.action),
+      latencySeconds: r.latencySeconds === null ? null : Number(r.latencySeconds),
+    }));
   }
 }
 
