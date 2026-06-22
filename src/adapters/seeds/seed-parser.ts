@@ -41,9 +41,14 @@ export function parseSeeds(markdown: string, cadenceDays: number): ParsedSeeds {
     if (section === 'catalog') {
       const entry = parseCatalogRow(cells);
       if (entry) {
-        catalog.push(entry);
+        // Normalize the catalog's provider URL up front (the doc lists bare hosts
+        // like `netflix.com/de`). The CatalogEntry feeds `subscription.provider_url`
+        // (`z.string().url()`), so it MUST carry a scheme — store the normalized form,
+        // not the raw cell, and drop a row whose cell isn't a usable URL.
         const url = ensureUrl(entry.providerUrl);
-        if (url && !seenUrls.has(url)) {
+        if (!url) continue;
+        catalog.push({ ...entry, providerUrl: url });
+        if (!seenUrls.has(url)) {
           seenUrls.add(url);
           sources.push(makeSource(url, 'provider', 1, entry.service, cadenceDays));
         }
