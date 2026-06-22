@@ -8,6 +8,7 @@ import {
   SourceNotReviewableError,
   MissingApproverError,
 } from '../../domain/index.js';
+import { tldtsSuffixOracle } from '../../adapters/suffix/tldts-suffix-oracle.js';
 import { randomUUID } from 'node:crypto';
 
 describe('SourceReviewUseCase (source-promotion loop)', () => {
@@ -16,7 +17,7 @@ describe('SourceReviewUseCase (source-promotion loop)', () => {
 
   beforeEach(() => {
     db = new InMemoryDb();
-    uc = new SourceReviewUseCase(db, new FixedClock(), new FakeLogger());
+    uc = new SourceReviewUseCase(db, new FixedClock(), new FakeLogger(), tldtsSuffixOracle, 'DE');
   });
 
   async function seedPending() {
@@ -80,5 +81,82 @@ describe('SourceReviewUseCase (source-promotion loop)', () => {
     await expect(uc.approveSource(randomUUID(), 'curator')).rejects.toBeInstanceOf(
       SourceNotFoundError,
     );
+  });
+
+  // ── listRegistry + createSource (ACR-10 sources registry) ─────────────────
+  describe('listRegistry', () => {
+    it('lists active + disabled (not pending/rejected), projected + status-mapped', async () => {
+      await db.sources.upsert(
+        makeSource({ url: 'https://active.de', status: 'active', reliability_score: 0.9 }),
+      );
+      await db.sources.upsert(
+        makeSource({ url: 'https://flaky.de', status: 'active', reliability_score: 0.2 }),
+      );
+      await db.sources.upsert(makeSource({ url: 'https://off.de', status: 'disabled' }));
+      await db.sources.upsert(
+        makeSource({ url: 'https://pending.de', status: 'pending_approval' }),
+      );
+      await db.sources.upsert(makeSource({ url: 'https://nope.de', status: 'rejected' }));
+
+      const registry = await uc.listRegistry();
+      const byDomain = Object.fromEntries(registry.map((r) => [r.domain, r]));
+      // pending + rejected are excluded.
+      expect(registry.map((r) => r.domain).sort()).toEqual(['active.de', 'flaky.de', 'off.de']);
+      // status mapping: active+high → active; active+low → degraded; disabled → disabled.
+      expect(byDomain['active.de']!.status).toBe('active');
+      expect(byDomain['flaky.de']!.status).toBe('degraded');
+      expect(byDomain['off.de']!.status).toBe('disabled');
+      // kind is capitalised.
+      expect(byDomain['active.de']!.kind).toBe(
+        byDomain['active.de']!.kind[0]!.toUpperCase() + byDomain['active.de']!.kind.slice(1),
+      );
+    });
+  });
+
+  describe('createSource', () => {
+    it('registers an active source, pins registrable_domain, defaults country to the market', async () => {
+      const source = await uc.createSource({
+        approver: 'curator',
+        domain: 'netflix.com',
+        kind: 'Provider',
+        tier: 1,
+      });
+      expect(source.status).toBe('active');
+      expect(source.url).toBe('https://netflix.com/');
+      expect(source.type).toBe('provider');
+      expect(source.country).toBe('DE'); // default market
+      expect(source.registrable_domain).toBe('netflix.com'); // pinned via the real PSL
+      expect(source.next_due).toBeNull();
+      // it appears in the registry now.
+      const registry = await uc.listRegistry();
+      expect(registry.some((r) => r.domain === 'netflix.com')).toBe(true);
+    });
+
+    it('rejects an unsupported kind, a bad tier, and a missing approver', async () => {
+      await expect(
+        uc.createSource({ approver: 'c', domain: 'bank.de', kind: 'Bank', tier: 1 }),
+      ).rejects.toThrow(/kind/i);
+      await expect(
+        uc.createSource({ approver: 'c', domain: 'x.de', kind: 'provider', tier: 9 }),
+      ).rejects.toThrow(/tier/i);
+      await expect(
+        uc.createSource({ approver: '  ', domain: 'x.de', kind: 'provider', tier: 1 }),
+      ).rejects.toThrow(/approver/i);
+    });
+
+    it('rejects a non-URL domain and an out-of-market country', async () => {
+      await expect(
+        uc.createSource({ approver: 'c', domain: 'not a url', kind: 'provider', tier: 1 }),
+      ).rejects.toThrow(/domain/i);
+      await expect(
+        uc.createSource({
+          approver: 'c',
+          domain: 'x.de',
+          kind: 'provider',
+          tier: 1,
+          country: 'US',
+        }),
+      ).rejects.toThrow(/country|market/i);
+    });
   });
 });

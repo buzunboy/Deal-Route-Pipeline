@@ -45,7 +45,13 @@ describe('ReviewApi (HTTP integration)', () => {
       new ConsoleLogger('error'),
       tldtsSuffixOracle,
     );
-    const sourceReview = new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'));
+    const sourceReview = new SourceReviewUseCase(
+      db,
+      new SystemClock(),
+      new ConsoleLogger('error'),
+      tldtsSuffixOracle,
+      'DE',
+    );
     api = new ReviewApi(review, sourceReview, new ConsoleLogger('error'), {
       staticPageHtml: '<html>page</html>',
     });
@@ -258,6 +264,46 @@ describe('ReviewApi (HTTP integration)', () => {
     });
     expect(res.status).toBe(413);
     expect((await db.deals.getById(deal.id))!.status).toBe('candidate');
+  });
+
+  it('GET /api/sources lists the operational registry, POST adds one (ACR-10)', async () => {
+    await db.sources.upsert(
+      makeSource({ url: 'https://active.de', status: 'active', reliability_score: 0.9 }),
+    );
+    await db.sources.upsert(makeSource({ url: 'https://pending.de', status: 'pending_approval' }));
+
+    const list = (await (await fetch(`${base}/api/sources`)).json()) as {
+      sources: { domain: string; kind: string; status: string }[];
+    };
+    // registry excludes the pending source.
+    expect(list.sources.map((s) => s.domain)).toContain('active.de');
+    expect(list.sources.map((s) => s.domain)).not.toContain('pending.de');
+
+    // POST a new source → 201 { id, created }, then it shows in the registry.
+    const created = await fetch(`${base}/api/sources`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        approver: 'curator',
+        domain: 'netflix.com',
+        kind: 'Provider',
+        tier: 1,
+      }),
+    });
+    expect(created.status).toBe(201);
+    const body = (await created.json()) as { id: string; created: boolean };
+    expect(body.created).toBe(true);
+    const stored = (await db.sources.getById(body.id))!;
+    expect(stored.status).toBe('active');
+    expect(stored.registrable_domain).toBe('netflix.com');
+
+    // a bad kind → 400.
+    const bad = await fetch(`${base}/api/sources`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'curator', domain: 'bank.de', kind: 'Bank', tier: 1 }),
+    });
+    expect(bad.status).toBe(400);
   });
 
   it('GET /api/sources/pending lists pending sources; approve → active', async () => {

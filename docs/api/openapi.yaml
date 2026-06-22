@@ -525,6 +525,79 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '413': { $ref: '#/components/responses/TooLarge' }
 
+  /api/sources:
+    get:
+      tags: [Sources]
+      summary: Sources registry — operational sources (active + disabled), ACR-10
+      operationId: listSourceRegistry
+      description: |
+        The operational source list (NOT the pending-promotion queue). Curated rows:
+        domain, capitalised kind, tier, cadence, reliability, last_seen, and a panel
+        status (`active` · `degraded` for a flaky active source · `disabled`). Read.
+      security: []
+      responses:
+        '200':
+          description: The sources registry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sources]
+                properties:
+                  sources:
+                    type: array
+                    items: { $ref: '#/components/schemas/SourceRegistryEntry' }
+                additionalProperties: false
+    post:
+      tags: [Sources]
+      summary: Register a new operational source (the "+ Add source" flow, ACR-10)
+      operationId: createSource
+      description: |
+        Builds an `active` source from the panel fields, pinning its registrable
+        domain via the PSL. Idempotent on URL (re-adding a domain updates in place).
+        `country` defaults to the active market (DE v1). Bearer-gated.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approver, domain, kind, tier]
+              properties:
+                approver: { type: string, minLength: 1 }
+                domain:
+                  type: string
+                  minLength: 1
+                  description: Bare domain (netflix.com) or full URL.
+                kind:
+                  type: string
+                  description: provider | bundler | community | discovered | aggregator (case-insensitive).
+                tier: { type: integer, enum: [1, 2, 3, 4] }
+                country: { type: string, description: In-scope market; defaults to DE. }
+                cadence_days: { type: integer, minimum: 1 }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Source registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, created]
+                properties:
+                  id: { type: string, format: uuid }
+                  created: { type: boolean }
+                additionalProperties: false
+        '400':
+          description: Missing/invalid approver, domain, kind, tier, or country.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
   /api/sources/pending:
     get:
       tags: [Sources]
@@ -996,6 +1069,27 @@ components:
           description: |
             Panel lifecycle status. `published` → `live`; `expired` → `unpublished`.
             `re-review` is reserved (no single backing pipeline status today).
+      additionalProperties: false
+    SourceRegistryEntry:
+      type: object
+      description: One row on the admin "Sources registry" screen (ACR-10).
+      required: [id, domain, kind, tier, cadence, reliability, last_seen_at, status]
+      properties:
+        id: { type: string, format: uuid }
+        domain:
+          type: string
+          description: Registrable domain (eTLD+1) if pinned, else the raw URL.
+        kind:
+          type: string
+          description: Capitalised source type (Provider/Bundler/Community/Discovered/Aggregator).
+        tier: { type: integer, enum: [1, 2, 3, 4] }
+        cadence: { type: integer, description: Days between re-crawls. }
+        reliability: { type: number, minimum: 0, maximum: 1 }
+        last_seen_at: { type: [string, 'null'], format: date-time }
+        status:
+          type: string
+          enum: [active, degraded, disabled]
+          description: '`active` with reliability ≤ 0.3 → `degraded`; `disabled` stays `disabled`.'
       additionalProperties: false
     ReviewRecord:
       type: object

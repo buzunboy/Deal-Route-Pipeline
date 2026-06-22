@@ -94,4 +94,29 @@ suite('source-promotion loop (Container + Postgres)', () => {
     // The rejected source stays rejected (not resurrected to pending).
     expect((await container.db.sources.getById(proposed.id))!.status).toBe('rejected');
   });
+
+  it('createSource registers an active source + listRegistry shows it, over real SQL (ACR-10)', async () => {
+    container = makeContainer({
+      fetcher: new ScriptedFetcher({}),
+      llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [] }) }),
+    });
+    const created = await container.sourceReview.createSource({
+      approver: 'curator',
+      domain: 'netflix.com',
+      kind: 'Provider',
+      tier: 1,
+    });
+    // persisted active, with a pinned registrable_domain + default DE market.
+    const stored = (await container.db.sources.getById(created.id))!;
+    expect(stored.status).toBe('active');
+    expect(stored.country).toBe('DE');
+    expect(stored.registrable_domain).toBe('netflix.com');
+
+    // appears in the registry, projected + status-mapped; pending-queue is empty.
+    const registry = await container.sourceReview.listRegistry();
+    const row = registry.find((r) => r.domain === 'netflix.com')!;
+    expect(row.kind).toBe('Provider');
+    expect(row.status).toBe('active'); // reliability 0.5 > degraded threshold
+    expect(await container.sourceReview.listPending()).toHaveLength(0);
+  });
 });

@@ -189,7 +189,13 @@ export class Container {
       this.suffixOracle,
     );
     this.review = new ReviewUseCase(this.db, this.clock, this.logger, this.suffixOracle);
-    this.sourceReview = new SourceReviewUseCase(this.db, this.clock, this.logger);
+    this.sourceReview = new SourceReviewUseCase(
+      this.db,
+      this.clock,
+      this.logger,
+      this.suffixOracle,
+      config.country,
+    );
     this.monitor = new MonitorSourceUseCase(
       this.fetcher,
       this.db,

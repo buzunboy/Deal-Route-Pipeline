@@ -87,6 +87,8 @@ export interface ReviewApiOptions {
  *   POST  /api/manual-capture-tasks       { approver, fields, evidence } → { created, candidate_id }  (ad-hoc, ACR-12)
  *   POST  /api/manual-capture-tasks/:id/complete
  *           { approver, fields, evidence } → { deal }  (creates a candidate; never publishes)
+ *   GET   /api/sources                    → { sources: [SourceRegistryEntry] }   (registry, ACR-10)
+ *   POST  /api/sources                    { approver, domain, kind, tier } → { id, created }  (ACR-10)
  *   GET   /api/sources/pending            → [Source]   (proposed sources)
  *   POST  /api/sources/:id/approve        { approver }            → { source }
  *   POST  /api/sources/:id/reject         { approver, reason? }   → { source }
@@ -339,6 +341,33 @@ export class ReviewApi {
       });
     }
 
+    // ── Sources registry (ACR-10) ────────────────────────────────────────────
+    // Exact `/api/sources` — distinct from `/api/sources/pending` (the queue) and
+    // `/api/sources/:id/...` below. GET lists the operational registry; POST adds one.
+    if (method === 'GET' && path === '/api/sources') {
+      return sendJson(res, 200, { sources: await this.sourceReview.listRegistry() });
+    }
+    if (method === 'POST' && path === '/api/sources') {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
+      if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
+      const parsed = CreateSourceBody.safeParse(body);
+      if (!parsed.success)
+        return sendError(res, 400, 'approver, domain, kind and tier are required');
+      return this.mapErrors(res, async () => {
+        const source = await this.sourceReview.createSource({
+          approver: parsed.data.approver,
+          domain: parsed.data.domain,
+          kind: parsed.data.kind,
+          tier: parsed.data.tier,
+          country: parsed.data.country,
+          cadenceDays: parsed.data.cadence_days,
+        });
+        sendJson(res, 201, { id: source.id, created: true });
+      });
+    }
+
     // ── Source-promotion loop ────────────────────────────────────────────────
     if (method === 'GET' && path === '/api/sources/pending') {
       return sendJson(res, 200, await this.sourceReview.listPending());
@@ -464,6 +493,15 @@ const ApproveCandidateBody = z.object({
   affiliate_disclosure: z.boolean().optional(),
 });
 const RejectBody = z.object({ approver: z.string().min(1), reason: z.string().optional() });
+/** Register a new operational source from the admin "+ Add source" flow (ACR-10). */
+const CreateSourceBody = z.object({
+  approver: z.string().min(1),
+  domain: z.string().min(1),
+  kind: z.string().min(1),
+  tier: z.number().int(),
+  country: z.string().min(1).optional(),
+  cadence_days: z.number().int().positive().optional(),
+});
 
 /**
  * PATCH candidate edit. `patch` is an opaque object — the deeper allowlist +
