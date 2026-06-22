@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { parseSeeds } from './seed-parser.js';
+import { SubscriptionCatalogEntrySchema } from '../../domain/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SEED_DOC = join(here, '../../../docs/DealRoute_Seed_List_DE.md');
@@ -15,6 +16,25 @@ describe('parseSeeds against the real seed doc', () => {
     expect(catalog.length).toBe(25);
     expect(catalog.map((c) => c.service)).toContain('Netflix');
     expect(catalog.map((c) => c.service)).toContain('PlayStation Plus');
+  });
+
+  it('every catalog entry passes the SubscriptionCatalogEntry schema (provider_url is a valid URL)', () => {
+    // Regression: the seed doc lists bare hosts (`netflix.com/de`). seed-import upserts
+    // each entry's providerUrl into `provider_url` (z.string().url()), so a scheme-less
+    // value made `seed-import` crash with "Invalid url" and wrote NOTHING. The parser
+    // must hand back already-normalized (scheme-bearing) URLs. This is the exact
+    // validation `catalog.upsert` runs, so it reproduces that crash if it regresses.
+    for (const entry of catalog) {
+      const parsed = SubscriptionCatalogEntrySchema.safeParse({
+        service: entry.service,
+        category: entry.category,
+        provider_url: entry.providerUrl,
+        country: 'DE',
+      });
+      expect(parsed.success, `bad provider_url for ${entry.service}: ${entry.providerUrl}`).toBe(
+        true,
+      );
+    }
   });
 
   it('creates Tier-1 provider sources for catalog entries', () => {
