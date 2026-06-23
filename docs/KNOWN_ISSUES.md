@@ -615,6 +615,42 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Fix-when**: build the `min_confidence` gate if confidence-based auto-queue is wanted; add promote/extract audit rows when the audit screen needs the full action vocabulary; set `DEPLOYMENT_ID` per deploy in prod.
 - **Logged**: 2026-06-22 (updated 2026-06-22: ACR-5/7/8/10/11/12 + the ACR-6/9/10-Metrics layer + ACR-10 Settings ALL shipped — the ACR endpoint set is complete)
 
+### Auth/IAM migrations 0019–0022 carry STALE intermediate drizzle snapshots (only 0023 is final-shape)
+- **Severity**: low (dev-time tooling only; runtime is unaffected)
+- **Area**: db / migrations
+- **Location**: `drizzle/meta/0019_snapshot.json`…`0022_snapshot.json` (vs the correct `0023_snapshot.json`); `drizzle/0019–0023_*.sql`.
+- **What**: the five auth migrations were authored via `drizzle-kit generate --custom` because drizzle-kit's table-RENAME detection is interactive (it can't run non-interactively here, and these migrations also need seeds/backfills/a column-drop it never generates). `--custom` copied the prior (0018) snapshot forward, so the intermediate `0019–0022` meta snapshots still describe `team_members`/no-auth-tables. The FINAL snapshot `0023_snapshot.json` was regenerated to the true final schema (verified: a fresh `db:generate` reports "No schema changes"), and `migrate()` uses ONLY the journal + `.sql` files (which are correct + verified applying cleanly from scratch AND on top of an existing `team_members`), so runtime + CI integration are unaffected.
+- **Why deferred**: harmless — the only consumer of intermediate snapshots is a hypothetical `db:generate` run pinned to an intermediate migration, which the repo never does; there is no `db:check` CI gate on snapshot content; the latest snapshot (the one future generates diff against) is correct.
+- **Fix-when**: if a future `db:generate` ever produces a spurious diff, or if a snapshot-integrity check is added — regenerate the intermediate snapshots in an interactive terminal (answer the rename prompt `team_members → users`) and commit them. Not worth the interactive-tooling risk now.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 1)
+
+### Phase-2 login: lockout must stay anti-enumeration (429 shape identical for known vs unknown email)
+- **Severity**: medium (a trust/anti-enumeration design constraint for the NOT-YET-BUILT login use-case; no live surface yet)
+- **Area**: auth (Phase 2)
+- **Location**: `src/domain/auth/auth-errors.ts` (`AccountLockedError`, `lockedUntil` now nullable); the future `AuthenticateUseCase` (Phase 2/3).
+- **What**: lockout is keyed to a real account's `failed_login_count`/`locked_until`, so an unknown email has no counter and never "locks". If the login use-case returns a 401 (`InvalidCredentialsError`) for an unknown email but a 429 (`AccountLockedError`) for a known-but-locked one, the differing status/shape is an account-enumeration oracle — defeating the constant-time-hasher work `DUMMY_PASSWORD_HASH` exists for. `AccountLockedError.lockedUntil` was made nullable in Phase 1 so the use-case CAN return an identical 429 shape on the unknown-email path if it chooses to model a per-email/per-IP attempt counter that doesn't require a user row (the panel already keeps such a sliding-window limiter as defense-in-depth).
+- **Why deferred**: the login use-case + HTTP handler are Phase 2/3; Phase 1 only ships the error type + the pure `lockoutPolicy`. The decision (and a timing/return-shape parity test for unknown-vs-known email) belongs with the use-case that produces these errors — `.claude/rules/testing.md` already mandates that adversarial "timing parity unknown-vs-known email" test for `/auth/login`.
+- **Fix-when**: when building `AuthenticateUseCase` (Phase 2) — decide the unknown-email-under-attack behavior, keep the 401-vs-429 distinction from leaking account existence, and add the timing/shape-parity boundary test.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 1 — code-reviewer follow-up)
+
+### Integration harness `seedAuthBaseline` reseeds the permissions catalog with `label = key` (not migration 0021's human labels)
+- **Severity**: low (test-fixture fidelity; no runtime/contract impact)
+- **Area**: testing / db
+- **Location**: `test/integration/harness.ts` (`seedAuthBaseline`, the `permissions` INSERT uses `VALUES ($1, $1)`).
+- **What**: after a TRUNCATE, the harness restores the permission KEYS but sets each `label` to the key itself, whereas migration 0021 installs human labels ("View the review queue", …). Current tests assert only keys, so this is harmless, but a future test asserting a permission label would pass against test data that diverges from prod.
+- **Why deferred**: no test reads labels yet; importing the labels would couple the harness to the migration's label strings for no current benefit.
+- **Fix-when**: when a test (or the Phase-3 `GET /api/permissions` integration test) asserts permission labels — source the labels from a shared constant the migration also uses, or assert keys only.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 1 — code-reviewer follow-up)
+
+### `team.upsert` over the consolidated `users` table loses the auth columns it can't express
+- **Severity**: low (a projection seam, by design; no data is corrupted)
+- **Area**: db / auth
+- **Location**: `PgTeamRepo`/`InMemoryTeamRepo` (`src/adapters/db/{postgres,in-memory}`); `src/domain/team/team-member.ts`.
+- **What**: `TeamMember` is now a PROJECTION of `User` (the `team_members → users` consolidation). `team.upsert` writes only name/email/role/status, defaulting the auth columns (`password_hash=null`, `token_version=0`, `auth_provider='password'`) on a fresh row — and a custom (non-admin/non-reviewer) role projects to `'reviewer'` on read (TeamMember.role is the closed admin|reviewer enum). So the legacy Team write path can't set a password or a custom role.
+- **Why deferred**: intended for the dual-accept window — the legacy `/api/team` path keeps working unchanged (invite → invited user, no password yet), and real login-capable provisioning + custom roles arrive via `ProvisionUserUseCase` / the `/api/users` screen in Phase 3. The panel migrates off `/api/team` in Phase 4; `/api/team` is removed in Phase 5.
+- **Fix-when**: when `/api/team` is retired (Phase 5) — drop the projection and the `TeamMember.role`→reviewer fallback; until then it is the correct compatibility shim.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 1)
+
 ---
 
 ## Resolved

@@ -35,7 +35,15 @@ import {
   type PublishedFilters,
   type CandidateQuery,
   type VocabularyEntry,
+  type User,
+  type Role,
+  type Permission,
+  type StoredRefresh,
   REVIEWABLE_STATUSES,
+  UserSchema,
+  RoleSchema,
+  TeamMemberSchema,
+  SYSTEM_ROLES,
 } from '../../../domain/index.js';
 import type {
   Database,
@@ -53,6 +61,11 @@ import type {
   TeamRepository,
   AlertRepository,
   SettingsRepository,
+  UserRepository,
+  RoleRepository,
+  RolePermissionRepository,
+  RefreshTokenRepository,
+  AuthMetaRepository,
 } from '../../../application/ports/index.js';
 
 /**
@@ -81,9 +94,37 @@ export class InMemoryDb implements Database {
   reviews: ReviewRepository = new InMemoryReviewRepo(this.deals, this.evidence);
   sourceReviews: SourceReviewRepository = new InMemorySourceReviewRepo();
   catalog: SubscriptionCatalogRepository = new InMemoryCatalogRepo();
-  team: TeamRepository = new InMemoryTeamRepo();
   alerts: AlertRepository = new InMemoryAlertRepo();
   settings: SettingsRepository = new InMemorySettingsRepo();
+  // Auth/IAM (Phase 1): identity store + RBAC + refresh-token registry. The user repo
+  // is built first so the role repo can count users.role_id (the same join the Postgres
+  // adapter does in SQL) — keeping countUsers LSP-identical across adapters.
+  users: InMemoryUserRepo = new InMemoryUserRepo();
+  roles: InMemoryRoleRepo = new InMemoryRoleRepo(this.users);
+  rolePermissions: InMemoryRolePermissionRepo = new InMemoryRolePermissionRepo();
+  refreshTokens: RefreshTokenRepository = new InMemoryRefreshTokenRepo();
+  authMeta: AuthMetaRepository = new InMemoryAuthMetaRepo();
+  // The Team screen is a PROJECTION over the SAME users table (role_id → role name via
+  // the roles repo). Built after users + roles so a user created via either path is
+  // visible through both — the consolidation seam (team_members → users).
+  team: TeamRepository = new InMemoryTeamRepo(this.users, this.roles);
+
+  constructor() {
+    // Seed the auth baseline the SQL migrations 0020–0023 install into Postgres, so the
+    // in-memory adapter starts from the SAME state (LSP) without a migration runner: the
+    // two system roles + their permission grants + perm_version=0 (the auth-meta repo
+    // already defaults to 0). Keeps `team.upsert(role:'admin')` resolvable and the
+    // contract/integration suites identical across adapters.
+    for (const role of SYSTEM_ROLES) {
+      this.roles.seed({
+        id: role.id,
+        name: role.name,
+        description: role.description,
+        is_system: true,
+      });
+      this.rolePermissions.seed(role.id, [...role.permissions]);
+    }
+  }
 }
 
 class InMemorySourceRepo implements SourceRepository {
@@ -587,26 +628,55 @@ class InMemoryReviewRepo implements ReviewRepository {
   }
 }
 
+/**
+ * The Team screen, projected over the SAME `users` + `roles` stores the Auth/IAM repos
+ * use (the `team_members → users` consolidation). `TeamMember.role` (a name) maps to/from
+ * `users.role_id` via the roles repo; `TeamMember.status` is `User['status']` (widened to
+ * include `disabled`). A user created via `db.users.insert` shows up here and vice-versa —
+ * there is no parallel store to drift. Mirrors the Postgres `PgTeamRepo` join (LSP).
+ */
 class InMemoryTeamRepo implements TeamRepository {
-  // Keyed by email (the natural identity), matching the Postgres ON CONFLICT (email).
-  private store = new Map<string, TeamMember>();
+  constructor(
+    private readonly users: InMemoryUserRepo,
+    private readonly roles: InMemoryRoleRepo,
+  ) {}
   async upsert(m: TeamMember): Promise<void> {
-    const existing = this.store.get(m.email);
-    // Keep the original id on a conflict (mirrors the Postgres upsert keeping id).
-    this.store.set(m.email, existing ? { ...m, id: existing.id } : { ...m });
+    // Resolve the role name → role_id (the role must exist — admin/reviewer are seeded).
+    const role = await this.roles.getByName(m.role);
+    if (role === null) throw new Error(`team.upsert: unknown role "${m.role}"`);
+    const existing = this.users.entityByEmail(m.email);
+    this.users.upsertProjection({
+      id: existing?.id ?? m.id,
+      name: m.name,
+      email: m.email,
+      roleId: role.id,
+      status: m.status,
+      createdAt: existing?.created_at ?? m.created_at,
+    });
   }
   async getById(id: string): Promise<TeamMember | null> {
-    for (const m of this.store.values()) if (m.id === id) return { ...m };
-    return null;
+    const u = this.users.entityById(id);
+    return u ? this.project(u) : null;
   }
   async getByEmail(email: string): Promise<TeamMember | null> {
-    const m = this.store.get(email);
-    return m ? { ...m } : null;
+    const u = this.users.entityByEmail(email);
+    return u ? this.project(u) : null;
   }
   async list(): Promise<TeamMember[]> {
-    return [...this.store.values()]
-      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
-      .map((m) => ({ ...m }));
+    const members = await Promise.all(this.users.listEntities().map((u) => this.project(u)));
+    return members.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  }
+  /** Project a User → TeamMember, mapping role_id → role name. */
+  private async project(u: User): Promise<TeamMember> {
+    const role = await this.roles.getById(u.role_id);
+    return TeamMemberSchema.parse({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: role?.name ?? 'reviewer',
+      status: u.status,
+      created_at: u.created_at,
+    });
   }
 }
 
@@ -661,6 +731,280 @@ class InMemorySettingsRepo implements SettingsRepository {
   }
   async delete(key: string): Promise<void> {
     this.store.delete(key);
+  }
+}
+
+/** Internal user row: the domain entity + the adapter-only auth columns (hash, counters). */
+interface UserRow {
+  user: User;
+  passwordHash: string | null;
+  failedLoginCount: number;
+  lockedUntil: string | null;
+}
+
+class InMemoryUserRepo implements UserRepository {
+  // Keyed by email (the natural identity), matching the Postgres unique(email).
+  private store = new Map<string, UserRow>();
+
+  async insert(user: User, passwordHash: string | null): Promise<void> {
+    // Parse on write so schema defaults are applied exactly as the Postgres adapter
+    // applies them on read (LSP) — the fake must not be more permissive than prod.
+    const parsed = UserSchema.parse(user);
+    this.store.set(parsed.email, {
+      user: parsed,
+      passwordHash,
+      failedLoginCount: 0,
+      lockedUntil: null,
+    });
+  }
+  async getById(id: string): Promise<User | null> {
+    for (const row of this.store.values()) if (row.user.id === id) return { ...row.user };
+    return null;
+  }
+  async getByEmail(email: string): Promise<User | null> {
+    const row = this.store.get(email);
+    return row ? { ...row.user } : null;
+  }
+  async getPasswordHashByEmail(email: string): Promise<string | null> {
+    return this.store.get(email)?.passwordHash ?? null;
+  }
+  async list(): Promise<User[]> {
+    return [...this.store.values()]
+      .map((r) => r.user)
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+      .map((u) => ({ ...u }));
+  }
+  async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
+    const row = this.rowById(id);
+    if (row) row.passwordHash = passwordHash;
+  }
+  async setStatus(id: string, status: User['status']): Promise<void> {
+    const row = this.rowById(id);
+    if (row) row.user = { ...row.user, status };
+  }
+  async bumpTokenVersion(id: string): Promise<number> {
+    const row = this.rowById(id);
+    if (!row) return 0;
+    const next = row.user.token_version + 1;
+    row.user = { ...row.user, token_version: next };
+    return next;
+  }
+  async setRole(id: string, roleId: string): Promise<void> {
+    const row = this.rowById(id);
+    if (row) row.user = { ...row.user, role_id: roleId };
+  }
+  async recordLogin(id: string, at: string): Promise<void> {
+    const row = this.rowById(id);
+    if (row) {
+      row.failedLoginCount = 0;
+      row.lockedUntil = null;
+      row.user = { ...row.user };
+      this.lastLogin.set(id, at);
+    }
+  }
+  async recordFailedLogin(id: string, _at: string): Promise<number> {
+    const row = this.rowById(id);
+    if (!row) return 0;
+    row.failedLoginCount += 1;
+    return row.failedLoginCount;
+  }
+  async setLockedUntil(id: string, until: string | null): Promise<void> {
+    const row = this.rowById(id);
+    if (row) row.lockedUntil = until;
+  }
+  async getLoginState(
+    id: string,
+  ): Promise<{ failedLoginCount: number; lockedUntil: string | null } | null> {
+    const row = this.rowById(id);
+    return row ? { failedLoginCount: row.failedLoginCount, lockedUntil: row.lockedUntil } : null;
+  }
+  /** Count users assigned a role — backs RoleRepository.countUsers (the role-FK join). */
+  countByRole(roleId: string): number {
+    let n = 0;
+    for (const row of this.store.values()) if (row.user.role_id === roleId) n++;
+    return n;
+  }
+  // ── Team-projection helpers (the `users` table also backs the Team screen) ──
+  // The team repo is a PROJECTION over the SAME store, so a user created via
+  // users.insert appears in team.list and vice-versa (no parallel store to drift).
+  /** All users as raw entities, for the team projection (mapped role_id→name by caller). */
+  listEntities(): User[] {
+    return [...this.store.values()].map((r) => ({ ...r.user }));
+  }
+  /** Raw user entity by email (or null) — for the team projection. */
+  entityByEmail(email: string): User | null {
+    const r = this.store.get(email);
+    return r ? { ...r.user } : null;
+  }
+  /** Raw user entity by id (or null) — for the team projection. */
+  entityById(id: string): User | null {
+    return this.rowById(id)?.user ? { ...this.rowById(id)!.user } : null;
+  }
+  /**
+   * Upsert a user from the Team-screen projection (keyed on email). A new row gets the
+   * given role_id + auth defaults (no password yet → `invited`); an existing row keeps
+   * its id + auth columns and only refreshes name/role/status. Mirrors the Postgres
+   * team.upsert ON CONFLICT (email).
+   */
+  upsertProjection(input: {
+    id: string;
+    name: string;
+    email: string;
+    roleId: string;
+    status: User['status'];
+    createdAt: string;
+  }): void {
+    const existing = this.store.get(input.email);
+    if (existing) {
+      existing.user = {
+        ...existing.user,
+        name: input.name,
+        role_id: input.roleId,
+        status: input.status,
+      };
+      return;
+    }
+    this.store.set(input.email, {
+      user: UserSchema.parse({
+        id: input.id,
+        name: input.name,
+        email: input.email,
+        role_id: input.roleId,
+        status: input.status,
+        auth_provider: 'password',
+        google_sub: null,
+        token_version: 0,
+        created_at: input.createdAt,
+      }),
+      passwordHash: null,
+      failedLoginCount: 0,
+      lockedUntil: null,
+    });
+  }
+  // last_login_at is an adapter-only column (not on the User entity); tracked for parity.
+  private readonly lastLogin = new Map<string, string>();
+  private rowById(id: string): UserRow | undefined {
+    for (const row of this.store.values()) if (row.user.id === id) return row;
+    return undefined;
+  }
+}
+
+class InMemoryRoleRepo implements RoleRepository {
+  // Keyed by id; the name index is derived on demand (the role set is tiny).
+  private store = new Map<string, Role>();
+  // Reaches the user repo so countUsers reflects users.role_id — the same join the
+  // Postgres adapter does in SQL (LSP). Mirrors how the deal repo reaches sources.
+  constructor(private readonly users: InMemoryUserRepo) {}
+  /** Synchronous baseline seed (the migration equivalent) — used by the InMemoryDb ctor. */
+  seed(role: Role): void {
+    this.store.set(role.id, RoleSchema.parse(role));
+  }
+  async insert(role: Role): Promise<void> {
+    this.store.set(role.id, RoleSchema.parse(role));
+  }
+  async getById(id: string): Promise<Role | null> {
+    const r = this.store.get(id);
+    return r ? { ...r } : null;
+  }
+  async getByName(name: string): Promise<Role | null> {
+    for (const r of this.store.values()) if (r.name === name) return { ...r };
+    return null;
+  }
+  async list(): Promise<Role[]> {
+    return [...this.store.values()]
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+      .map((r) => ({ ...r }));
+  }
+  async countUsers(roleId: string): Promise<number> {
+    return this.users.countByRole(roleId);
+  }
+  async delete(id: string): Promise<void> {
+    this.store.delete(id);
+  }
+}
+
+class InMemoryRolePermissionRepo implements RolePermissionRepository {
+  // role_id → set of permission keys (a replace-set, mirroring the composite-PK table).
+  private store = new Map<string, Set<Permission>>();
+  /** Synchronous baseline seed (the migration equivalent) — used by the InMemoryDb ctor. */
+  seed(roleId: string, permissions: Permission[]): void {
+    this.store.set(roleId, new Set(permissions));
+  }
+  async permissionsForRole(roleId: string): Promise<Permission[]> {
+    return [...(this.store.get(roleId) ?? new Set<Permission>())];
+  }
+  async list(): Promise<{ roleId: string; permissionKey: Permission }[]> {
+    const out: { roleId: string; permissionKey: Permission }[] = [];
+    for (const [roleId, keys] of this.store) {
+      for (const permissionKey of keys) out.push({ roleId, permissionKey });
+    }
+    return out;
+  }
+  async setForRole(roleId: string, permissions: Permission[]): Promise<void> {
+    this.store.set(roleId, new Set(permissions));
+  }
+}
+
+class InMemoryRefreshTokenRepo implements RefreshTokenRepository {
+  private store = new Map<string, StoredRefresh>(); // by id
+  async issue(token: StoredRefresh): Promise<void> {
+    this.store.set(token.id, { ...token });
+  }
+  async findByHash(tokenHash: string): Promise<StoredRefresh | null> {
+    for (const t of this.store.values()) if (t.token_hash === tokenHash) return { ...t };
+    return null;
+  }
+  async rotate(oldId: string, replacement: StoredRefresh): Promise<void> {
+    const old = this.store.get(oldId);
+    if (old) {
+      this.store.set(oldId, {
+        ...old,
+        revoked_at: replacement.issued_at,
+        replaced_by: replacement.id,
+      });
+    }
+    this.store.set(replacement.id, { ...replacement });
+  }
+  async revokeFamily(familyId: string, at: string): Promise<number> {
+    let n = 0;
+    for (const [id, t] of this.store) {
+      if (t.family_id === familyId && t.revoked_at === null) {
+        this.store.set(id, { ...t, revoked_at: at });
+        n++;
+      }
+    }
+    return n;
+  }
+  async revokeAllForUser(userId: string, at: string): Promise<number> {
+    let n = 0;
+    for (const [id, t] of this.store) {
+      if (t.user_id === userId && t.revoked_at === null) {
+        this.store.set(id, { ...t, revoked_at: at });
+        n++;
+      }
+    }
+    return n;
+  }
+  async deleteExpired(now: Date): Promise<number> {
+    let n = 0;
+    for (const [id, t] of this.store) {
+      if (Date.parse(t.expires_at) <= now.getTime()) {
+        this.store.delete(id);
+        n++;
+      }
+    }
+    return n;
+  }
+}
+
+class InMemoryAuthMetaRepo implements AuthMetaRepository {
+  private permVersion = 0;
+  async getPermVersion(): Promise<number> {
+    return this.permVersion;
+  }
+  async bumpPermVersion(): Promise<number> {
+    this.permVersion += 1;
+    return this.permVersion;
   }
 }
 

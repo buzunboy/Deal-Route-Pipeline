@@ -171,6 +171,39 @@ const ConfigSchema = z.object({
      */
     corsAllowOrigin: z.string().min(1),
   }),
+  // Auth/IAM (the pipeline-as-IdP). The signing key is a SECRET (env only, never
+  // committed); unset ⇒ the TokenIssuer can't sign/verify and auth is effectively
+  // disabled (Phase 2's `serve` warns at startup; after the P5 cutover an unset key is
+  // a hard fail). Argon2/lockout/TTL knobs are tuned for ~5 reviewers on Fly.
+  auth: z.object({
+    jwt: z.object({
+      // ES256 private key, PKCS8 PEM or JWK JSON. Optional so offline/dry-run/test
+      // (no auth) loads; the TokenIssuer fails loudly on first use when it's needed unset.
+      privateKey: z.string().optional(),
+      kid: z.string().optional(), // key id stamped in the JWS header + JWKS
+      nextPrivateKey: z.string().optional(), // optional overlap key for rotation
+      nextKid: z.string().optional(),
+      iss: z.string().min(1), // default 'dealroute-pipeline'
+      aud: z.string().min(1), // default 'dealroute-panel'
+      clockToleranceSeconds: z.coerce.number().int().nonnegative(),
+    }),
+    ttls: z.object({
+      accessSeconds: z.coerce.number().int().positive(), // ~900 (15 min)
+      refreshSeconds: z.coerce.number().int().positive(), // ~604800 (7 days)
+    }),
+    argon2: z.object({
+      memoryCost: z.coerce.number().int().positive(), // KiB; 19456 = 19 MiB (OWASP floor)
+      timeCost: z.coerce.number().int().positive(), // iterations
+      parallelism: z.coerce.number().int().positive(),
+    }),
+    passwordPolicy: z.object({
+      minLength: z.coerce.number().int().min(8),
+    }),
+    login: z.object({
+      maxFailedAttempts: z.coerce.number().int().positive(), // lockout threshold
+      lockoutSeconds: z.coerce.number().int().positive(),
+    }),
+  }),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']),
   country: z.string().min(1),
   currency: z.string().min(1),
@@ -284,6 +317,32 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     publicApi: {
       corsAllowOrigin: env.PUBLIC_CORS_ORIGIN ?? '*',
+    },
+    auth: {
+      jwt: {
+        privateKey: emptyToUndefined(env.AUTH_JWT_PRIVATE_KEY),
+        kid: emptyToUndefined(env.AUTH_JWT_KID),
+        nextPrivateKey: emptyToUndefined(env.AUTH_JWT_PRIVATE_KEY_NEXT),
+        nextKid: emptyToUndefined(env.AUTH_JWT_KID_NEXT),
+        iss: env.AUTH_JWT_ISS ?? 'dealroute-pipeline',
+        aud: env.AUTH_JWT_AUD ?? 'dealroute-panel',
+        // A few seconds of skew tolerance avoids spurious 401s on clock drift.
+        clockToleranceSeconds: env.AUTH_JWT_CLOCK_TOLERANCE_SECONDS ?? '5',
+      },
+      ttls: {
+        accessSeconds: env.AUTH_ACCESS_TTL_SECONDS ?? '900', // 15 min
+        refreshSeconds: env.AUTH_REFRESH_TTL_SECONDS ?? '604800', // 7 days
+      },
+      argon2: {
+        memoryCost: env.AUTH_ARGON2_MEMORY_KIB ?? '19456', // 19 MiB (OWASP floor)
+        timeCost: env.AUTH_ARGON2_TIME_COST ?? '2',
+        parallelism: env.AUTH_ARGON2_PARALLELISM ?? '1',
+      },
+      passwordPolicy: { minLength: env.AUTH_PASSWORD_MIN_LENGTH ?? '12' },
+      login: {
+        maxFailedAttempts: env.AUTH_LOGIN_MAX_ATTEMPTS ?? '5',
+        lockoutSeconds: env.AUTH_LOGIN_LOCKOUT_SECONDS ?? '900',
+      },
     },
     logLevel: env.LOG_LEVEL ?? 'info',
     country: env.COUNTRY ?? 'DE',

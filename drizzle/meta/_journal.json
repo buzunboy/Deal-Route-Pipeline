@@ -134,6 +134,41 @@
       "when": 1782162721515,
       "tag": "0018_bright_blackheart",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1782221683170,
+      "tag": "0019_users_from_team_members",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1782221692058,
+      "tag": "0020_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1782221692666,
+      "tag": "0021_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1782221693287,
+      "tag": "0022_role_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1782221693908,
+      "tag": "0023_refresh_tokens_and_auth_meta",
+      "breakpoints": true
     }
   ]
 }

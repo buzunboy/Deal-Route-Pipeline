@@ -18,6 +18,11 @@ import type {
   TeamRepository,
   AlertRepository,
   SettingsRepository,
+  UserRepository,
+  RoleRepository,
+  RolePermissionRepository,
+  RefreshTokenRepository,
+  AuthMetaRepository,
 } from '../../../application/ports/index.js';
 import {
   ChangeSchema,
@@ -30,6 +35,10 @@ import {
   SettingOverrideSchema,
   SubscriptionCatalogEntrySchema,
   CostSummarySchema,
+  UserSchema,
+  RoleSchema,
+  StoredRefreshSchema,
+  Permission,
   eurFromMicros,
   SOURCELESS_RUN_BUCKET,
   buildReliabilityIndex,
@@ -64,6 +73,9 @@ import type {
   CandidateDealCounts,
   AdminPublishedQuery,
   VocabularyEntry,
+  User,
+  Role,
+  StoredRefresh,
 } from '../../../domain/index.js';
 import type { Logger } from '../../../application/ports/index.js';
 import * as schema from './schema.js';
@@ -128,6 +140,11 @@ export class PostgresDb implements Database {
   readonly team: TeamRepository;
   readonly alerts: AlertRepository;
   readonly settings: SettingsRepository;
+  readonly users: UserRepository;
+  readonly roles: RoleRepository;
+  readonly rolePermissions: RolePermissionRepository;
+  readonly refreshTokens: RefreshTokenRepository;
+  readonly authMeta: AuthMetaRepository;
 
   private constructor(
     private readonly pool: pg.Pool,
@@ -151,6 +168,11 @@ export class PostgresDb implements Database {
     this.team = new PgTeamRepo(db, retrier);
     this.alerts = new PgAlertRepo(db, retrier);
     this.settings = new PgSettingsRepo(db, retrier);
+    this.users = new PgUserRepo(db, retrier);
+    this.roles = new PgRoleRepo(db, retrier);
+    this.rolePermissions = new PgRolePermissionRepo(db, retrier);
+    this.refreshTokens = new PgRefreshTokenRepo(db, retrier);
+    this.authMeta = new PgAuthMetaRepo(db, retrier);
   }
 
   static connect(
@@ -1006,58 +1028,95 @@ class PgSourceReviewRepo extends PgRepo implements SourceReviewRepository {
   }
 }
 
+/**
+ * The Team screen, projected over `users` + `roles` (the `team_members → users`
+ * consolidation). `TeamMember.role` (a name) maps to/from `users.role_id` via a join;
+ * a new member row carries the auth defaults (no password yet → `invited`). Shares the
+ * SAME table the `PgUserRepo` uses, so a user created via either path is visible through
+ * both. Mirrors the in-memory `InMemoryTeamRepo` projection (LSP).
+ */
 class PgTeamRepo extends PgRepo implements TeamRepository {
   async upsert(m: TeamMember): Promise<void> {
-    // Conflict on `email` (the natural identity): re-inviting/updating the same
-    // person updates in place and keeps the original id, mirroring sources.upsert.
-    const row = {
-      id: m.id,
-      name: m.name,
-      email: m.email,
-      role: m.role,
-      status: m.status,
-      createdAt: m.created_at,
-    };
-    await this.run('team.upsert', () =>
-      this.db
-        .insert(schema.teamMembers)
-        .values(row)
+    await this.run('team.upsert', async () => {
+      const role = await this.db
+        .select({ id: schema.roles.id })
+        .from(schema.roles)
+        .where(eq(schema.roles.name, m.role))
+        .limit(1);
+      const roleId = role[0]?.id;
+      if (!roleId) throw new Error(`team.upsert: unknown role "${m.role}"`);
+      // Conflict on `email` (the natural identity): re-inviting/updating the same person
+      // updates name/role/status in place and keeps the id + auth columns (mirrors
+      // sources.upsert). A first insert gets the auth defaults (no password → invited).
+      await this.db
+        .insert(schema.users)
+        .values({
+          id: m.id,
+          name: m.name,
+          email: m.email,
+          roleId,
+          status: m.status,
+          passwordHash: null,
+          authProvider: 'password',
+          tokenVersion: 0,
+          failedLoginCount: 0,
+          createdAt: m.created_at,
+        })
         .onConflictDoUpdate({
-          target: schema.teamMembers.email,
-          set: { name: m.name, role: m.role, status: m.status },
-        }),
-    );
+          target: schema.users.email,
+          set: { name: m.name, roleId, status: m.status },
+        });
+    });
   }
   async getById(id: string): Promise<TeamMember | null> {
-    const rows = await this.run('team.getById', () =>
-      this.db.select().from(schema.teamMembers).where(eq(schema.teamMembers.id, id)).limit(1),
-    );
+    const rows = await this.run('team.getById', () => this.selectMembers(eq(schema.users.id, id)));
     return rows[0] ? rowToTeamMember(rows[0]) : null;
   }
   async getByEmail(email: string): Promise<TeamMember | null> {
     const rows = await this.run('team.getByEmail', () =>
-      this.db.select().from(schema.teamMembers).where(eq(schema.teamMembers.email, email)).limit(1),
+      this.selectMembers(eq(schema.users.email, email)),
     );
     return rows[0] ? rowToTeamMember(rows[0]) : null;
   }
   async list(): Promise<TeamMember[]> {
     const rows = await this.run('team.list', () =>
-      this.db
-        .select()
-        .from(schema.teamMembers)
-        .orderBy(asc(schema.teamMembers.name), asc(schema.teamMembers.id)),
+      this.selectMembers(undefined).orderBy(asc(schema.users.name), asc(schema.users.id)),
     );
     return rows.map(rowToTeamMember);
   }
+  /** The shared users⨝roles projection select (role_id → role name). */
+  private selectMembers(where: SQL | undefined) {
+    return this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        email: schema.users.email,
+        roleName: schema.roles.name,
+        status: schema.users.status,
+        createdAt: schema.users.createdAt,
+      })
+      .from(schema.users)
+      .leftJoin(schema.roles, eq(schema.users.roleId, schema.roles.id))
+      .where(where);
+  }
 }
 
-function rowToTeamMember(r: typeof schema.teamMembers.$inferSelect): TeamMember {
-  // Re-validate at the boundary (free-text role/status columns) — never trust the row.
+/** Re-validate a users⨝roles projection row at the boundary into a TeamMember. */
+function rowToTeamMember(r: {
+  id: string;
+  name: string;
+  email: string;
+  roleName: string | null;
+  status: string;
+  createdAt: string;
+}): TeamMember {
   return TeamMemberSchema.parse({
     id: r.id,
     name: r.name,
     email: r.email,
-    role: r.role,
+    // An unmapped/custom role projects to 'reviewer' (TeamMember.role is the admin|reviewer
+    // enum; custom roles surface via the Phase-3 /api/users screen, not the Team view).
+    role: r.roleName === 'admin' ? 'admin' : 'reviewer',
     status: r.status,
     created_at: isoTimestamp(r.createdAt),
   });
@@ -1209,6 +1268,371 @@ function rowToSetting(r: typeof schema.settings.$inferSelect): SettingOverride {
     updated_at: isoTimestamp(r.updatedAt),
     updated_by: r.updatedBy,
   });
+}
+
+// ── Auth/IAM repos (Phase 1) ──────────────────────────────────────────────────
+
+class PgUserRepo extends PgRepo implements UserRepository {
+  async insert(user: User, passwordHash: string | null): Promise<void> {
+    const u = UserSchema.parse(user); // boundary-validate before write
+    await this.run(
+      'users.insert',
+      () =>
+        this.db.insert(schema.users).values({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          roleId: u.role_id,
+          status: u.status,
+          passwordHash,
+          authProvider: u.auth_provider,
+          googleSub: u.google_sub,
+          tokenVersion: u.token_version,
+          failedLoginCount: 0,
+          createdAt: u.created_at,
+        }),
+      false,
+    );
+  }
+  async getById(id: string): Promise<User | null> {
+    const rows = await this.run('users.getById', () =>
+      this.db.select().from(schema.users).where(eq(schema.users.id, id)).limit(1),
+    );
+    return rows[0] ? rowToUser(rows[0]) : null;
+  }
+  async getByEmail(email: string): Promise<User | null> {
+    const rows = await this.run('users.getByEmail', () =>
+      this.db.select().from(schema.users).where(eq(schema.users.email, email)).limit(1),
+    );
+    return rows[0] ? rowToUser(rows[0]) : null;
+  }
+  async getPasswordHashByEmail(email: string): Promise<string | null> {
+    const rows = await this.run('users.getPasswordHashByEmail', () =>
+      this.db
+        .select({ passwordHash: schema.users.passwordHash })
+        .from(schema.users)
+        .where(eq(schema.users.email, email))
+        .limit(1),
+    );
+    return rows[0]?.passwordHash ?? null;
+  }
+  async list(): Promise<User[]> {
+    const rows = await this.run('users.list', () =>
+      this.db.select().from(schema.users).orderBy(asc(schema.users.name), asc(schema.users.id)),
+    );
+    return rows.map(rowToUser);
+  }
+  async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
+    await this.run('users.updatePasswordHash', () =>
+      this.db.update(schema.users).set({ passwordHash }).where(eq(schema.users.id, id)),
+    );
+  }
+  async setStatus(id: string, status: User['status']): Promise<void> {
+    await this.run('users.setStatus', () =>
+      this.db.update(schema.users).set({ status }).where(eq(schema.users.id, id)),
+    );
+  }
+  async bumpTokenVersion(id: string): Promise<number> {
+    const rows = await this.run('users.bumpTokenVersion', () =>
+      this.db
+        .update(schema.users)
+        .set({ tokenVersion: sql`${schema.users.tokenVersion} + 1` })
+        .where(eq(schema.users.id, id))
+        .returning({ tokenVersion: schema.users.tokenVersion }),
+    );
+    return rows[0]?.tokenVersion ?? 0;
+  }
+  async setRole(id: string, roleId: string): Promise<void> {
+    await this.run('users.setRole', () =>
+      this.db.update(schema.users).set({ roleId }).where(eq(schema.users.id, id)),
+    );
+  }
+  async recordLogin(id: string, at: string): Promise<void> {
+    await this.run('users.recordLogin', () =>
+      this.db
+        .update(schema.users)
+        .set({ lastLoginAt: at, failedLoginCount: 0, lockedUntil: null })
+        .where(eq(schema.users.id, id)),
+    );
+  }
+  async recordFailedLogin(id: string, _at: string): Promise<number> {
+    const rows = await this.run(
+      'users.recordFailedLogin',
+      () =>
+        this.db
+          .update(schema.users)
+          .set({ failedLoginCount: sql`${schema.users.failedLoginCount} + 1` })
+          .where(eq(schema.users.id, id))
+          .returning({ failedLoginCount: schema.users.failedLoginCount }),
+      false,
+    );
+    return rows[0]?.failedLoginCount ?? 0;
+  }
+  async setLockedUntil(id: string, until: string | null): Promise<void> {
+    await this.run('users.setLockedUntil', () =>
+      this.db.update(schema.users).set({ lockedUntil: until }).where(eq(schema.users.id, id)),
+    );
+  }
+  async getLoginState(
+    id: string,
+  ): Promise<{ failedLoginCount: number; lockedUntil: string | null } | null> {
+    const rows = await this.run('users.getLoginState', () =>
+      this.db
+        .select({
+          failedLoginCount: schema.users.failedLoginCount,
+          lockedUntil: schema.users.lockedUntil,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, id))
+        .limit(1),
+    );
+    const r = rows[0];
+    return r
+      ? { failedLoginCount: r.failedLoginCount, lockedUntil: isoTimestampOrNull(r.lockedUntil) }
+      : null;
+  }
+}
+
+/**
+ * Re-validate a users row at the boundary into the `User` entity — DROPPING the
+ * password hash + the adapter-only login counters (they are never on `User`, so they
+ * can't leak through a DTO/log). The free-text status/auth_provider columns are
+ * enforced by the schema, not just the column types.
+ */
+function rowToUser(r: typeof schema.users.$inferSelect): User {
+  return UserSchema.parse({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    // role_id is nullable at the column level (pre-roles rows) but the domain requires
+    // it; a NULL here is a real data error worth failing loudly on (post-0020 backfill
+    // guarantees it's set). Coerce undefined → fail the schema rather than silently ''.
+    role_id: r.roleId ?? undefined,
+    status: r.status,
+    auth_provider: r.authProvider,
+    google_sub: r.googleSub,
+    token_version: r.tokenVersion,
+    created_at: isoTimestamp(r.createdAt),
+  });
+}
+
+class PgRoleRepo extends PgRepo implements RoleRepository {
+  async insert(role: Role): Promise<void> {
+    const r = RoleSchema.parse(role); // boundary-validate before write
+    await this.run(
+      'roles.insert',
+      () =>
+        this.db
+          .insert(schema.roles)
+          .values({ id: r.id, name: r.name, description: r.description, isSystem: r.is_system }),
+      false,
+    );
+  }
+  async getById(id: string): Promise<Role | null> {
+    const rows = await this.run('roles.getById', () =>
+      this.db.select().from(schema.roles).where(eq(schema.roles.id, id)).limit(1),
+    );
+    return rows[0] ? rowToRole(rows[0]) : null;
+  }
+  async getByName(name: string): Promise<Role | null> {
+    const rows = await this.run('roles.getByName', () =>
+      this.db.select().from(schema.roles).where(eq(schema.roles.name, name)).limit(1),
+    );
+    return rows[0] ? rowToRole(rows[0]) : null;
+  }
+  async list(): Promise<Role[]> {
+    const rows = await this.run('roles.list', () =>
+      this.db.select().from(schema.roles).orderBy(asc(schema.roles.name), asc(schema.roles.id)),
+    );
+    return rows.map(rowToRole);
+  }
+  async countUsers(roleId: string): Promise<number> {
+    const rows = await this.run('roles.countUsers', () =>
+      this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.users)
+        .where(eq(schema.users.roleId, roleId)),
+    );
+    return rows[0]?.n ?? 0;
+  }
+  async delete(id: string): Promise<void> {
+    await this.run('roles.delete', () =>
+      this.db.delete(schema.roles).where(eq(schema.roles.id, id)),
+    );
+  }
+}
+
+function rowToRole(r: typeof schema.roles.$inferSelect): Role {
+  return RoleSchema.parse({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    is_system: r.isSystem,
+  });
+}
+
+class PgRolePermissionRepo extends PgRepo implements RolePermissionRepository {
+  async permissionsForRole(roleId: string): Promise<Permission[]> {
+    const rows = await this.run('rolePermissions.permissionsForRole', () =>
+      this.db
+        .select({ key: schema.rolePermissions.permissionKey })
+        .from(schema.rolePermissions)
+        .where(eq(schema.rolePermissions.roleId, roleId)),
+    );
+    // Re-validate the free-text key column at the boundary (drop any non-enum key).
+    return rows.map((r) => Permission.parse(r.key));
+  }
+  async list(): Promise<{ roleId: string; permissionKey: Permission }[]> {
+    const rows = await this.run('rolePermissions.list', () =>
+      this.db.select().from(schema.rolePermissions),
+    );
+    return rows.map((r) => ({
+      roleId: r.roleId,
+      permissionKey: Permission.parse(r.permissionKey),
+    }));
+  }
+  async setForRole(roleId: string, permissions: Permission[]): Promise<void> {
+    // Replace-set: delete the role's grants then insert the new set, in ONE transaction
+    // so a reader never sees a half-applied permission set.
+    await this.run('rolePermissions.setForRole', () =>
+      this.db.transaction(async (tx) => {
+        await tx.delete(schema.rolePermissions).where(eq(schema.rolePermissions.roleId, roleId));
+        if (permissions.length > 0) {
+          await tx
+            .insert(schema.rolePermissions)
+            .values(permissions.map((permissionKey) => ({ roleId, permissionKey })));
+        }
+      }),
+    );
+  }
+}
+
+class PgRefreshTokenRepo extends PgRepo implements RefreshTokenRepository {
+  async issue(token: StoredRefresh): Promise<void> {
+    const t = StoredRefreshSchema.parse(token); // boundary-validate before write
+    await this.run(
+      'refreshTokens.issue',
+      () => this.db.insert(schema.refreshTokens).values(toRefreshRow(t)),
+      false,
+    );
+  }
+  async findByHash(tokenHash: string): Promise<StoredRefresh | null> {
+    const rows = await this.run('refreshTokens.findByHash', () =>
+      this.db
+        .select()
+        .from(schema.refreshTokens)
+        .where(eq(schema.refreshTokens.tokenHash, tokenHash))
+        .limit(1),
+    );
+    return rows[0] ? rowToRefresh(rows[0]) : null;
+  }
+  async rotate(oldId: string, replacement: StoredRefresh): Promise<void> {
+    const r = StoredRefreshSchema.parse(replacement);
+    // Atomic: stamp the predecessor (revoked_at + replaced_by) and insert the successor
+    // in one transaction so there is no window where both are current.
+    await this.run('refreshTokens.rotate', () =>
+      this.db.transaction(async (tx) => {
+        await tx
+          .update(schema.refreshTokens)
+          .set({ revokedAt: r.issued_at, replacedBy: r.id })
+          .where(eq(schema.refreshTokens.id, oldId));
+        await tx.insert(schema.refreshTokens).values(toRefreshRow(r));
+      }),
+    );
+  }
+  async revokeFamily(familyId: string, at: string): Promise<number> {
+    const rows = await this.run('refreshTokens.revokeFamily', () =>
+      this.db
+        .update(schema.refreshTokens)
+        .set({ revokedAt: at })
+        .where(
+          and(eq(schema.refreshTokens.familyId, familyId), isNull(schema.refreshTokens.revokedAt)),
+        )
+        .returning({ id: schema.refreshTokens.id }),
+    );
+    return rows.length;
+  }
+  async revokeAllForUser(userId: string, at: string): Promise<number> {
+    const rows = await this.run('refreshTokens.revokeAllForUser', () =>
+      this.db
+        .update(schema.refreshTokens)
+        .set({ revokedAt: at })
+        .where(and(eq(schema.refreshTokens.userId, userId), isNull(schema.refreshTokens.revokedAt)))
+        .returning({ id: schema.refreshTokens.id }),
+    );
+    return rows.length;
+  }
+  async deleteExpired(now: Date): Promise<number> {
+    const rows = await this.run('refreshTokens.deleteExpired', () =>
+      this.db
+        .delete(schema.refreshTokens)
+        .where(lte(schema.refreshTokens.expiresAt, now.toISOString()))
+        .returning({ id: schema.refreshTokens.id }),
+    );
+    return rows.length;
+  }
+}
+
+function toRefreshRow(t: StoredRefresh): typeof schema.refreshTokens.$inferInsert {
+  return {
+    id: t.id,
+    userId: t.user_id,
+    tokenHash: t.token_hash,
+    familyId: t.family_id,
+    issuedAt: t.issued_at,
+    expiresAt: t.expires_at,
+    revokedAt: t.revoked_at,
+    replacedBy: t.replaced_by,
+    userAgent: t.user_agent,
+    ip: t.ip,
+  };
+}
+
+function rowToRefresh(r: typeof schema.refreshTokens.$inferSelect): StoredRefresh {
+  return StoredRefreshSchema.parse({
+    id: r.id,
+    user_id: r.userId,
+    token_hash: r.tokenHash,
+    family_id: r.familyId,
+    issued_at: isoTimestamp(r.issuedAt),
+    expires_at: isoTimestamp(r.expiresAt),
+    revoked_at: isoTimestampOrNull(r.revokedAt),
+    replaced_by: r.replacedBy,
+    user_agent: r.userAgent,
+    ip: r.ip,
+  });
+}
+
+class PgAuthMetaRepo extends PgRepo implements AuthMetaRepository {
+  private static readonly PERM_VERSION_KEY = 'perm_version';
+  async getPermVersion(): Promise<number> {
+    const rows = await this.run('authMeta.getPermVersion', () =>
+      this.db
+        .select({ value: schema.authMeta.value })
+        .from(schema.authMeta)
+        .where(eq(schema.authMeta.key, PgAuthMetaRepo.PERM_VERSION_KEY))
+        .limit(1),
+    );
+    return rows[0] ? Number(rows[0].value) : 0;
+  }
+  async bumpPermVersion(): Promise<number> {
+    // Atomic increment via upsert: an existing row's value text is cast to int, +1,
+    // back to text; a missing row seeds to 1. Returns the new value.
+    const rows = await this.run(
+      'authMeta.bumpPermVersion',
+      () =>
+        this.db
+          .insert(schema.authMeta)
+          .values({ key: PgAuthMetaRepo.PERM_VERSION_KEY, value: '1' })
+          .onConflictDoUpdate({
+            target: schema.authMeta.key,
+            set: { value: sql`(${schema.authMeta.value}::int + 1)::text` },
+          })
+          .returning({ value: schema.authMeta.value }),
+      false,
+    );
+    return Number(rows[0]?.value ?? 0);
+  }
 }
 
 // ── row mappers (small, table-local) ─────────────────────────────────────────

@@ -25,6 +25,8 @@ import {
   type SearchProvider,
   type BrowserAgent,
   type Alerting,
+  type PasswordHasher,
+  type TokenIssuer,
 } from '../application/index.js';
 import {
   SEED_VOCABULARY,
@@ -55,6 +57,8 @@ import { PostgresDb } from '../adapters/db/postgres/postgres-db.js';
 import { NoopAlerter } from '../adapters/alerting/noop-alerter.js';
 import { WebhookAlerter } from '../adapters/alerting/webhook-alerter.js';
 import { PersistingAlerter } from '../adapters/alerting/persisting-alerter.js';
+import { Argon2idHasher } from '../adapters/security/argon2id-hasher.js';
+import { JoseTokenIssuer } from '../adapters/security/jose-token-issuer.js';
 
 /**
  * The ONE composition root. It reads typed config and constructs concrete
@@ -83,6 +87,8 @@ export interface ContainerOptions {
     browserAgent?: BrowserAgent;
     alerting?: Alerting;
     suffixOracle?: SuffixOracle;
+    passwordHasher?: PasswordHasher;
+    tokenIssuer?: TokenIssuer;
   };
 }
 
@@ -100,6 +106,10 @@ export class Container {
   readonly browserAgent: BrowserAgent;
   readonly alerting: Alerting;
   readonly suffixOracle: SuffixOracle;
+  // Auth/IAM ports (Phase 1). Constructed here (the one composition root); the use-cases
+  // + HTTP guard that consume them are wired in Phase 2.
+  readonly passwordHasher: PasswordHasher;
+  readonly tokenIssuer: TokenIssuer;
 
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
@@ -149,6 +159,14 @@ export class Container {
       this.clock,
       this.logger,
     );
+    // Auth/IAM ports (Phase 1): the Argon2id hasher + the jose ES256 token issuer.
+    // The issuer takes the injected Clock so iat/exp are deterministic in tests; keys
+    // load lazily and fail loudly on first use (Phase 2's init() parses them at boot).
+    // Test overrides let integration tests inject a deterministic hasher/issuer while
+    // exercising the real wiring (same pattern as clock/llm/alerting).
+    this.passwordHasher = overrides.passwordHasher ?? new Argon2idHasher(config.auth.argon2);
+    this.tokenIssuer = overrides.tokenIssuer ?? new JoseTokenIssuer(config.auth.jwt, this.clock);
+
     // NB: there is intentionally no job queue wired here. v1 runs as external
     // cron invoking the CLI (`crawl --due`, `monitor --due`, `ingest
     // --community-due`) — see README "Deployment". The `Queue` port + pg-boss/

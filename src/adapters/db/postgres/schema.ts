@@ -9,6 +9,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -264,23 +265,106 @@ export const alertEvents = pgTable(
   }),
 );
 
-// Team / reviewer registry (ACR-10 Team + ACR-11 Profile). The pipeline is the
-// system of record for reviewer identity; the admin panel's auth allow-list mirrors
-// it. `review_count` is NOT stored — it is derived per-actor from the reviews audit
-// log at read time (so it can never drift from the real decision history).
-export const teamMembers = pgTable(
-  'team_members',
+// User / login-account registry (Auth/IAM — the `team_members → users` consolidation,
+// migration 0019). The pipeline is the IdP + system of record for reviewer identity.
+// `review_count` is NOT stored — it is derived per-actor from the reviews audit log at
+// read time (by `approver` = `email`), so it can never drift. The PASSWORD HASH lives
+// here as a column but NEVER on the `User` domain entity (adapter-only). `email` stays
+// UNIQUE — it is the auth identity the reviews log keys on as `approver`.
+export const users = pgTable(
+  'users',
   {
     id: uuid('id').primaryKey(),
     name: text('name').notNull(),
-    // The auth identity (the reviews log keys on this as `approver`). Unique.
     email: text('email').notNull(),
-    role: text('role').notNull(), // admin | reviewer
-    status: text('status').notNull(), // active | invited
+    // FK → roles.id (added in 0020 after the roles seed backfills it). Nullable in 0019,
+    // tightened conceptually once backfilled; left nullable at the column level so a
+    // pre-roles row can't block the rename.
+    roleId: uuid('role_id'),
+    status: text('status').notNull(), // active | invited | disabled
+    // Argon2id encoded hash; nullable (admin sets later / SSO-only accounts have none).
+    passwordHash: text('password_hash'),
+    authProvider: text('auth_provider').notNull().default('password'), // password | google
+    googleSub: text('google_sub'), // OIDC subject; null until SSO (P6)
+    tokenVersion: integer('token_version').notNull().default(0), // immediate-revoke lever
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true, mode: 'string' }),
+    failedLoginCount: integer('failed_login_count').notNull().default(0),
+    lockedUntil: timestamp('locked_until', { withTimezone: true, mode: 'string' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull(),
   },
-  (t) => ({ emailUnique: uniqueIndex('team_members_email_unique').on(t.email) }),
+  (t) => ({
+    // The rename carries this index forward (renamed from team_members_email_unique).
+    emailUnique: uniqueIndex('users_email_unique').on(t.email),
+    roleIdx: index('users_role_idx').on(t.roleId),
+  }),
 );
+
+// Roles — named bundles of permissions (Auth/IAM, migration 0020). `is_system` protects
+// the built-in admin/reviewer roles from delete/re-scope.
+export const roles = pgTable(
+  'roles',
+  {
+    id: uuid('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    isSystem: boolean('is_system').notNull().default(false),
+  },
+  (t) => ({ nameUnique: uniqueIndex('roles_name_unique').on(t.name) }),
+);
+
+// The closed catalog of permission keys (Auth/IAM, migration 0021), seeded one row per
+// `ALL_PERMISSIONS` key so the panel "Roles & permissions" UI can enumerate them without
+// the `Permission` enum shipping to the client. `key` matches Permission.options exactly.
+export const permissions = pgTable('permissions', {
+  key: text('key').primaryKey(),
+  label: text('label').notNull(),
+});
+
+// The `(role_id, permission_key)` grants (Auth/IAM, migration 0022) — the source of
+// "what can this role do". Composite PK + FKs. Seed: admin→all keys; reviewer→read +
+// approve/reject/edit + manual-capture + evidence:read.
+export const rolePermissions = pgTable(
+  'role_permissions',
+  {
+    roleId: uuid('role_id').notNull(),
+    permissionKey: text('permission_key').notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.roleId, t.permissionKey] }) }),
+);
+
+// Server-side refresh tokens (Auth/IAM, migration 0023). The opaque token is stored ONLY
+// as its SHA-256 hash; `family_id` links a rotation lineage so presenting a rotated-out
+// member revokes the whole family (reuse detection).
+export const refreshTokens = pgTable(
+  'refresh_tokens',
+  {
+    id: uuid('id').primaryKey(),
+    userId: uuid('user_id').notNull(),
+    tokenHash: text('token_hash').notNull(), // SHA-256 hex of the opaque token (never the token)
+    familyId: uuid('family_id').notNull(),
+    issuedAt: timestamp('issued_at', { withTimezone: true, mode: 'string' }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'string' }),
+    replacedBy: uuid('replaced_by'), // the rotation successor's id (null until rotated)
+    userAgent: text('user_agent'),
+    ip: text('ip'),
+  },
+  (t) => ({
+    userIdx: index('refresh_tokens_user_idx').on(t.userId),
+    // Lookup-by-hash + dedupe: a token hash is globally unique.
+    hashUnique: uniqueIndex('refresh_tokens_token_hash_unique').on(t.tokenHash),
+    familyIdx: index('refresh_tokens_family_idx').on(t.familyId),
+  }),
+);
+
+// Global auth counters (Auth/IAM, migration 0023) — currently just `perm_version`,
+// bumped on any role_permissions edit so a mid-token permission change is honoured.
+// A DEDICATED table (not `settings`) so the counter never surfaces in the panel's
+// settings view / settings catalog.
+export const authMeta = pgTable('auth_meta', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+});
 
 // Persisted settings OVERRIDES (ACR-10 Settings). The pipeline's operational config is
 // env-driven (source of truth for a running process); this table layers the few
