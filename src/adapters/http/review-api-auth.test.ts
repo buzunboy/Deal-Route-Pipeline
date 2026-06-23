@@ -56,12 +56,13 @@ class MovableClock implements Clock {
 }
 
 /**
- * The Phase-2 JWT guard + dual-accept on ReviewApi: identity is proven from the verified
- * token (not the body), reads now require a token, the route registry enforces per-write
- * permissions, immediate revocation works, and the legacy static token still authenticates
- * during the dual-accept window. These are the trust-critical + adversarial guard paths.
+ * The JWT guard on ReviewApi (Auth/IAM, post-Phase-5): per-user ES256 token is the ONLY
+ * auth path. Identity is proven from the verified token (never the body), every `/api/*`
+ * request requires a token, the route registry enforces per-write permissions, immediate
+ * revocation works, and the retired legacy static token no longer authenticates anything.
+ * These are the trust-critical + adversarial guard paths.
  */
-describe('ReviewApi — JWT guard + dual-accept (Phase 2)', () => {
+describe('ReviewApi — per-user JWT guard (Phase 5: JWT-only)', () => {
   let makeIssuer: (clock: Clock) => JoseTokenIssuer;
   let clock: MovableClock;
   let db: InMemoryDb;
@@ -122,7 +123,7 @@ describe('ReviewApi — JWT guard + dual-accept (Phase 2)', () => {
       new ConsoleLogger('error'),
       {
         staticPageHtml: '<html>page</html>',
-        authToken: LEGACY_TOKEN, // dual-accept: legacy static token stays valid
+        // Phase 5: NO `authToken` — the legacy static token is retired; per-user JWT only.
         auth: {
           tokenIssuer: issuer,
           db,
@@ -266,25 +267,42 @@ describe('ReviewApi — JWT guard + dual-accept (Phase 2)', () => {
     });
   });
 
-  describe('dual-accept: the legacy static token still works', () => {
-    it('the legacy bearer authorises a read', async () => {
+  describe('Phase 5 retirement: the legacy static token no longer authenticates', () => {
+    it('the OLD static token alone → 401 on a read (dual-accept is GONE)', async () => {
+      // The headline retirement proof: a bearer that was the legacy REVIEW_API_TOKEN is now
+      // just a non-JWT string and is rejected like any other garbage bearer.
       expect(
         (await fetch(`${base}/api/candidates`, { headers: bearer(LEGACY_TOKEN) })).status,
-      ).toBe(200);
+      ).toBe(401);
     });
 
-    it('the legacy bearer authorises a write, recording the BODY approver (no synthetic actor)', async () => {
+    it('the OLD static token alone → 401 on a write (no legacy write path)', async () => {
       const deal = await seedCandidate();
       const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {
         method: 'POST',
         headers: bearer(LEGACY_TOKEN),
-        body: JSON.stringify({ approver: 'human@dealroute.de' }),
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(401);
+      // Nothing was recorded — the write never reached the use-case.
+      expect((await db.reviews.listForDeal(deal.id, 10)).length).toBe(0);
+    });
+  });
+
+  describe('body approver is ignored (no body field is trusted)', () => {
+    it('a forged body `approver` on a JWT write is ignored — the TOKEN email is recorded', async () => {
+      const deal = await seedCandidate();
+      const token = await accessTokenFor('rita@dealroute.de');
+      const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {
+        method: 'POST',
+        headers: bearer(token),
+        // A stale/malicious client may still send `approver` — zod strips it; it is never used.
+        body: JSON.stringify({ approver: 'attacker@evil.com' }),
       });
       expect(res.status).toBe(200);
       const reviews = await db.reviews.listForDeal(deal.id, 10);
-      // The legacy path uses the BODY approver — and never a synthetic 'legacy-token@system'.
-      expect(reviews[0]!.approver).toBe('human@dealroute.de');
-      expect(reviews.some((r) => r.approver.includes('legacy-token@system'))).toBe(false);
+      expect(reviews[0]!.approver).toBe('rita@dealroute.de');
+      expect(reviews.some((r) => r.approver === 'attacker@evil.com')).toBe(false);
     });
   });
 

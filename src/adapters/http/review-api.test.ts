@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { AddressInfo } from 'node:net';
 import { ReviewApi } from './review-api.js';
 import {
@@ -8,20 +8,102 @@ import {
   AlertsUseCase,
   MetricsUseCase,
   SettingsUseCase,
+  AuthenticateUseCase,
+  AuthorizationUseCase,
+  ProvisionUserUseCase,
+  ManageRolesUseCase,
 } from '../../application/index.js';
 import { loadConfig } from '../../config/index.js';
-import { DealStatus, type DealRecord } from '../../domain/index.js';
+import { DealStatus, SYSTEM_ROLE_ADMIN_ID, type DealRecord } from '../../domain/index.js';
 import { makeSource } from '../../../test/factories/source.js';
 import { InMemoryDb } from '../db/in-memory/in-memory-db.js';
 import { LocalFsEvidenceStore } from '../evidence-store/local-fs-evidence-store.js';
 import { ConsoleLogger } from '../logger/console-logger.js';
+import type { Clock } from '../../application/ports/index.js';
 import { SystemClock } from '../../application/ports/index.js';
+import { JoseTokenIssuer } from '../security/jose-token-issuer.js';
+import { FakePasswordHasher, FakeLogger } from '../../../test/fakes/fakes.js';
+import {
+  makeTestTokenIssuerFactory,
+  seedActiveUser,
+  TEST_AUTH_TTLS,
+  TEST_LOCKOUT,
+  TEST_REALM,
+} from '../../../test/fakes/auth-test-support.js';
 import { makeLlmDeal, makeDealRecord } from '../../../test/factories/deal.js';
 import { tldtsSuffixOracle } from '../suffix/tldts-suffix-oracle.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+
+/**
+ * Auth/IAM Phase 5: per-user JWT is the ONLY way into `/api/*`. This shared helper wires a
+ * real (deterministic) ES256 `JoseTokenIssuer` + the auth use-cases into a `ReviewApi`, seeds
+ * one ADMIN user (all permissions), mints its access token, and returns a `fetch`-replacing
+ * installer so the existing route/DTO/validation tests below — which predate auth — can run
+ * against the authenticated surface WITHOUT editing every call site. `installAuthedFetch`
+ * patches `globalThis.fetch` to attach `Authorization: Bearer <adminToken>` to same-`base`
+ * requests that don't already set one; `restore()` puts the real `fetch` back.
+ */
+async function buildAuthForTests(
+  db: InMemoryDb,
+  clock: Clock,
+  makeIssuer: (c: Clock) => JoseTokenIssuer,
+): Promise<{
+  auth: NonNullable<ConstructorParameters<typeof ReviewApi>[8]['auth']>;
+  adminToken: string;
+}> {
+  const issuer = makeIssuer(clock);
+  const hasher = new FakePasswordHasher();
+  const authorization = new AuthorizationUseCase(db);
+  const passwordPolicy = loadConfig({}).auth.passwordPolicy;
+  await seedActiveUser(db, hasher, {
+    id: '44444444-4444-4444-8444-444444444444',
+    email: 'admin@dealroute.de',
+    password: 'pw',
+    roleId: SYSTEM_ROLE_ADMIN_ID,
+  });
+  const login = new AuthenticateUseCase(
+    db,
+    hasher,
+    issuer,
+    authorization,
+    clock,
+    new FakeLogger(),
+    TEST_AUTH_TTLS,
+    TEST_LOCKOUT,
+    TEST_REALM,
+  );
+  const session = await login.authenticate({ email: 'admin@dealroute.de', password: 'pw' });
+  return {
+    auth: {
+      tokenIssuer: issuer,
+      db,
+      authorization,
+      provisionUser: new ProvisionUserUseCase(db, hasher, clock, new FakeLogger(), passwordPolicy),
+      manageRoles: new ManageRolesUseCase(db, hasher, clock, new FakeLogger(), passwordPolicy),
+    },
+    adminToken: session.accessToken,
+  };
+}
+
+/** Patch `globalThis.fetch` to auto-attach the admin bearer to `base` requests. */
+function installAuthedFetch(base: string, adminToken: string): () => void {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.startsWith(base)) {
+      const headers = new Headers(init?.headers);
+      if (!headers.has('authorization')) headers.set('authorization', `Bearer ${adminToken}`);
+      return realFetch(input, { ...init, headers });
+    }
+    return realFetch(input, init);
+  }) as typeof fetch;
+  return () => {
+    globalThis.fetch = realFetch;
+  };
+}
 
 /** Drives the real HTTP server over a real socket end-to-end. */
 describe('ReviewApi (HTTP integration)', () => {
@@ -31,6 +113,15 @@ describe('ReviewApi (HTTP integration)', () => {
   // One store per test, shared by seedCandidate + the ReviewApi (so the gated
   // /api/evidence endpoint reads back the same bundle seedCandidate wrote).
   let evidenceStore: LocalFsEvidenceStore;
+  // Auth/IAM Phase 5: per-user JWT is the only path in. These route/DTO/validation tests
+  // predate auth, so we wire a real issuer + seeded admin and auto-attach the admin bearer
+  // to every request (`installAuthedFetch`); `restoreFetch` undoes the patch per test.
+  let makeIssuer: (c: Clock) => JoseTokenIssuer;
+  let restoreFetch: () => void;
+
+  beforeAll(async () => {
+    makeIssuer = await makeTestTokenIssuerFactory();
+  });
 
   async function seedCandidate(overrides: Partial<DealRecord> = {}): Promise<DealRecord> {
     const ev = await evidenceStore.save({
@@ -72,6 +163,7 @@ describe('ReviewApi (HTTP integration)', () => {
       new SystemClock(),
       new ConsoleLogger('error'),
     );
+    const { auth, adminToken } = await buildAuthForTests(db, new SystemClock(), makeIssuer);
     api = new ReviewApi(
       review,
       sourceReview,
@@ -83,15 +175,18 @@ describe('ReviewApi (HTTP integration)', () => {
       new ConsoleLogger('error'),
       {
         staticPageHtml: '<html>page</html>',
+        auth,
       },
     );
     await api.listen(0);
     // @ts-expect-error reach into the underlying server for the assigned port
     const port = (api['server'].address() as AddressInfo).port;
     base = `http://localhost:${port}`;
+    restoreFetch = installAuthedFetch(base, adminToken);
   });
 
   afterEach(async () => {
+    restoreFetch();
     await api.close();
   });
 
@@ -376,15 +471,21 @@ describe('ReviewApi (HTTP integration)', () => {
     expect((await db.deals.getById(deal.id))!.affiliate_disclosure).toBe(false);
   });
 
-  it('POST approve without an approver is a 400 (no anonymous publish)', async () => {
+  it('POST approve needs no body approver — the actor comes from the token (Phase 5)', async () => {
+    // Pre-Phase-5 an empty `approver` was a 400; now the actor is the verified token email,
+    // so an empty body publishes (the "no anonymous publish" guard is the token requirement
+    // itself — a tokenless approve 401s, covered in the per-user-JWT guard suite).
     const deal = await seedCandidate();
     const res = await fetch(`${base}/api/candidates/${deal.id}/approve`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({}),
     });
-    expect(res.status).toBe(400);
-    expect((await db.deals.getById(deal.id))!.status).toBe('candidate');
+    expect(res.status).toBe(200);
+    expect((await db.deals.getById(deal.id))!.status).toBe('published');
+    // The approver recorded is the seeded admin (the token email), never a body value.
+    const reviews = await db.reviews.listForDeal(deal.id, 10);
+    expect(reviews[0]!.approver).toBe('admin@dealroute.de');
   });
 
   it('POST reject archives the deal', async () => {
@@ -516,27 +617,28 @@ describe('ReviewApi (HTTP integration)', () => {
     const alice = list.members.find((m) => m.email === 'alice@dealroute.de')!;
     expect(alice.review_count).toBe(1);
 
-    // PATCH profile name
+    // PATCH profile name — SELF-only: it edits the TOKEN user's own row (the seeded admin
+    // the wrapper authenticates as), never a body-supplied email (Phase 5: no body approver).
     const patched = await fetch(`${base}/api/profile`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ approver: 'alice@dealroute.de', name: 'Alice M.' }),
+      body: JSON.stringify({ name: 'Admin M.' }),
     });
     expect(patched.status).toBe(200);
     expect(
       (await patched.json()) as { updated: boolean; name: string; password_changed: boolean },
     ).toEqual({
       updated: true,
-      name: 'Alice M.',
+      name: 'Admin M.',
       password_changed: false,
     });
-    expect((await db.team.getByEmail('alice@dealroute.de'))!.name).toBe('Alice M.');
+    expect((await db.team.getByEmail('admin@dealroute.de'))!.name).toBe('Admin M.');
 
     // a bad role → 400
     const bad = await fetch(`${base}/api/team`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ approver: 'admin', name: 'X', email: 'x@dealroute.de', role: 'root' }),
+      body: JSON.stringify({ name: 'X', email: 'x@dealroute.de', role: 'root' }),
     });
     expect(bad.status).toBe(400);
   });
@@ -911,12 +1013,18 @@ describe('ReviewApi (HTTP integration)', () => {
   });
 });
 
-describe('ReviewApi — auth (bearer token gating state changes)', () => {
+describe('ReviewApi — auth (per-user JWT gating state changes)', () => {
   let db: InMemoryDb;
   let api: ReviewApi;
   let base: string;
   let dealId: string;
   let evidenceId: string;
+  let makeIssuer: (c: Clock) => JoseTokenIssuer;
+  let token: string; // a real admin access token (replaces the retired static 'secret-token')
+
+  beforeAll(async () => {
+    makeIssuer = await makeTestTokenIssuerFactory();
+  });
 
   beforeEach(async () => {
     db = new InMemoryDb();
@@ -951,6 +1059,12 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
       new SystemClock(),
       new ConsoleLogger('error'),
     );
+    const { auth: authWiring, adminToken } = await buildAuthForTests(
+      db,
+      new SystemClock(),
+      makeIssuer,
+    );
+    token = adminToken;
     api = new ReviewApi(
       review,
       sourceReview,
@@ -961,7 +1075,7 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
       evidenceStore,
       new ConsoleLogger('error'),
       {
-        authToken: 'secret-token',
+        auth: authWiring,
       },
     );
     await api.listen(0);
@@ -977,38 +1091,42 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     const res = await fetch(`${base}/api/candidates/${dealId}/approve`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ approver: 'reviewer' }),
+      body: JSON.stringify({}),
     });
     expect(res.status).toBe(401);
     expect((await db.deals.getById(dealId))!.status).toBe('candidate');
   });
 
-  it('accepts approve with the correct bearer token', async () => {
+  it('accepts approve with a valid per-user token', async () => {
     const res = await fetch(`${base}/api/candidates/${dealId}/approve`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: 'Bearer secret-token' },
-      body: JSON.stringify({ approver: 'reviewer' }),
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({}),
     });
     expect(res.status).toBe(200);
     expect((await db.deals.getById(dealId))!.status).toBe('published');
   });
 
-  it('now requires a token on read endpoints too (Phase-2 change), but health stays open', async () => {
-    // Reads were open before; they now require a valid token.
+  it('the OLD static token alone → 401 (dual-accept is GONE), but health stays open', async () => {
+    // A read with no token → 401; a read with the RETIRED static token → 401 (no longer
+    // accepted); a read with a valid per-user token → 200; the liveness probe stays open.
     expect((await fetch(`${base}/api/candidates`)).status).toBe(401);
     expect(
       (await fetch(`${base}/api/candidates`, { headers: { authorization: 'Bearer secret-token' } }))
         .status,
+    ).toBe(401);
+    expect(
+      (await fetch(`${base}/api/candidates`, { headers: { authorization: `Bearer ${token}` } }))
+        .status,
     ).toBe(200);
-    // The liveness probe stays unauthenticated.
     expect((await fetch(`${base}/api/health`)).status).toBe(200);
   });
 
-  it('gates the new write endpoints (PATCH edit / promote / complete) with the bearer token (401)', async () => {
+  it('gates the new write endpoints (PATCH edit / promote / complete) without a token (401)', async () => {
     const patch = await fetch(`${base}/api/candidates/${dealId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ approver: 'alice', patch: { headline: 'x' } }),
+      body: JSON.stringify({ patch: { headline: 'x' } }),
     });
     expect(patch.status).toBe(401);
     expect((await db.deals.getById(dealId))!.headline).not.toBe('x');
@@ -1016,23 +1134,23 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     const promote = await fetch(`${base}/api/field-proposals/k/promote`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ approver: 'a', canonical_key: 'x', label: 'x', target: 'vocabulary' }),
+      body: JSON.stringify({ canonical_key: 'x', label: 'x', target: 'vocabulary' }),
     });
     expect(promote.status).toBe(401);
 
     const complete = await fetch(`${base}/api/manual-capture-tasks/${randomUUID()}/complete`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ approver: 'a', fields: {}, evidence: {} }),
+      body: JSON.stringify({ fields: {}, evidence: {} }),
     });
     expect(complete.status).toBe(401);
   });
 
   // ── GET /api/evidence/:id/:artifact (gated reviewer evidence-fetch) ────────
-  const auth = { authorization: 'Bearer secret-token' };
+  const auth = (): Record<string, string> => ({ authorization: `Bearer ${token}` });
 
   it('streams the screenshot bytes with image/png + private no-store (with token)', async () => {
-    const res = await fetch(`${base}/api/evidence/${evidenceId}/screenshot`, { headers: auth });
+    const res = await fetch(`${base}/api/evidence/${evidenceId}/screenshot`, { headers: auth() });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('image/png');
     expect(res.headers.get('cache-control')).toBe('private, no-store');
@@ -1041,14 +1159,14 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
   });
 
   it('streams the archived HTML with text/html (with token)', async () => {
-    const res = await fetch(`${base}/api/evidence/${evidenceId}/html`, { headers: auth });
+    const res = await fetch(`${base}/api/evidence/${evidenceId}/html`, { headers: auth() });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
     expect(await res.text()).toBe('<html>archived</html>');
   });
 
   it('streams the terms text with text/plain (with token)', async () => {
-    const res = await fetch(`${base}/api/evidence/${evidenceId}/terms`, { headers: auth });
+    const res = await fetch(`${base}/api/evidence/${evidenceId}/terms`, { headers: auth() });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
     expect(await res.text()).toBe('verbatim terms');
@@ -1060,7 +1178,7 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
   });
 
   it('404s a known-shaped but absent evidence id', async () => {
-    const res = await fetch(`${base}/api/evidence/${randomUUID()}/screenshot`, { headers: auth });
+    const res = await fetch(`${base}/api/evidence/${randomUUID()}/screenshot`, { headers: auth() });
     expect(res.status).toBe(404);
   });
 
@@ -1068,13 +1186,13 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     // `evidence.json`/metadata is deliberately NOT exposed; an arbitrary kind falls
     // through to the catch-all 404 and never reaches the store as a path.
     for (const kind of ['evidence.json', 'meta', 'terms.txt', '..']) {
-      const res = await fetch(`${base}/api/evidence/${evidenceId}/${kind}`, { headers: auth });
+      const res = await fetch(`${base}/api/evidence/${evidenceId}/${kind}`, { headers: auth() });
       expect(res.status).toBe(404);
     }
   });
 
   it('404s a non-UUID evidence id (UUID-segment guard)', async () => {
-    const res = await fetch(`${base}/api/evidence/not-a-uuid/screenshot`, { headers: auth });
+    const res = await fetch(`${base}/api/evidence/not-a-uuid/screenshot`, { headers: auth() });
     expect(res.status).toBe(404);
   });
 
@@ -1144,13 +1262,13 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     expect(setting.status).toBe(401);
     expect(await db.settings.get('affiliate_disclosure')).toBeNull(); // no override written
 
-    // Reads now require a valid token too (Phase-2 change — they were open before): an
-    // unauthenticated GET /api/* is 401, but WITH the (legacy) bearer it serves 200.
+    // Reads require a valid per-user token (they were open before Phase 2): an
+    // unauthenticated GET /api/* is 401, but WITH a valid per-user bearer it serves 200.
     expect((await fetch(`${base}/api/sources`)).status).toBe(401);
     expect((await fetch(`${base}/api/team`)).status).toBe(401);
     expect((await fetch(`${base}/api/alerts`)).status).toBe(401);
     expect((await fetch(`${base}/api/settings`)).status).toBe(401);
-    const tok = { authorization: 'Bearer secret-token' };
+    const tok = { authorization: `Bearer ${token}` };
     expect((await fetch(`${base}/api/sources`, { headers: tok })).status).toBe(200);
     expect((await fetch(`${base}/api/team`, { headers: tok })).status).toBe(200);
     expect((await fetch(`${base}/api/alerts`, { headers: tok })).status).toBe(200);
@@ -1161,11 +1279,17 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
 describe('ReviewApi — CORS for the browser admin panel', () => {
   const ORIGIN = 'https://admin.dealroute.example';
   let db: InMemoryDb;
+  let makeIssuer: (c: Clock) => JoseTokenIssuer;
 
-  /** Spin up an API with the given options and return its base URL. */
-  async function start(options: ConstructorParameters<typeof ReviewApi>[8]): Promise<{
+  /**
+   * Spin up an API with the given CORS option and return its base URL + a valid per-user
+   * admin token (Phase 5: every `/api/*` request needs one). Auth is ALWAYS wired — the
+   * CORS behaviour under test is independent of whether the request is authenticated.
+   */
+  async function start(opts: { corsAllowOrigin?: string }): Promise<{
     api: ReviewApi;
     base: string;
+    token: string;
   }> {
     const review = new ReviewUseCase(
       db,
@@ -1183,6 +1307,7 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
       new SystemClock(),
       new ConsoleLogger('error'),
     );
+    const { auth, adminToken } = await buildAuthForTests(db, new SystemClock(), makeIssuer);
     const api = new ReviewApi(
       review,
       sourceReview,
@@ -1192,20 +1317,24 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
       settings,
       new LocalFsEvidenceStore(mkdtempSync(join(tmpdir(), 'ev-'))),
       new ConsoleLogger('error'),
-      options,
+      { corsAllowOrigin: opts.corsAllowOrigin, auth },
     );
     await api.listen(0);
     // @ts-expect-error reach into the underlying server for the assigned port
     const base = `http://localhost:${(api['server'].address() as AddressInfo).port}`;
-    return { api, base };
+    return { api, base, token: adminToken };
   }
+
+  beforeAll(async () => {
+    makeIssuer = await makeTestTokenIssuerFactory();
+  });
 
   beforeEach(() => {
     db = new InMemoryDb();
   });
 
   it('answers an OPTIONS preflight 204 with the configured origin + Authorization allowed', async () => {
-    const { api, base } = await start({ corsAllowOrigin: ORIGIN, authToken: 'secret-token' });
+    const { api, base } = await start({ corsAllowOrigin: ORIGIN });
     try {
       const res = await fetch(`${base}/api/candidates/${randomUUID()}/approve`, {
         method: 'OPTIONS',
@@ -1224,7 +1353,7 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
 
   it('does NOT require a bearer on the preflight (OPTIONS carries no Authorization)', async () => {
     // A browser preflight is unauthenticated by spec; gating it would break CORS.
-    const { api, base } = await start({ corsAllowOrigin: ORIGIN, authToken: 'secret-token' });
+    const { api, base } = await start({ corsAllowOrigin: ORIGIN });
     try {
       const res = await fetch(`${base}/api/candidates/${randomUUID()}/approve`, {
         method: 'OPTIONS',
@@ -1237,9 +1366,11 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
   });
 
   it('echoes the CORS origin on a normal GET response', async () => {
-    const { api, base } = await start({ corsAllowOrigin: ORIGIN });
+    const { api, base, token } = await start({ corsAllowOrigin: ORIGIN });
     try {
-      const res = await fetch(`${base}/api/candidates`, { headers: { origin: ORIGIN } });
+      const res = await fetch(`${base}/api/candidates`, {
+        headers: { origin: ORIGIN, authorization: `Bearer ${token}` },
+      });
       expect(res.status).toBe(200);
       expect(res.headers.get('access-control-allow-origin')).toBe(ORIGIN);
     } finally {
@@ -1250,12 +1381,12 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
   it('includes the CORS origin even on an error response (401), so the browser can read it', async () => {
     // Without CORS headers on the 401 the browser surfaces an opaque network error
     // instead of the real status — the panel could never show "unauthorized".
-    const { api, base } = await start({ corsAllowOrigin: ORIGIN, authToken: 'secret-token' });
+    const { api, base } = await start({ corsAllowOrigin: ORIGIN });
     try {
       const res = await fetch(`${base}/api/candidates/${randomUUID()}/approve`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', origin: ORIGIN },
-        body: JSON.stringify({ approver: 'a' }),
+        body: JSON.stringify({}), // no token → 401
       });
       expect(res.status).toBe(401);
       expect(res.headers.get('access-control-allow-origin')).toBe(ORIGIN);
@@ -1265,9 +1396,11 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
   });
 
   it('emits NO CORS headers when no origin is configured (same-origin default)', async () => {
-    const { api, base } = await start({});
+    const { api, base, token } = await start({});
     try {
-      const res = await fetch(`${base}/api/candidates`, { headers: { origin: ORIGIN } });
+      const res = await fetch(`${base}/api/candidates`, {
+        headers: { origin: ORIGIN, authorization: `Bearer ${token}` },
+      });
       expect(res.status).toBe(200);
       expect(res.headers.get('access-control-allow-origin')).toBeNull();
     } finally {

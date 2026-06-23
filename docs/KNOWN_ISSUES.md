@@ -651,15 +651,6 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Fix-when**: when `/api/team` is retired (Phase 5) — drop the projection and the `TeamMember.role`→reviewer fallback; until then it is the correct compatibility shim.
 - **Logged**: 2026-06-23 (Auth/IAM Phase 1)
 
-### Auth dual-accept window: the legacy static `REVIEW_API_TOKEN` is still accepted on `/api/*` (must be time-boxed; remove in Phase 5)
-- **Severity**: medium (a deliberately-temporary widening of the trust boundary)
-- **Area**: api / auth (Phase 2)
-- **Location**: `src/adapters/http/review-api.ts` (`authenticate()` legacy branch → `{ kind:'legacy' }`); wired via `serve.ts` (`auth.tokenIssuer` + `config.reviewApi.authToken`).
-- **What**: to let the panel cut over without a flag-day, the per-request guard accepts the **legacy static bearer** alongside per-user JWTs. A legacy caller is given NO identity and NO per-user permissions — it deliberately does **not** synthesize a `legacy-token@system` actor, so it cannot pollute the email-keyed `reviews.approver` audit trail (a legacy write still records the BODY `approver`, the pre-Phase-2 behaviour; the registry per-permission check is skipped for it, as the static token was always all-or-nothing). It is still a single shared all-powerful credential whose leak = full write access until retired.
-- **Why deferred**: the window is required so the panel (separate repo) can migrate to `/auth/login` + per-user tokens without a lockstep deploy. It is bounded: the plan retires `REVIEW_API_TOKEN` + this branch in **Phase 5**, after the panel cutover (Phase 4).
-- **Fix-when**: Phase 5 — delete the legacy branch in `authenticate()`, drop `REVIEW_API_TOKEN` from config + `serve.ts`, and remove the accept-but-ignore body `approver` (make it a required token-derived field). Keep `adminCorsAllowOrigin`.
-- **Logged**: 2026-06-23 (Auth/IAM Phase 2)
-
 ### Login lockout (429) remains account-specific, while unknown-email is 401 — a residual enumeration signal
 - **Severity**: medium (anti-enumeration; partially mitigated)
 - **Area**: auth (Phase 2)
@@ -690,6 +681,22 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 ---
 
 ## Resolved
+
+### Auth dual-accept window + "reads now require auth" — RESOLVED 2026-06-23 (Auth/IAM Phase 5)
+- **Was**: medium (a deliberately-temporary widening of the trust boundary), api / auth (Phase 2). To
+  let the panel cut over without a flag-day, the per-request guard accepted the **legacy static
+  `REVIEW_API_TOKEN`** alongside per-user JWTs (a `{ kind:'legacy' }` identity that recorded the BODY
+  `approver`); reads were also newly gated. Both were time-boxed to Phase 5.
+- **Resolution**: Phase 5 retired the legacy path entirely. `ReviewApi.authenticate()` is now JWT-only
+  (the `legacy` `Identity` variant + the static-token branch + the open trusted-network mode are
+  deleted); `REVIEW_API_TOKEN`/`reviewApi.authToken` are dropped from config + `serve.ts`; an unset
+  `AUTH_JWT_PRIVATE_KEY` is a HARD startup fail (no fallback). Body `approver` is no longer read — every
+  write body's `approver` zod field is removed and the actor is the verified token email. Every `/api/*`
+  request (reads + writes) requires a valid per-user token; `/v1/*` stays open. A request bearing ONLY
+  the old static token → 401 (proven by `review-api-auth.test.ts` + `auth-flow.integration.test.ts`); a
+  forged body `approver` is recorded as the token email (proven by the same suites). OpenAPI + Postman
+  regenerated to the per-user-JWT-only model. **Deploy order: the panel (which stopped sending the
+  static token in Phase 4) ships BEFORE this pipeline removal.**
 
 ### Public landing page GDPR/affiliate-disclosure fields — RESOLVED 2026-06-23
 - **Was**: high (legal/compliance launch gate), api / schema / legal. P3 shipped the public `/v1/`

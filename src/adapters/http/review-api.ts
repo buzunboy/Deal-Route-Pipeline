@@ -7,7 +7,6 @@ import {
   sendJson,
   sendError,
   sendBytes,
-  safeEqual,
   parseIntParam,
   errMessage,
 } from './http-helpers.js';
@@ -66,19 +65,20 @@ import {
 } from '../../domain/index.js';
 
 /**
- * The verified identity behind a gated `/api/*` request (Auth/IAM, Phase 2). Two shapes
- * during the dual-accept window:
- * - `kind:'jwt'` — a per-user ES256 token: identity + perms come from the VERIFIED claims.
- *   `email` becomes the `approver` on every audited decision (the body field is ignored).
- * - `kind:'legacy'` — the soon-to-be-retired static `REVIEW_API_TOKEN`. It carries NO
- *   identity, so it is deliberately given NO `email` and NO perms — it must NEVER synthesize
- *   a `legacy-token@system` actor onto the email-keyed reviews audit trail. A legacy caller
- *   still supplies the `approver` in the BODY (the pre-Phase-2 behaviour); the registry
- *   permission check is skipped for it (the static token was always all-or-nothing).
+ * The verified identity behind a gated `/api/*` request (Auth/IAM). Since Phase 5 there is
+ * ONE shape: a per-user ES256 token. Identity + permissions come from the VERIFIED claims —
+ * `email` becomes the `approver` on every audited decision and a body `approver` is ignored
+ * entirely (the headline trust fix). The legacy static-token "dual-accept" identity was
+ * RETIRED in Phase 5: there is no un-credentialed/static path and no synthetic actor can
+ * ever land on the email-keyed reviews audit trail.
  */
-export type Identity =
-  | { kind: 'jwt'; userId: string; email: string; role: string; perms: Set<Permission> }
-  | { kind: 'legacy' };
+export type Identity = {
+  kind: 'jwt';
+  userId: string;
+  email: string;
+  role: string;
+  perms: Set<Permission>;
+};
 
 /**
  * UUID path-segment matcher for `:id` routes whose id maps to a Postgres `uuid` column
@@ -94,15 +94,6 @@ const UUID_SEG = UUID_PATTERN;
 export interface ReviewApiOptions {
   staticPageHtml?: string;
   /**
-   * The LEGACY static bearer token (`REVIEW_API_TOKEN`). During the Phase-2 dual-accept
-   * window it is accepted ALONGSIDE per-user JWTs (see {@link ReviewApi.authenticate}):
-   * a request whose bearer equals this token authenticates as a `kind:'legacy'` identity
-   * (no per-user perms; `approver` still comes from the body). It is RETIRED in Phase 5.
-   * When BOTH this and the JWT signing key are unset, the surface is open (trusted-network
-   * mode) — `serve.ts` warns at startup. Reads now also require a valid token (JWT or this).
-   */
-  authToken?: string;
-  /**
    * `Access-Control-Allow-Origin` for the browser admin panel that consumes this
    * API cross-origin. UNSET ⇒ no CORS headers are emitted (same-origin / server-to-
    * server callers only) — the safe default. When set it is echoed verbatim and the
@@ -112,11 +103,12 @@ export interface ReviewApiOptions {
    */
   corsAllowOrigin?: string;
   /**
-   * Auth/IAM (Phase 2) wiring for the per-user JWT guard. When present, a request may
-   * authenticate with a per-user ES256 bearer (verified by `tokenIssuer`, the user reloaded
-   * via `db`, perms resolved via `authorization`); the legacy {@link authToken} stays
-   * accepted alongside it (dual-accept). When ABSENT, only the legacy token / open mode
-   * applies (so existing constructions without auth keep working unchanged).
+   * Auth/IAM per-user JWT wiring — the ONLY authentication path since Phase 5. A request
+   * authenticates with a per-user ES256 bearer (verified by `tokenIssuer`, the user reloaded
+   * via `db`, perms resolved via `authorization`); identity + permissions come from the
+   * verified claims. `serve.ts` HARD-FAILS at startup when no signing key is configured, so
+   * in production this is ALWAYS wired. When ABSENT (a unit-test construction that doesn't
+   * exercise auth), EVERY `/api/*` request 401s — there is no static-token or open fallback.
    */
   auth?: {
     tokenIssuer: TokenIssuer;
@@ -135,51 +127,54 @@ export interface ReviewApiOptions {
  *
  * Built on Node's `http` (no framework dependency) to stay light and swappable.
  * Read endpoints are GET; state changes are POST with a JSON body. Nothing here
- * publishes automatically — `approve` requires an approver identity.
+ * publishes automatically — `approve` requires an authenticated reviewer.
+ *
+ * Auth/IAM Phase 5: EVERY `/api/*` request (reads + writes) requires a per-user ES256
+ * bearer (only `GET /api/health` is open). The `approver`/`actor` recorded on an audited
+ * action is ALWAYS the verified token email — request bodies carry NO `approver` field.
  *
  *   GET   /api/health
  *   GET   /api/candidates/counts          → CandidateCounts  (queue view-cards, ACR-5)
  *   GET   /api/candidates/freshness       → [FreshnessBand]  (queue age-buckets, ACR-9)
  *   GET   /api/candidates                 → [{ deal, evidence }]
  *           ?status=&service=&confidence_max=&limit=&offset=  (filters + pagination)
- *   PATCH /api/candidates/:id             { approver, patch }     → { deal }  (reviewer edit)
- *   POST  /api/candidates/:id/approve     { approver, affiliate_disclosure? } → { deal }
- *   POST  /api/candidates/:id/reject      { approver, reason? }   → { deal }
+ *   PATCH /api/candidates/:id             { patch }     → { deal }  (reviewer edit)
+ *   POST  /api/candidates/:id/approve     { affiliate_disclosure? } → { deal }
+ *   POST  /api/candidates/:id/reject      { reason? }   → { deal }
  *   GET   /api/candidates/:id/reviews     → [ReviewRecord]   (audit history)
- *   GET   /api/evidence/:id/:artifact     → raw bytes   (Bearer-GATED; artifact ∈ screenshot|html|terms)
+ *   GET   /api/evidence/:id/:artifact     → raw bytes   (artifact ∈ screenshot|html|terms)
  *   GET   /api/field-proposals            → [FieldProposalRecord]
  *   GET   /api/audit                      → { entries: [AuditEntry] }   (ACR-7)
  *           ?actor=&entity_id=&since=&limit=
  *   GET   /api/published                  → { deals: [AdminPublishedDeal], total }  (ACR-10)
  *           ?limit=&offset=
  *   POST  /api/field-proposals/:key/promote
- *           { approver, canonical_key, label, target } → { vocabulary_entry }
+ *           { canonical_key, label, target } → { vocabulary_entry }
  *   GET   /api/manual-capture-tasks       → [ManualCaptureTask]
- *   POST  /api/manual-capture-tasks       { approver, fields, evidence } → { created, candidate_id }  (ad-hoc, ACR-12)
+ *   POST  /api/manual-capture-tasks       { fields, evidence } → { created, candidate_id }  (ad-hoc, ACR-12)
  *   POST  /api/manual-capture-tasks/:id/complete
- *           { approver, fields, evidence } → { deal }  (creates a candidate; never publishes)
+ *           { fields, evidence } → { deal }  (creates a candidate; never publishes)
  *   GET   /api/sources                    → { sources: [SourceRegistryEntry] }   (registry, ACR-10)
- *   POST  /api/sources                    { approver, domain, kind, tier } → { id, created }  (ACR-10)
+ *   POST  /api/sources                    { domain, kind, tier } → { id, created }  (ACR-10)
  *   GET   /api/sources/pending            → [Source]   (proposed sources)
- *   POST  /api/sources/:id/approve        { approver }            → { source }
- *   POST  /api/sources/:id/reject         { approver, reason? }   → { source }
+ *   POST  /api/sources/:id/approve        { }            → { source }
+ *   POST  /api/sources/:id/reject         { reason? }   → { source }
  *   GET   /api/sources/:id/reviews        → [SourceReviewRecord]  (audit history)
  *   GET   /api/team                       → { members: [TeamMemberView] }   (ACR-10)
- *   POST  /api/team                       { approver, name, email, role? } → { id, invited, email }  (ACR-10)
- *   PATCH /api/profile                    { approver, name } → { updated, name }   (ACR-11)
+ *   POST  /api/team                       { name, email, role? } → { id, invited, email }  (ACR-10)
+ *   PATCH /api/profile                    { name } → { updated, name }   (ACR-11)
  *   GET   /api/alerts                     → { alerts: [AlertView], open_count }   (ACR-8)
- *   POST  /api/alerts/:id/acknowledge     { approver } → { acknowledged }   (ACR-8)
- *   POST  /api/alerts/:id/resolve         { approver } → { resolved }   (ACR-8)
+ *   POST  /api/alerts/:id/acknowledge     { } → { acknowledged }   (ACR-8)
+ *   POST  /api/alerts/:id/resolve         { } → { resolved }   (ACR-8)
  *   GET   /api/metrics/throughput         → ThroughputSummary   (today's reviewer throughput, ACR-6)
  *           ?period=today
  *   GET   /api/metrics                    → DashboardMetrics    (KPIs/cost/confidence, ACR-10)
  *   GET   /api/settings                   → SettingsView   (grouped knobs, ACR-10 Settings)
- *   PATCH /api/settings/:key              { approver, value } → { key, updated }  (writable only; 409 otherwise)
+ *   PATCH /api/settings/:key              { value } → { key, updated }  (writable only; 409 otherwise)
  */
 export class ReviewApi {
   private server: Server | null = null;
   private readonly staticPageHtml?: string;
-  private readonly authToken?: string;
   private readonly corsAllowOrigin?: string;
   private readonly auth?: ReviewApiOptions['auth'];
 
@@ -195,7 +190,6 @@ export class ReviewApi {
     options: ReviewApiOptions = {},
   ) {
     this.staticPageHtml = options.staticPageHtml;
-    this.authToken = options.authToken;
     this.corsAllowOrigin = options.corsAllowOrigin;
     this.auth = options.auth;
   }
@@ -328,11 +322,10 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = PromoteBody.safeParse(body);
-      if (!parsed.success)
-        return sendError(res, 400, 'approver, canonical_key and label are required');
+      if (!parsed.success) return sendError(res, 400, 'canonical_key and label are required');
       return this.mapErrors(res, async () => {
         const entry = await this.review.promoteFieldProposal({
-          approver: this.approverFor(identity, parsed.data.approver),
+          approver: this.approverFor(identity),
           suggestedKey: decodeURIComponent(promote[1]!),
           canonicalKey: parsed.data.canonical_key,
           label: parsed.data.label,
@@ -351,10 +344,10 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = CreateManualBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver, fields and evidence are required');
+      if (!parsed.success) return sendError(res, 400, 'fields and evidence are required');
       return this.mapErrors(res, async () => {
         const deal = await this.review.createManualCapture(
-          this.approverFor(identity, parsed.data.approver),
+          this.approverFor(identity),
           parsed.data.fields,
           {
             sourceUrl: parsed.data.evidence.source_url,
@@ -379,11 +372,11 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = CompleteManualBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver, fields and evidence are required');
+      if (!parsed.success) return sendError(res, 400, 'fields and evidence are required');
       return this.mapErrors(res, async () => {
         const deal = await this.review.completeManualCapture(
           decodeURIComponent(completeManual[1]!),
-          this.approverFor(identity, parsed.data.approver),
+          this.approverFor(identity),
           parsed.data.fields,
           {
             sourceUrl: parsed.data.evidence.source_url,
@@ -433,11 +426,11 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = EditCandidateBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver and patch are required');
+      if (!parsed.success) return sendError(res, 400, 'patch is required');
       return this.mapErrors(res, async () => {
         const deal = await this.review.editCandidate(
           decodeURIComponent(editCandidate[1]!),
-          this.approverFor(identity, parsed.data.approver),
+          this.approverFor(identity),
           parsed.data.patch,
         );
         sendJson(res, 200, { deal });
@@ -452,7 +445,7 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = ApproveCandidateBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver is required');
+      if (!parsed.success) return sendError(res, 400, 'invalid request body');
       return this.mapErrors(res, async () => {
         // The reviewer may set the EU-Omnibus affiliate disclosure at approve-time.
         // When OMITTED, fall back to the pipeline-owned default from settings (ACR-10;
@@ -463,7 +456,7 @@ export class ReviewApi {
           parsed.data.affiliate_disclosure ?? (await this.settings.defaultAffiliateDisclosure());
         const deal = await this.review.approve(
           decodeURIComponent(approve[1]!),
-          this.approverFor(identity, parsed.data.approver),
+          this.approverFor(identity),
           { affiliateDisclosure },
         );
         sendJson(res, 200, { deal });
@@ -478,11 +471,11 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = RejectBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver is required');
+      if (!parsed.success) return sendError(res, 400, 'invalid request body');
       return this.mapErrors(res, async () => {
         const deal = await this.review.reject(
           decodeURIComponent(reject[1]!),
-          this.approverFor(identity, parsed.data.approver),
+          this.approverFor(identity),
           parsed.data.reason,
         );
         sendJson(res, 200, { deal });
@@ -502,11 +495,10 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = CreateSourceBody.safeParse(body);
-      if (!parsed.success)
-        return sendError(res, 400, 'approver, domain, kind and tier are required');
+      if (!parsed.success) return sendError(res, 400, 'domain, kind and tier are required');
       return this.mapErrors(res, async () => {
         const { source, created } = await this.sourceReview.createSource({
-          approver: this.approverFor(identity, parsed.data.approver),
+          approver: this.approverFor(identity),
           domain: parsed.data.domain,
           kind: parsed.data.kind,
           tier: parsed.data.tier,
@@ -529,10 +521,10 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = InviteMemberBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver, name and email are required');
+      if (!parsed.success) return sendError(res, 400, 'name and email are required');
       return this.mapErrors(res, async () => {
         const member = await this.team.inviteMember({
-          approver: this.approverFor(identity, parsed.data.approver),
+          approver: this.approverFor(identity),
           name: parsed.data.name,
           email: parsed.data.email,
           role: parsed.data.role,
@@ -556,13 +548,10 @@ export class ReviewApi {
         return sendError(res, 400, 'name, or currentPassword + newPassword, is required');
       }
       const wantsPasswordChange = parsed.data.newPassword !== undefined;
-      // The self-service password change needs the IdP wired (the use-cases + hasher); a
-      // legacy/open caller (no `auth` bag) has no per-user identity to re-credential.
-      if (wantsPasswordChange && this.auth === undefined) {
-        return sendError(res, 400, 'password change requires per-user auth (no IdP configured)');
-      }
+      // `authenticate` already returned a verified JWT identity above (it returns null when
+      // `this.auth` is unset), so the IdP use-cases (`this.auth!`) are guaranteed present here.
       return this.mapErrors(res, async () => {
-        const actor = this.approverFor(identity, parsed.data.approver);
+        const actor = this.approverFor(identity);
         // Apply the password change FIRST so a wrong current-password (401) aborts the whole
         // patch BEFORE a name write lands — the verify is the authorization for the request.
         if (wantsPasswordChange) {
@@ -604,11 +593,11 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = UpdateSettingBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver and value are required');
+      if (!parsed.success) return sendError(res, 400, 'value is required');
       return this.mapErrors(res, async () => {
         const result = await this.settings.updateSetting(
           decodeURIComponent(updateSetting[1]!),
-          this.approverFor(identity, parsed.data.approver),
+          this.approverFor(identity),
           parsed.data.value,
         );
         sendJson(res, 200, result);
@@ -631,12 +620,9 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = ApproveBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver is required');
+      if (!parsed.success) return sendError(res, 400, 'invalid request body');
       return this.mapErrors(res, async () => {
-        await this.alerts.acknowledge(
-          decodeURIComponent(ackAlert[1]!),
-          this.approverFor(identity, parsed.data.approver),
-        );
+        await this.alerts.acknowledge(decodeURIComponent(ackAlert[1]!), this.approverFor(identity));
         sendJson(res, 200, { acknowledged: true });
       });
     }
@@ -648,12 +634,9 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = ApproveBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver is required');
+      if (!parsed.success) return sendError(res, 400, 'invalid request body');
       return this.mapErrors(res, async () => {
-        await this.alerts.resolve(
-          decodeURIComponent(resolveAlert[1]!),
-          this.approverFor(identity, parsed.data.approver),
-        );
+        await this.alerts.resolve(decodeURIComponent(resolveAlert[1]!), this.approverFor(identity));
         sendJson(res, 200, { resolved: true });
       });
     }
@@ -678,11 +661,11 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = ApproveBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver is required');
+      if (!parsed.success) return sendError(res, 400, 'invalid request body');
       return this.mapErrors(res, async () => {
         const source = await this.sourceReview.approveSource(
           decodeURIComponent(approveSource[1]!),
-          this.approverFor(identity, parsed.data.approver),
+          this.approverFor(identity),
         );
         sendJson(res, 200, { source });
       });
@@ -695,11 +678,11 @@ export class ReviewApi {
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = RejectBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver is required');
+      if (!parsed.success) return sendError(res, 400, 'invalid request body');
       return this.mapErrors(res, async () => {
         const source = await this.sourceReview.rejectSource(
           decodeURIComponent(rejectSource[1]!),
-          this.approverFor(identity, parsed.data.approver),
+          this.approverFor(identity),
           parsed.data.reason,
         );
         sendJson(res, 200, { source });
@@ -728,10 +711,12 @@ export class ReviewApi {
   }
 
   /**
-   * Authenticate a gated `/api/*` request (Auth/IAM, Phase 2). Returns the verified
-   * {@link Identity}, or `null` (the caller 401s — a UNIFORM `{ error: 'unauthorized' }`
-   * so a probe can't tell "no token" from "bad/expired/revoked token"). DUAL-ACCEPT: a
-   * per-user ES256 JWT is preferred; the legacy static token is accepted alongside it.
+   * Authenticate a gated `/api/*` request (Auth/IAM). Returns the verified {@link Identity},
+   * or `null` (the caller 401s — a UNIFORM `{ error: 'unauthorized' }` so a probe can't tell
+   * "no token" from "bad/expired/revoked token"). Since Phase 5 there is ONE path: a per-user
+   * ES256 JWT. The legacy static-token dual-accept + the open trusted-network mode are GONE —
+   * an unwired `auth` (a unit-test construction) means EVERY request 401s, and `serve.ts`
+   * hard-fails at startup without a signing key, so production always wires it.
    *
    * JWT path (the headline fix — identity is proven, never trusted from the body):
    *   1. `tokenIssuer.verifyAccess` PINS `algorithms:['ES256']` + checks iss/aud/exp/sig.
@@ -740,56 +725,42 @@ export class ReviewApi {
    *   3. `claims.token_version !== user.token_version` ⇒ null (IMMEDIATE revoke lever).
    *   4. On a `perm_version` mismatch, RE-RESOLVE perms from the DB (so a mid-token
    *      permission change is honoured before exp); else trust the token's `perms`.
-   *
-   * Open mode: when NEITHER a signing key (`this.auth`) NOR a legacy token is configured,
-   * the surface is open (trusted-network) — returns a `legacy` identity so handlers run.
    */
   private async authenticate(req: IncomingMessage): Promise<Identity | null> {
+    // No auth wired ⇒ no path to authenticate (unit-test construction only; production
+    // hard-fails at startup without a signing key). Deny — there is no open/static fallback.
+    if (this.auth === undefined) return null;
+
     const header = req.headers.authorization ?? '';
     const prefix = 'Bearer ';
     const bearer = header.startsWith(prefix) ? header.slice(prefix.length) : null;
+    if (bearer === null) return null;
 
-    // Legacy static token (constant-time) — accepted during the dual-accept window. It
-    // carries NO identity (no email/perms): it must never become a synthetic actor on the
-    // email-keyed reviews trail; a legacy caller's `approver` still comes from the body.
-    if (bearer !== null && this.authToken !== undefined && safeEqual(bearer, this.authToken)) {
-      return { kind: 'legacy' };
-    }
-
-    // Per-user JWT path (when auth is wired and the bearer isn't the legacy token).
-    if (bearer !== null && this.auth !== undefined) {
-      const claims = await this.auth.tokenIssuer.verifyAccess(bearer).catch(() => null);
-      if (claims === null) return null;
-      const user = await this.auth.db.users.getById(claims.sub);
-      if (user === null || user.status !== 'active') return null;
-      if (claims.token_version !== user.token_version) return null; // immediate revoke
-      const currentPermVersion = await this.auth.db.authMeta.getPermVersion();
-      const perms =
-        claims.perm_version === currentPermVersion
-          ? new Set<Permission>(claims.perms)
-          : await this.auth.authorization.permissionsForUser(user.id);
-      const role = await this.auth.db.roles.getById(user.role_id);
-      return {
-        kind: 'jwt',
-        userId: user.id,
-        email: user.email,
-        role: role?.name ?? '',
-        perms,
-      };
-    }
-
-    // No bearer (or bearer present but no JWT wiring and not the legacy token):
-    // open mode ONLY when neither credential is configured at all.
-    if (this.authToken === undefined && this.auth === undefined) return { kind: 'legacy' };
-    return null;
+    const claims = await this.auth.tokenIssuer.verifyAccess(bearer).catch(() => null);
+    if (claims === null) return null;
+    const user = await this.auth.db.users.getById(claims.sub);
+    if (user === null || user.status !== 'active') return null;
+    if (claims.token_version !== user.token_version) return null; // immediate revoke
+    const currentPermVersion = await this.auth.db.authMeta.getPermVersion();
+    const perms =
+      claims.perm_version === currentPermVersion
+        ? new Set<Permission>(claims.perms)
+        : await this.auth.authorization.permissionsForUser(user.id);
+    const role = await this.auth.db.roles.getById(user.role_id);
+    return {
+      kind: 'jwt',
+      userId: user.id,
+      email: user.email,
+      role: role?.name ?? '',
+      perms,
+    };
   }
 
   /**
    * Guard a WRITE handler: authenticate, then require the route's permission. Returns the
-   * `Identity` to use, or `null` after sending the 401/403 (the caller returns early). A
-   * `jwt` identity must hold `permission`; a `legacy` identity is the all-or-nothing static
-   * token (the old behaviour) and skips the per-permission check. The `approver` the handler
-   * records is resolved via {@link approverFor}, never read straight from the body.
+   * `Identity` to use, or `null` after sending the 401/403 (the caller returns early). The
+   * verified token must hold `permission`. The `approver` the handler records is the token's
+   * email ({@link approverFor}), never read from the body.
    */
   private async requireWrite(
     req: IncomingMessage,
@@ -801,7 +772,7 @@ export class ReviewApi {
       sendError(res, 401, 'unauthorized');
       return null;
     }
-    if (identity.kind === 'jwt' && !hasPermission(identity.perms, permission)) {
+    if (!hasPermission(identity.perms, permission)) {
       sendError(res, 403, 'forbidden');
       return null;
     }
@@ -809,9 +780,9 @@ export class ReviewApi {
   }
 
   /**
-   * Guard a READ handler: a valid token (JWT or legacy) is now required (the Phase-2
-   * "all `/api/*` reads require auth" change — reads were open before). No named permission
-   * for a bare GET. Returns true when authorised; otherwise sends 401 and returns false.
+   * Guard a READ handler: a valid per-user token is required (the "all `/api/*` reads require
+   * auth" rule). No named permission for a bare GET. Returns true when authorised; otherwise
+   * sends 401 and returns false.
    */
   private async requireRead(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     const identity = await this.authenticate(req);
@@ -823,15 +794,12 @@ export class ReviewApi {
   }
 
   /**
-   * The actor to record as `approver`/`actor` on an audited action. For a JWT identity it
-   * is the TOKEN's verified email — the body field is IGNORED (the headline trust fix); a
-   * JWT caller need not send one. For the legacy static token (no identity) it falls back to
-   * the body `approver` (the pre-Phase-2 behaviour), so the dual-accept window never
-   * fabricates a synthetic actor. A legacy caller that omits the approver gets `''`, which
-   * the use-case rejects with `MissingApproverError` (400) exactly as before.
+   * The actor to record as `approver`/`actor` on an audited action: ALWAYS the verified
+   * TOKEN email. The body is never consulted — there is no body `approver` field anymore
+   * (Phase 5). A JWT always carries an email, so this is total.
    */
-  private approverFor(identity: Identity, bodyApprover: string | undefined): string {
-    return identity.kind === 'jwt' ? identity.email : (bodyApprover ?? '');
+  private approverFor(identity: Identity): string {
+    return identity.email;
   }
 
   /**
@@ -861,15 +829,12 @@ export class ReviewApi {
         sendError(res, 401, 'unauthorized');
         return true;
       }
-      // A legacy static-token caller has no per-user identity; report the all-or-nothing
-      // posture honestly (the full catalogue) rather than fabricating a user.
-      const permissions =
-        identity.kind === 'jwt' ? [...identity.perms].sort() : [...ALL_PERMISSIONS];
-      const body =
-        identity.kind === 'jwt'
-          ? { email: identity.email, role: identity.role, permissions }
-          : { email: null, role: 'legacy', permissions };
-      sendJson(res, 200, body);
+      // The signed-in user's own resolved permission set (token-derived).
+      sendJson(res, 200, {
+        email: identity.email,
+        role: identity.role,
+        permissions: [...identity.perms].sort(),
+      });
       return true;
     }
     if (method === 'GET' && path === '/api/permissions') {
@@ -900,7 +865,7 @@ export class ReviewApi {
       }
       await this.mapErrors(res, async () => {
         const user = await auth.provisionUser.provision({
-          actor: this.approverFor(identity, parsed.data.approver),
+          actor: this.approverFor(identity),
           name: parsed.data.name,
           email: parsed.data.email,
           roleName: parsed.data.role,
@@ -926,14 +891,14 @@ export class ReviewApi {
         parsed.data.role !== undefined ||
         parsed.data.status !== undefined ||
         parsed.data.password !== undefined;
-      const isSelf = identity.kind === 'jwt' && identity.userId === targetId;
+      const isSelf = identity.userId === targetId;
       // Any privileged sub-field, OR editing another user at all, needs team:manage.
       const needsManage = wantsAdminFields || !isSelf;
-      if (needsManage && !this.hasManage(identity, 'team:manage')) {
+      if (needsManage && !hasPermission(identity.perms, 'team:manage')) {
         return (sendError(res, 403, 'forbidden'), true);
       }
       await this.mapErrors(res, async () => {
-        const actor = this.approverFor(identity, parsed.data.approver);
+        const actor = this.approverFor(identity);
         // The admin trio (role/status/password) is applied through ONE use-case that
         // validates everything up front, so a later invalid sub-field can't half-apply an
         // earlier one (it also single-bumps token_version + revokes refreshes on disable).
@@ -978,7 +943,7 @@ export class ReviewApi {
       if (!parsed.success) return (sendError(res, 400, 'name and permissions are required'), true);
       await this.mapErrors(res, async () => {
         const role = await auth.manageRoles.createRole({
-          actor: this.approverFor(identity, parsed.data.approver),
+          actor: this.approverFor(identity),
           name: parsed.data.name,
           description: parsed.data.description,
           permissions: parsed.data.permissions,
@@ -1000,7 +965,7 @@ export class ReviewApi {
       if (!parsed.success) return (sendError(res, 400, 'invalid role patch'), true);
       await this.mapErrors(res, async () => {
         const role = await auth.manageRoles.updateRole({
-          actor: this.approverFor(identity, parsed.data.approver),
+          actor: this.approverFor(identity),
           roleName: decodeURIComponent(roleByName[1]!),
           description: parsed.data.description,
           permissions: parsed.data.permissions,
@@ -1014,7 +979,7 @@ export class ReviewApi {
       if (identity === null) return true;
       await this.mapErrors(res, async () => {
         await auth.manageRoles.deleteRole({
-          actor: this.approverForActor(identity),
+          actor: this.approverFor(identity),
           roleName: decodeURIComponent(roleByName[1]!),
         });
         sendJson(res, 200, { deleted: true });
@@ -1023,20 +988,6 @@ export class ReviewApi {
     }
 
     return false;
-  }
-
-  /**
-   * Does this identity hold a management permission? A `jwt` identity must hold the key;
-   * a `legacy` static-token identity is the all-or-nothing admin token (the dual-accept
-   * window), so it passes. The SELF-only paths call this to gate the privileged sub-fields.
-   */
-  private hasManage(identity: Identity, permission: Permission): boolean {
-    return identity.kind === 'legacy' || hasPermission(identity.perms, permission);
-  }
-
-  /** The token-derived actor for an audited action with no body (DELETE). Legacy ⇒ ''. */
-  private approverForActor(identity: Identity): string {
-    return identity.kind === 'jwt' ? identity.email : '';
   }
 
   /**
@@ -1087,23 +1038,19 @@ export class ReviewApi {
   }
 }
 
-// `approver` is OPTIONAL at the HTTP boundary across all write bodies (Auth/IAM Phase 2):
-// a per-user JWT supplies the actor from its verified email (the body field is ignored —
-// `approverFor`), and a legacy static-token caller still sends it in the body. A legacy
-// caller that omits it reaches `MissingApproverError` → 400 in the use-case, unchanged.
-const ApproveBody = z.object({ approver: z.string().min(1).optional() });
+// Auth/IAM Phase 5: write bodies carry NO `approver` field. The actor is ALWAYS the verified
+// token email (`approverFor`); zod strips any `approver` a stale client still sends, so a
+// forged body `approver` is silently ignored — never trusted, never recorded.
+const ApproveBody = z.object({});
 /** Candidate approve also accepts the reviewer's EU-Omnibus affiliate disclosure (optional). */
 const ApproveCandidateBody = z.object({
-  approver: z.string().min(1).optional(),
   affiliate_disclosure: z.boolean().optional(),
 });
 const RejectBody = z.object({
-  approver: z.string().min(1).optional(),
   reason: z.string().optional(),
 });
 /** Invite / register a team member (ACR-10 Team). */
 const InviteMemberBody = z.object({
-  approver: z.string().min(1).optional(),
   name: z.string().min(1),
   email: z.string().email(),
   role: z.string().optional(),
@@ -1114,11 +1061,10 @@ const InviteMemberBody = z.object({
  * together change the caller's own password (the current-password proof IS the authorization —
  * no `team:manage`). All fields optional, but at least one mutation must be present, and the
  * password fields are all-or-nothing (a `newPassword` without `currentPassword`, or vice-versa,
- * is a 400 — never a silent partial). The actor is token-derived; any body `approver` is ignored.
+ * is a 400 — never a silent partial). The actor is token-derived; the body carries no `approver`.
  */
 const UpdateProfileBody = z
   .object({
-    approver: z.string().min(1).optional(),
     name: z.string().min(1).optional(),
     currentPassword: z.string().min(1).optional(),
     newPassword: z.string().min(1).optional(),
@@ -1139,12 +1085,10 @@ const UpdateProfileBody = z
  * `validateSettingValue` domain rule is the real, per-key validator.
  */
 const UpdateSettingBody = z.object({
-  approver: z.string().min(1).optional(),
   value: z.union([z.string(), z.number(), z.boolean()]),
 });
 /** Register a new operational source from the admin "+ Add source" flow (ACR-10). */
 const CreateSourceBody = z.object({
-  approver: z.string().min(1).optional(),
   domain: z.string().min(1),
   kind: z.string().min(1),
   tier: z.number().int(),
@@ -1153,13 +1097,11 @@ const CreateSourceBody = z.object({
 });
 
 // ── Auth/IAM Phase 3 request bodies ──
-// `approver` is optional everywhere (the actor is token-derived; only a legacy static-token
-// caller supplies it — the same dual-accept convention as the rest of the API). The
-// `password` floor is enforced by the pure `validatePasswordPolicy` in the use-case, so the
-// HTTP boundary only checks presence (min(1)) — never echoes the value.
+// No `approver` field (Phase 5 — the actor is the verified token email). The `password`
+// floor is enforced by the pure `validatePasswordPolicy` in the use-case, so the HTTP
+// boundary only checks presence (min(1)) — never echoes the value.
 /** Provision a login-capable user (POST /api/users) — gated `team:manage`. */
 const CreateUserBody = z.object({
-  approver: z.string().min(1).optional(),
   name: z.string().min(1),
   email: z.string().email(),
   role: z.string().min(1),
@@ -1168,7 +1110,6 @@ const CreateUserBody = z.object({
 /** Patch a user (PATCH /api/users/:id): name self-or-admin; role/status/password admin-only. */
 const PatchUserBody = z
   .object({
-    approver: z.string().min(1).optional(),
     name: z.string().min(1).optional(),
     role: z.string().min(1).optional(),
     status: z.enum(['active', 'disabled']).optional(),
@@ -1185,7 +1126,6 @@ const PatchUserBody = z
   );
 /** Create a custom role (POST /api/roles) — gated `roles:manage`. */
 const CreateRoleBody = z.object({
-  approver: z.string().min(1).optional(),
   name: z.string().min(1),
   description: z.string().optional(),
   permissions: z.array(z.string()),
@@ -1193,7 +1133,6 @@ const CreateRoleBody = z.object({
 /** Patch a role (PATCH /api/roles/:name): description and/or the permission set. */
 const PatchRoleBody = z
   .object({
-    approver: z.string().min(1).optional(),
     description: z.string().optional(),
     permissions: z.array(z.string()).optional(),
   })
@@ -1207,19 +1146,16 @@ const PatchRoleBody = z
  * which the use-case calls, so the HTTP boundary only checks the envelope.
  */
 const EditCandidateBody = z.object({
-  approver: z.string().min(1).optional(),
   patch: z.record(z.unknown()),
 });
 /** Promote a field proposal into the condition vocabulary. */
 const PromoteBody = z.object({
-  approver: z.string().min(1).optional(),
   canonical_key: z.string().min(1),
   label: z.string().min(1),
   target: z.enum(['vocabulary', 'field']).default('vocabulary'),
 });
 /** Human deal fields + referenced evidence — shared by complete + ad-hoc create. */
 const ManualCaptureBody = z.object({
-  approver: z.string().min(1).optional(),
   fields: z.record(z.unknown()),
   evidence: z.object({
     source_url: z.string().min(1),

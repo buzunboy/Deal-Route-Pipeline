@@ -44,7 +44,7 @@ All config + secrets come from the environment; nothing is hard-coded. Key vars 
 | `S3_CDN_BASE_URL` | public CDN/base URL for the public `/v1/` feed's evidence screenshot (only `s3`); turns into `$S3_CDN_BASE_URL/<evidence_id>/screenshot.png`. Unset ⇒ no public evidence URL (safe default). **Expose ONLY `*/screenshot.png` publicly** — `page.html`/`terms.txt` (verbatim terms) live under the same `<id>/` prefix and must stay private. The committed `deploy/aws/setup-evidence-cdn.sh` (CloudFront + OAC + a screenshot-only edge function) enforces this; see `deploy/fly/README.md` §2.4 + ARCHITECTURE.md. The ADMIN panel reads evidence via the gated `GET /api/evidence/:id/:artifact` instead, so it doesn't need this. |
 | `DATABASE_URL` | Postgres connection string (persisted runs only; dry-run/tests need none) |
 | `DEFAULT_RECRAWL_DAYS` | re-crawl cadence (default 3) |
-| `REVIEW_API_TOKEN` | optional bearer token gating approve/reject on `/api/`; unset ⇒ open (bind to a trusted network) |
+| `AUTH_JWT_PRIVATE_KEY` | **required to `serve`** — the ES256 signing key for the per-user JWT IdP (Auth/IAM Phase 5; the legacy `REVIEW_API_TOKEN` is retired). `serve` hard-fails without it. A secret; set via your secret store, never commit. See `.env.example` → "Auth / IdP". |
 | `PUBLIC_CORS_ORIGIN` | `Access-Control-Allow-Origin` for the public `/v1/` read API (default `*`; set to the landing-page origin to tighten) |
 
 ## What you must supply
@@ -144,12 +144,13 @@ GET  /api/sources/:id/reviews           source-promotion audit history
 GET  /api/health
 ```
 
-State-changing POSTs require `Authorization: Bearer $REVIEW_API_TOKEN` when that var is set
-(unset ⇒ open; bind to a trusted network). Unknown deal → `404`; an already-decided deal →
-`409`; missing approver / malformed JSON → `400`; oversized body → `413`. Internal errors return
-a generic `500` (no internal detail leaked). Read endpoints are open, with **one exception**:
-`GET /api/evidence/:id/:artifact` is Bearer-gated too — evidence bytes (raw HTML + verbatim
-copyrighted terms) are sensitive, so it's the authed complement of the screenshot-only public CDN.
+**Every `/api/*` request requires a per-user ES256 bearer** (Auth/IAM Phase 5 — the legacy
+static `REVIEW_API_TOKEN` is retired; only `GET /api/health` is open). The token comes from
+`POST /auth/login`; the pipeline verifies it, derives the `approver` from the claims (request
+bodies carry no `approver`), and authorizes writes per-permission. No token / a stale legacy
+token / an expired-or-revoked token → `401`. Unknown deal → `404`; an already-decided deal →
+`409`; malformed JSON → `400`; oversized body → `413`; missing permission → `403`. Internal
+errors return a generic `500` (no internal detail leaked). The public `/v1/*` feed stays open.
 
 ## Public read API (`/v1/*` — unauthenticated, read-only)
 

@@ -28,7 +28,7 @@ primary_region = "fra"           # Frankfurt — near the eu-central-1 evidence 
   app = "serve"
 
 [env]
-  # Non-secret config. Secrets (DATABASE_URL, REVIEW_API_TOKEN, S3_*, ANTHROPIC_API_KEY)
+  # Non-secret config. Secrets (DATABASE_URL, AUTH_JWT_PRIVATE_KEY, S3_*, ANTHROPIC_API_KEY)
   # are set with `fly secrets set` and injected as env at runtime — keep them OUT of here.
   NODE_ENV = "production"
   REVIEW_API_PORT = "8080"       # must match internal_port below
