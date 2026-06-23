@@ -7,13 +7,30 @@
  *   - read endpoints (GET) + the public feed / health / test page marked `noauth`
  *     so the bearer never rides on an unauthenticated call.
  *
- * This is deterministic (no timestamps/randomness) so re-running it yields a clean
- * diff. Run via `npm run api:postman` — do NOT hand-edit the generated JSON.
+ * It ALSO strips the generator's non-deterministic ids (`_postman_id` + the per-item
+ * `id` UUIDs that `openapi-to-postmanv2` re-randomises every run) so the output is
+ * byte-stable: re-running `npm run api:postman` on an unchanged spec yields a clean
+ * `git diff`. That lets CI gate spec↔collection drift with `git diff --exit-code`.
+ * The ids are optional in the collection schema (Postman re-mints them on import).
+ *
+ * Run via `npm run api:postman` — do NOT hand-edit the generated JSON.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const PATH = 'docs/api/dealroute.postman_collection.json';
 const c = JSON.parse(readFileSync(PATH, 'utf8'));
+
+// 0. Strip the generator's random ids so the file is byte-stable (see header).
+function stripIds(node) {
+  if (Array.isArray(node)) {
+    node.forEach(stripIds);
+  } else if (node && typeof node === 'object') {
+    delete node._postman_id;
+    if (typeof node.id === 'string' && /^[0-9a-f-]{36}$/.test(node.id)) delete node.id;
+    Object.values(node).forEach(stripIds);
+  }
+}
+stripIds(c);
 
 // 1. Collection-level bearer auth (inherited by requests unless overridden below).
 c.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{bearerToken}}', type: 'string' }] };

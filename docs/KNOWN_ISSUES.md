@@ -53,15 +53,6 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Fix-when**: rotate creds + pin the tag before going past dev/staging; set `ADMIN_CORS_ORIGIN` when the panel deploys; make the image private if/when the repo's exposure posture requires it.
 - **Logged**: 2026-06-22
 
-### A malformed (non-UUID) `:id` on an HTTP route 500s instead of 404
-- **Severity**: low
-- **Area**: api / db
-- **Location**: `src/adapters/http/public-api.ts` (`getDeal` → `deals.getById`); `src/adapters/http/review-api.ts` (the `/api/candidates/:id/*` routes → use-cases → repo lookups); surfaces in `src/adapters/db/postgres/postgres-db.ts` where the id hits a `uuid` column.
-- **What**: `GET /v1/deals/abc` and `POST /api/candidates/abc/approve` (any non-UUID id) return **500** with the Postgres error `invalid input syntax for type uuid: "abc"` escaping to the top-level handler, instead of a clean **404**. A valid-but-nonexistent UUID correctly 404s (the typed `DealNotFoundError` → `mapErrors`), so this is purely the id-format boundary. Found 2026-06-21 during local Postgres bring-up; the in-memory DB accepts any string as a key, so no unit/integration test caught it (they all use valid UUIDs).
-- **Why deferred**: low impact — it's a malformed-input edge that returns the wrong status code (500 vs 404) and leaks a generic Postgres type message (no data). Not a trust/security issue; nothing auto-publishes. Out of scope for the local-setup + admin-CORS change that surfaced it.
-- **Fix-when**: when touching the HTTP id boundary or the DB adapter. Cleanest fix: validate `:id` as a UUID at the HTTP boundary (zod `z.string().uuid()`) and 404 on mismatch before the DB call — covers both routers in one place; add a test with a non-UUID id (and ideally make the in-memory DB reject non-UUID keys so the gap can't recur silently). Alternatively, classify the Postgres `22P02` invalid-text-representation error → 404/400 in `db-resilience`.
-- **Logged**: 2026-06-21
-
 ### Manual-capture screenshot/artifact UPLOAD channel is not built (capture is by-reference only)
 - **Severity**: medium (a capability gap, not a defect; the trust invariant still holds)
 - **Area**: api / evidence
@@ -518,26 +509,6 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Fix-when**: a scheduler/worker introduces real concurrency on the same source.
 - **Logged**: 2026-06-20
 
-### Postgres `Database` contract suite isn't isolated per-test and isn't run in CI
-- **Severity**: medium
-- **Area**: ci / db / testing
-- **Location**: `src/adapters/db/postgres/postgres-db.test.ts`, `test/contracts/database-contract.ts`, `vitest.integration.config.ts`
-- **What**: Two linked gaps. (1) The shared `databaseContract` gives each test a fresh store
-  for the in-memory adapter, but for Postgres `makeDb()` just reconnects to the same DB with
-  no per-test truncation — so count/global-list tests (`fieldProposals` repeat-sighting,
-  `expirePublishedBySourceUrl`, `findByDedupeKey` canonical) collide and fail when the file
-  is run as a whole. (2) The suite only runs under the default vitest config and self-skips
-  without `DATABASE_URL_TEST`; the integration config includes only `test/integration/**`, and
-  the CI `check` job has no DB — so the Postgres adapter contract effectively **never runs in
-  CI** (contradicting the testing-rules claim that it runs in the integration tier).
-- **Why deferred**: not gating anything today (it skips in CI) and the adapter is covered
-  end-to-end by `test/integration/**` (all green). Fixing isolation means giving the contract
-  a per-test reset hook (truncate for Postgres / fresh map for in-memory) and wiring the file
-  into the integration tier — a focused test-harness change, not a product fix.
-- **Fix-when**: before relying on the contract suite as the substitutability gate, or when
-  wiring the Postgres contract into the integration run — add a `resetBetweenTests` hook to
-  `databaseContract` and include the file in `vitest.integration.config.ts`.
-- **Logged**: 2026-06-20
 
 ### Two differently-named EvidenceStore error classes
 - **Severity**: low
@@ -686,6 +657,32 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 ---
 
 ## Resolved
+
+### Postgres `Database` contract suite isn't isolated per-test and isn't run in CI — RESOLVED 2026-06-23 (P1)
+- **Was**: medium, ci / db / testing, `src/adapters/db/postgres/postgres-db.test.ts` +
+  `test/contracts/database-contract.ts` + the vitest configs.
+- **Problem**: the Postgres adapter contract (the LSP substitutability gate) never ran in CI —
+  it self-skipped in the unit tier (no DB) and wasn't in the integration glob — and its cases
+  polluted each other (no per-test truncation) when the file ran whole.
+- **Resolution**: `databaseContract` gained an optional `reset` hook run in `beforeEach`; the
+  Postgres entry shares ONE connection and supplies a TRUNCATE-all reset (a separate pool, so
+  the adapter under test is never reached for the reset). The file moved into the integration
+  tier (`vitest.integration.config.ts` include + excluded from the unit config so it isn't
+  double-run), so CI's Postgres-backed integration job now runs all 63 contract cases. Fixing
+  isolation also surfaced a real latent test bug — `updateStatus(... 'r', 't')` passed `'t'`
+  as a `timestamptz` (Postgres rejected it; the more-permissive in-memory adapter had masked
+  it) — now a valid ISO timestamp. The whole file passes (63/63) against real Postgres.
+
+### A malformed (non-UUID) `:id` on an HTTP route 500s instead of 404 — RESOLVED 2026-06-23 (P1)
+- **Was**: low, api / db, `src/adapters/http/public-api.ts` + `review-api.ts`.
+- **Problem**: `GET /v1/deals/abc` / `POST /api/candidates/abc/approve` (any non-UUID id) hit
+  the `uuid` column and 500'd with `invalid input syntax for type uuid`, instead of a clean 404.
+- **Resolution**: a shared `isUuid` boundary helper (`src/adapters/http/http-ids.ts`). The
+  public `getDeal` 404s a non-UUID id before the DB call; the gated review-API `:id` routes
+  whose id maps to a `uuid` column (candidates/sources/alerts/manual-complete) embed the UUID
+  shape in their route regex (`UUID_SEG`), so a malformed id falls through to the catch-all 404
+  — never reaching the DB. The string-keyed routes (`field-proposals/:key`, `settings/:key`)
+  are unchanged. Covered by unit tests on both routers + an `isUuid` table test.
 
 ### Monitor source-scoped lookups keyed off `source.url`, not the resolved `finalUrl` — RESOLVED 2026-06-20 (Step 4 / Prereq A)
 - **Was**: medium (trust-relevant for cross-domain-redirecting sources), monitor / db,

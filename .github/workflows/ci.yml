@@ -25,6 +25,10 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
+      # The HTTP contract: OpenAPI must lint, and the committed Postman collection must
+      # be structurally in sync with the spec (a new/renamed/removed endpoint that
+      # wasn't regenerated fails here). See scripts/postman-check.mjs.
+      - run: npm run api:check
       - run: npm test
       - run: npm run build
 

@@ -134,6 +134,11 @@ describe('PublicApi (/v1 HTTP integration)', () => {
     expect(res.status).toBe(404);
   });
 
+  it('GET /v1/deals/:id 404s a malformed (non-UUID) id — not a 500', async () => {
+    const res = await fetch(`${base}/v1/deals/not-a-uuid`);
+    expect(res.status).toBe(404); // would be 500 (uuid syntax error) without the boundary guard
+  });
+
   it('the HTTP response body carries NO internal field', async () => {
     const deal = publishedDeal();
     await db.deals.insert(deal);

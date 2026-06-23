@@ -170,34 +170,27 @@ shared contract suite enforcing LSP. The implementation is sound.
 
 No roadmap step remains. The concrete forward work, highest-value first:
 
-1. **Admin-panel new endpoints — the metrics layer is now BUILT (2026-06-22); only Settings is left.**
-   BUILT (both-adapter parity + contract + unit + integration + OpenAPI): **ACR-5** candidate counts,
-   **ACR-7** audit feed (approve/reject/edit), **ACR-10** admin published + sources registry,
-   **ACR-12** ad-hoc capture, **ACR-11 + ACR-10-Team** team/profile (pipeline is now the reviewer-
-   identity system of record; `team_members`, migration 0016), **ACR-8** persisted alerts +
-   ack/resolve (`alert_events`, migration 0017, read-time auto-resolve), and the **metrics/aggregation
-   layer** — **ACR-6** `GET /api/metrics/throughput` (today's approve/reject/edit + `avg_review_seconds`
-   = mean capture→decision latency), **ACR-9** `GET /api/candidates/freshness` (pending-queue age
-   buckets `<24h`/`1-3d`/`>3d`), **ACR-10 Metrics** `GET /api/metrics` (KPIs + 14-day cost-per-day +
-   confidence distribution), and **ACR-10 Settings** — `GET /api/settings` + `PATCH /api/settings/:key`
-   (env-driven config stays the source of truth; a `settings` table, migration **0018**, stores only
-   OVERRIDES for the writable knobs `affiliate_disclosure` + `daily_budget_queued`; read-only knobs
-   return `read_only:true` and a PATCH on them is a 409; new `DEPLOYMENT_ID` config powers the
-   queued-budget next-deploy semantics). The metrics endpoints are pure projections over `crawl_runs` +
-   `reviews` + `deals` on `MetricsUseCase`. **The full ACR endpoint set is now COMPLETE.** Remaining
-   smaller follow-ups: persist `promote`/`extract` as audit rows (ACR-7); build a `min_confidence`
-   auto-queue gate if wanted. NOTE — ACR-6 returns the ACR-doc `avg_review_seconds` (raw number) and
-   Settings adds a `read_only` row flag; the panel-side migrations (zod + view-only rows + dropping
-   no-backing placeholders) are handed off in `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`.
+1. **Admin-panel new endpoints — the FULL ACR endpoint set is BUILT + merged (2026-06-22).** ACR-5
+   counts · ACR-6 throughput · ACR-7 audit · ACR-8 alerts · ACR-9 freshness · ACR-10 published +
+   sources + team + metrics + **settings** · ACR-11 profile · ACR-12 ad-hoc capture — all with
+   both-adapter parity + contract + unit + integration + OpenAPI/Postman (migrations through **0018**).
+   Details in §2 + `docs/KNOWN_ISSUES.md`. **Remaining smaller follow-ups (not endpoints):** persist
+   `promote`/`extract` as audit rows (the one ACR-7 gap the panel models); build a `min_confidence`
+   auto-queue gate if the product wants confidence-based routing. **Panel-side migrations** (ACR-6's
+   `avg_review_seconds` number; Settings' `read_only` row flag + dropping the no-backing placeholders)
+   are handed off in `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`.
 2. **Post-deploy hardening** [medium] — the API is live + working, but parked: **rotate** the
    chat-exposed AWS key + GitHub PAT (before going past dev/staging), make the GHCR image private,
    **pin** `:edge` → `:sha-…`, set **`ADMIN_CORS_ORIGIN`** when the panel deploys. Plus the deploy-time
    **CDN scoping gate** [high — config, not code]: expose ONLY `screenshot.png`, never the whole
    evidence bundle, before pointing `S3_CDN_BASE_URL` at a public bucket.
-3. **The rest of the deferred-findings register** — e.g. the **dormant Postgres contract-suite CI
-   gap** [medium], the **manual-capture upload channel** [medium], no `/v1/` rate-limiting [medium,
-   CDN-fronted at deploy], the per-request active-source scan, the raw-IDN suffix normalisation, the
-   non-UUID `:id` → 500, the pg-boss pool bound (if/when wired). Pick by the listed fix-when triggers.
+3. **The rest of the deferred-findings register** — e.g. the **manual-capture upload channel**
+   [medium], no `/v1/` rate-limiting [medium, CDN-fronted at deploy], the per-request active-source
+   scan, the raw-IDN suffix normalisation, the pg-boss pool bound (if/when wired). Pick by the listed
+   fix-when triggers. _(P1 done 2026-06-23: the Postgres contract suite now runs in CI as the LSP gate
+   — per-test TRUNCATE reset + moved to the integration tier; `npm run api:check` (OpenAPI lint +
+   structural Postman-drift gate) added to CI; the non-UUID `:id` → 500 fixed via a UUID boundary
+   guard. All three were on this list and are now in KNOWN_ISSUES → Resolved.)_
 4. **Enable a real 2nd country** [low — feature-enablement, owner scope call] — Step 6 built the
    foundation; launching e.g. AT/CH is data/config (a `MARKETS` row + that country's
    seeds/vocab/deny-list/Tier-4 queries), NO logic change.

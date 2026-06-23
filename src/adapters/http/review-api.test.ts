@@ -114,6 +114,25 @@ describe('ReviewApi (HTTP integration)', () => {
     expect(items[0]!.evidence).not.toBeNull();
   });
 
+  it('a malformed (non-UUID) :id 404s instead of 500 (uuid-shaped route guard)', async () => {
+    // The id maps to a Postgres `uuid` column; a non-UUID would 500 without the guard.
+    expect((await fetch(`${base}/api/candidates/not-a-uuid/reviews`)).status).toBe(404);
+    const patch = await fetch(`${base}/api/candidates/not-a-uuid`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'a', patch: {} }),
+    });
+    expect(patch.status).toBe(404);
+    // A malformed id on a GATED POST falls through to 404 BEFORE the auth check (the
+    // route regex doesn't match) — 404 leaks strictly less than 401 and never hits the DB.
+    const approve = await fetch(`${base}/api/candidates/not-a-uuid/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'a' }),
+    });
+    expect(approve.status).toBe(404);
+  });
+
   it('GET /api/candidates/counts returns the aggregate review-queue counts (ACR-5)', async () => {
     await seedCandidate({ route_type: 'bundle', confidence: 0.3, human_edited: ['price'] });
     await seedCandidate({ status: 'in_review', route_type: 'promo', confidence: 0.9 });

@@ -29,6 +29,8 @@
     "dry-run-extract": "tsx --env-file-if-exists=.env src/adapters/cli/main.ts dry-run-extract",
     "api:lint": "redocly lint docs/api/openapi.yaml",
     "api:postman": "openapi2postmanv2 -s docs/api/openapi.yaml -o docs/api/dealroute.postman_collection.json -p -O folderStrategy=Tags && node scripts/postman-finalize.mjs",
+    "api:postman:check": "node scripts/postman-check.mjs",
+    "api:check": "npm run api:lint && npm run api:postman:check",
     "prepare": "husky || true"
   },
   "dependencies": {

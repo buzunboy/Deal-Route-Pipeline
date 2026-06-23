@@ -13,6 +13,7 @@ import {
   type PublishedQuery,
 } from '../../domain/index.js';
 import { toPublicDeal } from './public-dto.js';
+import { isUuid } from './http-ids.js';
 
 export interface PublicApiOptions {
   /** Public CDN base URL for evidence screenshots (config.evidence.s3.cdnBaseUrl). */
@@ -107,6 +108,10 @@ export class PublicApi {
   }
 
   private async getDeal(res: ServerResponse, id: string): Promise<void> {
+    // A malformed (non-UUID) id can't be a real deal id — 404 at the boundary rather
+    // than letting it hit the `uuid` column and surface as a 500 (same response a
+    // valid-but-missing id gets, so we don't leak which ids exist).
+    if (!isUuid(id)) return this.sendError(res, 404, 'deal not found');
     const deal = await this.deals.getById(id);
     // 404 a missing deal AND any non-published one — never leak a
     // candidate/in_review/expired/rejected record through the public surface, and

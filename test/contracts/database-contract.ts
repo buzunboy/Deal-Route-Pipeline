@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import type { Database } from '../../src/application/ports/index.js';
 import {
   DealStatus,
@@ -41,9 +41,27 @@ const dealRecord = makeDealRecord;
  * Postgres adapter both run it, guaranteeing substitutability (LSP). The Postgres
  * run is skipped automatically when no DATABASE_URL_TEST is configured (a
  * separate var from the runtime DATABASE_URL, since the suite mutates rows).
+ *
+ * `makeDb` returns the adapter under test. For the in-memory adapter every call
+ * returns a FRESH store, so cases are naturally isolated. For Postgres a single
+ * connection is reused (one pool, not one per case), so the optional `reset` hook
+ * is run in `beforeEach` to TRUNCATE every table — without it, count/global-list
+ * cases pollute each other when the file runs as a whole. The in-memory entry
+ * omits `reset` (nothing to clear); the Postgres entry supplies the truncate.
+ *
+ * NOTE: the `beforeEach(reset)` per-case TRUNCATE is now the isolation mechanism, so
+ * cases start empty on BOTH adapters. Several cases below still tag rows with a unique
+ * `service`/window and assert DELTAS (after−before) or filter to "their" ids — that is
+ * now DEFENSIVE REDUNDANCY (harmless), not the load-bearing isolation it once was when
+ * the shared DB persisted rows across cases. Don't rely on cross-case persistence.
  */
-export function databaseContract(name: string, makeDb: () => Promise<Database> | Database): void {
+export function databaseContract(
+  name: string,
+  makeDb: () => Promise<Database> | Database,
+  reset?: () => Promise<void>,
+): void {
   describe(`Database contract: ${name}`, () => {
+    if (reset) beforeEach(reset);
     it('sources: upsert, getById, listDue honours next_due and active status', async () => {
       const db = await makeDb();
       // Distinct URLs: these are three DIFFERENT sources (url is the natural key now).
@@ -211,7 +229,7 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       const found = await db.deals.findByDedupeKey(dedupeKey(deal, deal.source_registrable_domain));
       expect(found!.id).toBe(deal.id);
 
-      await db.deals.updateStatus(deal.id, DealStatus.enum.rejected, 'r', 't');
+      await db.deals.updateStatus(deal.id, DealStatus.enum.rejected, 'r', '2026-06-19T00:00:00Z');
       expect(
         await db.deals.findByDedupeKey(dedupeKey(deal, deal.source_registrable_domain)),
       ).toBeNull();
@@ -352,11 +370,10 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect(new Date(proposals[0]!.last_seen_at).toISOString()).toBe('2026-07-01T00:00:00.000Z');
     });
 
-    // deals.listPublished + countPublished — the public read feed. The shared
-    // Postgres DB persists rows ACROSS cases, so each case tags its deals with a
-    // unique `service` and filters by it, so other cases' rows can't pollute the
-    // result set. This block is the LSP proof: identical filter/sort/paginate in
-    // both adapters.
+    // deals.listPublished + countPublished — the public read feed. Each case tags its
+    // deals with a unique `service` and filters by it (defensive now that the per-case
+    // TRUNCATE isolates cases — see the suite header). This block is the LSP proof:
+    // identical filter/sort/paginate in both adapters.
     describe('deals.listPublished + countPublished', () => {
       it('serves ONLY published deals — never candidate/in_review/expired/rejected', async () => {
         const db = await makeDb();
@@ -822,10 +839,10 @@ export function databaseContract(name: string, makeDb: () => Promise<Database> |
       expect(history[1]!.reason).toBe('parked');
     });
 
-    // crawlRuns.costSummary — the shared Postgres DB persists rows ACROSS cases, so
-    // each case scopes its assertions to its own randomUUID() source_ids and bounds
-    // the window to its own far-out timestamps. We assert per_source for our own ids
-    // and never on the global total/run_count, so other cases' rows can't pollute.
+    // crawlRuns.costSummary — each case scopes its assertions to its own randomUUID()
+    // source_ids and bounds the window to its own far-out timestamps, asserting
+    // per_source for its own ids (never the global total/run_count). Defensive now that
+    // the per-case TRUNCATE isolates cases (see the suite header).
     describe('crawlRuns.costSummary', () => {
       it('(a) empty window → zeros + empty arrays, never throws', async () => {
         const db = await makeDb();

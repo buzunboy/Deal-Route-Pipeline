@@ -13,6 +13,7 @@ import {
 } from '../../application/index.js';
 import type { Logger } from '../../application/ports/index.js';
 import { toAdminEvidence } from './admin-evidence-dto.js';
+import { UUID_PATTERN } from './http-ids.js';
 import {
   DealNotFoundError,
   NotReviewableError,
@@ -40,6 +41,17 @@ import {
 
 /** Max accepted request-body size. Approve/reject bodies are a few hundred bytes. */
 const MAX_BODY_BYTES = 64 * 1024;
+
+/**
+ * UUID path-segment matcher for `:id` routes whose id maps to a Postgres `uuid` column
+ * (candidates/deals, sources, alerts, manual-capture tasks). Embedding the shape in the
+ * route regex means a malformed id (`/api/candidates/abc`) simply doesn't match and
+ * falls through to the catch-all 404 — instead of reaching the DB and 500-ing on
+ * `invalid input syntax for type uuid`. NOT used for the string-keyed routes
+ * (`field-proposals/:key`, `settings/:key`), whose keys are free-form. Shares the one
+ * UUID shape with `isUuid` (the public router's boundary guard) so the two can't drift.
+ */
+const UUID_SEG = UUID_PATTERN;
 
 export interface ReviewApiOptions {
   staticPageHtml?: string;
@@ -301,7 +313,9 @@ export class ReviewApi {
       });
     }
 
-    const completeManual = path.match(/^\/api\/manual-capture-tasks\/([^/]+)\/complete$/);
+    const completeManual = path.match(
+      new RegExp(`^/api/manual-capture-tasks/(${UUID_SEG})/complete$`),
+    );
     if (method === 'POST' && completeManual) {
       if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
       const body = await readBody(req);
@@ -326,14 +340,14 @@ export class ReviewApi {
       });
     }
 
-    const reviews = path.match(/^\/api\/candidates\/([^/]+)\/reviews$/);
+    const reviews = path.match(new RegExp(`^/api/candidates/(${UUID_SEG})/reviews$`));
     if (method === 'GET' && reviews) {
       return sendJson(res, 200, await this.review.listReviews(decodeURIComponent(reviews[1]!)));
     }
 
     // Edit a candidate's reviewer-correctable fields before approve. PATCH on the
     // candidate resource itself (no /edit suffix) — the verb carries the intent.
-    const editCandidate = path.match(/^\/api\/candidates\/([^/]+)$/);
+    const editCandidate = path.match(new RegExp(`^/api/candidates/(${UUID_SEG})$`));
     if (method === 'PATCH' && editCandidate) {
       if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
       const body = await readBody(req);
@@ -351,7 +365,7 @@ export class ReviewApi {
       });
     }
 
-    const approve = path.match(/^\/api\/candidates\/([^/]+)\/approve$/);
+    const approve = path.match(new RegExp(`^/api/candidates/(${UUID_SEG})/approve$`));
     if (method === 'POST' && approve) {
       if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
       const body = await readBody(req);
@@ -376,7 +390,7 @@ export class ReviewApi {
       });
     }
 
-    const reject = path.match(/^\/api\/candidates\/([^/]+)\/reject$/);
+    const reject = path.match(new RegExp(`^/api/candidates/(${UUID_SEG})/reject$`));
     if (method === 'POST' && reject) {
       if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
       const body = await readBody(req);
@@ -483,7 +497,7 @@ export class ReviewApi {
       }
       return sendJson(res, 200, await this.alerts.listAlerts(limit));
     }
-    const ackAlert = path.match(/^\/api\/alerts\/([^/]+)\/acknowledge$/);
+    const ackAlert = path.match(new RegExp(`^/api/alerts/(${UUID_SEG})/acknowledge$`));
     if (method === 'POST' && ackAlert) {
       if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
       const body = await readBody(req);
@@ -496,7 +510,7 @@ export class ReviewApi {
         sendJson(res, 200, { acknowledged: true });
       });
     }
-    const resolveAlert = path.match(/^\/api\/alerts\/([^/]+)\/resolve$/);
+    const resolveAlert = path.match(new RegExp(`^/api/alerts/(${UUID_SEG})/resolve$`));
     if (method === 'POST' && resolveAlert) {
       if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
       const body = await readBody(req);
@@ -514,7 +528,7 @@ export class ReviewApi {
     if (method === 'GET' && path === '/api/sources/pending') {
       return sendJson(res, 200, await this.sourceReview.listPending());
     }
-    const sourceReviews = path.match(/^\/api\/sources\/([^/]+)\/reviews$/);
+    const sourceReviews = path.match(new RegExp(`^/api/sources/(${UUID_SEG})/reviews$`));
     if (method === 'GET' && sourceReviews) {
       return sendJson(
         res,
@@ -522,7 +536,7 @@ export class ReviewApi {
         await this.sourceReview.listReviews(decodeURIComponent(sourceReviews[1]!)),
       );
     }
-    const approveSource = path.match(/^\/api\/sources\/([^/]+)\/approve$/);
+    const approveSource = path.match(new RegExp(`^/api/sources/(${UUID_SEG})/approve$`));
     if (method === 'POST' && approveSource) {
       if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
       const body = await readBody(req);
@@ -538,7 +552,7 @@ export class ReviewApi {
         sendJson(res, 200, { source });
       });
     }
-    const rejectSource = path.match(/^\/api\/sources\/([^/]+)\/reject$/);
+    const rejectSource = path.match(new RegExp(`^/api/sources/(${UUID_SEG})/reject$`));
     if (method === 'POST' && rejectSource) {
       if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
       const body = await readBody(req);

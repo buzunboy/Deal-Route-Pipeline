@@ -30,6 +30,19 @@ npm run api:postman    # regenerate the Postman collection from the spec (don't 
 Commit BOTH `openapi.yaml` and the regenerated `dealroute.postman_collection.json`. The
 collection is generated output — edit the spec, never the JSON.
 
+**CI enforces this.** The `check` job runs `npm run api:check` (= `api:lint` +
+`api:postman:check`). `api:postman:check` regenerates the collection and compares its
+STRUCTURE (folders, request names, methods, URL paths) to the committed file — so an
+endpoint added/renamed/removed in the spec but not regenerated **fails CI**. (It compares
+structure, not bytes, because the generator fakes random example values; `postman-finalize`
+strips the random ids so the committed file is otherwise stable.) If CI flags drift, run
+`npm run api:postman` and commit the result.
+
+The drift gate is **structure-only** — it catches an endpoint added/renamed/removed/re-pathed,
+NOT a changed request-body field, query param, response shape, or status code. Those are
+guarded by the endpoint's own HTTP unit + integration tests (this section's accuracy bar +
+`testing.md`), not by `api:check`.
+
 ## Accuracy bar
 
 - The spec must describe what the code **actually does**, not the intent. Mirror the real
