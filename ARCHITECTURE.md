@@ -143,7 +143,8 @@ endpoints (`PATCH /api/candidates/:id` edit, approve, reject, `POST /api/field-p
 `POST /api/manual-capture-tasks/:id/complete`, source approve/reject) are gated by `REVIEW_API_TOKEN`
 (bearer) when set; the recorded `approver` is still client-supplied, so the **production admin panel
 terminates real authentication and supplies the authenticated principal**. With no token set the API is
-open and **must** be bound to a trusted network (localhost/private). Read endpoints are never gated.
+open and **must** be bound to a trusted network (localhost/private). Read endpoints are open, with
+ONE exception — `GET /api/evidence/:id/:artifact` is bearer-gated too (see the trust rules below).
 Domain errors map to precise client status codes (404/409/400/413); internal errors return a
 generic 500 with no leaked detail; request bodies are size-bounded.
 
@@ -162,6 +163,14 @@ Trust rules specific to the write endpoints:
   reference / terms text → `400`); the source URL is pinned from the evidence (never the supplied
   fields); the human-entered record is marked entirely `human_edited`, runs the SAME sanity/grounding
   validation as an extraction (a failure → `in_review`), and lands as a `candidate` for normal review.
+- **Reviewer evidence-fetch is the gated read.** `GET /api/evidence/:id/:artifact`
+  (artifact ∈ `screenshot|html|terms`) streams the bytes from the `EvidenceStore` (`getArtifact`) —
+  the authed complement of the screenshot-only public CDN, so a reviewer reaches the `page.html` /
+  `terms.txt` (verbatim copyrighted terms) the CDN deliberately 403s. It REQUIRES the bearer (unlike
+  the other reads — evidence bytes are sensitive), serves `Cache-Control: private, no-store`, never
+  exposes `evidence.json`/metadata, and 404s an unknown id or artifact kind (the kind is a closed
+  enum in the route, so no arbitrary path reaches the store). The admin DTO's `evidence_*_url` point
+  here (relative authed paths), NOT the CDN; the public `/v1/` feed keeps its CDN screenshot URL.
 
 ### Public read surface (`/v1/*` — unauthenticated, read-only)
 

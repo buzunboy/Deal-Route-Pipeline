@@ -90,9 +90,9 @@ The review queue is empty on a fresh DB. To get candidates:
 Nothing auto-publishes — candidates land in the review queue for the panel to approve.
 
 ## Known local gotcha
-A malformed (non-UUID) `:id` on `/api/candidates/:id/*` or `/v1/deals/:id` returns **500** (Postgres
-rejects the id type) instead of a clean 404. A valid UUID behaves correctly. Logged in
-`docs/KNOWN_ISSUES.md`; harmless for normal panel use (the panel always sends real UUIDs).
+A malformed (non-UUID) `:id` on `/api/candidates/:id/*` or `/v1/deals/:id` returns a clean **404**
+(a UUID-shape boundary guard, `src/adapters/http/http-ids.ts`, rejects it before it reaches the
+Postgres `uuid` column). Fixed in P1 (was a 500); see `docs/KNOWN_ISSUES.md` → Resolved.
 
 ## Integration tests against the local DB
 Now that `dealroute_test` exists and `DATABASE_URL_TEST` is in `.env`:

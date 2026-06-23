@@ -41,7 +41,7 @@ All config + secrets come from the environment; nothing is hard-coded. Key vars 
 | `DISCOVERY_DENY_DOMAINS` | extra deny-list domains for broad discovery (comma/space-separated) on top of the defaults |
 | `DAILY_BUDGET_EUR` | aggregate €/UTC-day ceiling across all agentic runs (default 10.00; 0 disables) |
 | `EVIDENCE_STORE` | `local` (default) \| `s3` |
-| `S3_CDN_BASE_URL` | public CDN/base URL for evidence (only `s3`); the public API turns it into `$S3_CDN_BASE_URL/<evidence_id>/screenshot.png`. Unset ⇒ no public evidence URL exposed. **Expose ONLY `*/screenshot.png` publicly** — `page.html`/`terms.txt` live under the same `<id>/` prefix and must stay private (see ARCHITECTURE.md) |
+| `S3_CDN_BASE_URL` | public CDN/base URL for the public `/v1/` feed's evidence screenshot (only `s3`); turns into `$S3_CDN_BASE_URL/<evidence_id>/screenshot.png`. Unset ⇒ no public evidence URL (safe default). **Expose ONLY `*/screenshot.png` publicly** — `page.html`/`terms.txt` (verbatim terms) live under the same `<id>/` prefix and must stay private. The committed `deploy/aws/setup-evidence-cdn.sh` (CloudFront + OAC + a screenshot-only edge function) enforces this; see `deploy/fly/README.md` §2.4 + ARCHITECTURE.md. The ADMIN panel reads evidence via the gated `GET /api/evidence/:id/:artifact` instead, so it doesn't need this. |
 | `DATABASE_URL` | Postgres connection string (persisted runs only; dry-run/tests need none) |
 | `DEFAULT_RECRAWL_DAYS` | re-crawl cadence (default 3) |
 | `REVIEW_API_TOKEN` | optional bearer token gating approve/reject on `/api/`; unset ⇒ open (bind to a trusted network) |
@@ -129,10 +129,12 @@ ingest --source <id> | --community-due [--max-items N] [--dry-run]
 ## Review API (durable contract for the future admin panel)
 
 ```
-GET  /api/candidates                    list candidates + evidence
+GET  /api/candidates                    list candidates + evidence (evidence_*_url → authed paths)
 POST /api/candidates/:id/approve        { approver }          → publish
 POST /api/candidates/:id/reject         { approver, reason? } → archive
 GET  /api/candidates/:id/reviews        decision audit history (who/what/when/why)
+GET  /api/evidence/:id/:artifact        Bearer-GATED: stream one evidence artifact's bytes
+                                        (artifact = screenshot | html | terms)
 GET  /api/field-proposals               recurring unknown conditions
 GET  /api/manual-capture-tasks          login-gated / blocked offers
 GET  /api/sources/pending               proposed sources awaiting approval
@@ -145,7 +147,9 @@ GET  /api/health
 State-changing POSTs require `Authorization: Bearer $REVIEW_API_TOKEN` when that var is set
 (unset ⇒ open; bind to a trusted network). Unknown deal → `404`; an already-decided deal →
 `409`; missing approver / malformed JSON → `400`; oversized body → `413`. Internal errors return
-a generic `500` (no internal detail leaked). Read endpoints are never gated.
+a generic `500` (no internal detail leaked). Read endpoints are open, with **one exception**:
+`GET /api/evidence/:id/:artifact` is Bearer-gated too — evidence bytes (raw HTML + verbatim
+copyrighted terms) are sensitive, so it's the authed complement of the screenshot-only public CDN.
 
 ## Public read API (`/v1/*` — unauthenticated, read-only)
 
@@ -176,7 +180,10 @@ production for rate-limiting + caching.
 npm test            # unit + contract + golden + HTTP integration tests
 npm run lint        # eslint
 npm run typecheck   # tsc --noEmit
-npm run check       # lint + typecheck + test (CI gate)
+npm run format:check # prettier --check . (part of the CI check job)
+npm run check       # lint + typecheck + test (local convenience; the CI check job ALSO
+                    # runs format:check + api:check + build — run those before pushing)
+npm run api:check   # OpenAPI lint + Postman structural-drift gate
 npm run build       # compile to dist/
 npm run db:generate # regenerate SQL migrations from the schema
 npm run db:migrate  # apply migrations
