@@ -18,3 +18,5 @@ export * from './metrics/daily-budget-guard.js';
 export * from './team/team.js';
 export * from './alerting/alerts.js';
 export * from './settings/settings.js';
+export * from './auth/index.js';
+export * from './shared/refresh-token-crypto.js';

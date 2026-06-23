@@ -22,6 +22,10 @@ import type {
   AlertRecord,
   AlertStatus,
   SettingOverride,
+  User,
+  Role,
+  Permission,
+  StoredRefresh,
 } from '../../domain/index.js';
 
 /**
@@ -317,6 +321,114 @@ export interface SubscriptionCatalogRepository {
   list(): Promise<SubscriptionCatalogEntry[]>;
 }
 
+/**
+ * The user / login-account registry (Auth/IAM). Supersedes `TeamRepository` over the
+ * consolidated `users` table (`team_members` renamed in migration 0019); `TeamUseCase`
+ * stays a read model over the same rows. The password hash is kept OFF the `User`
+ * entity — only `insert`/`getPasswordHashByEmail`/`updatePasswordHash` touch it, and
+ * `getById`/`getByEmail`/`list` NEVER return it. Both adapters implement it identically
+ * (LSP). `email` is the natural identity (`reviews.approver` keys on it).
+ */
+export interface UserRepository {
+  /** Insert a new user with its (nullable) password hash — the hash never rides on `User`. */
+  insert(user: User, passwordHash: string | null): Promise<void>;
+  getById(id: string): Promise<User | null>;
+  getByEmail(email: string): Promise<User | null>; // === reviews.approver lookup
+  /** The hash for password verification — kept OFF the User entity; adapter-only. */
+  getPasswordHashByEmail(email: string): Promise<string | null>;
+  list(): Promise<User[]>; // Users/Team screen
+  updatePasswordHash(id: string, passwordHash: string): Promise<void>;
+  setStatus(id: string, status: User['status']): Promise<void>;
+  /** Immediate-revoke lever: ++token_version; returns the new value. */
+  bumpTokenVersion(id: string): Promise<number>;
+  setRole(id: string, roleId: string): Promise<void>;
+  /** On a successful login: clear failed_login_count + locked_until, set last_login_at. */
+  recordLogin(id: string, at: string): Promise<void>;
+  /**
+   * On a failed login: ++failed_login_count, returning the NEW count. It does NOT set
+   * `locked_until` itself — the caller (the Phase-2 `AuthenticateUseCase`) runs the pure
+   * `lockoutPolicy` over the returned count + the last-failed time and calls
+   * {@link setLockedUntil} when the threshold is crossed. The `at` arg is the failure
+   * timestamp (recorded as `last_login_at`'s sibling by the policy caller, not here).
+   */
+  recordFailedLogin(id: string, at: string): Promise<number>;
+  setLockedUntil(id: string, until: string | null): Promise<void>;
+  /** Failed-login counters for the pure lockout policy (kept off the `User` entity). */
+  getLoginState(
+    id: string,
+  ): Promise<{ failedLoginCount: number; lockedUntil: string | null } | null>;
+}
+
+/**
+ * The role registry (Auth/IAM). Roles are named bundles of permissions; the actual
+ * grants live in `RolePermissionRepository`. Both adapters identical (LSP).
+ */
+export interface RoleRepository {
+  insert(role: Role): Promise<void>;
+  getById(id: string): Promise<Role | null>;
+  getByName(name: string): Promise<Role | null>;
+  list(): Promise<Role[]>;
+  /**
+   * Update a role's `description` (and `name` for a NON-system role) by id — used by
+   * `ManageRolesUseCase` to edit descriptions/rename custom roles. `is_system` is immutable.
+   * Defense-in-depth (enforced by BOTH adapters): a SYSTEM role keeps its existing name —
+   * it can never be RENAMED here even if a caller passes a different name (the use-case is
+   * the primary gate; this is the net). A no-op when the id doesn't exist.
+   */
+  update(role: Role): Promise<void>;
+  /** Count users still assigned this role — guards delete (RoleInUseError). */
+  countUsers(roleId: string): Promise<number>;
+  delete(id: string): Promise<void>; // guarded by is_system + countUsers in the use-case
+}
+
+/**
+ * The `(role_id, permission_key)` grants (Auth/IAM). The single source of "what can a
+ * role do". `setForRole` is a REPLACE-set (clears then writes the given keys). Both
+ * adapters identical (LSP). A mutation bumps the global `perm_version` in the use-case.
+ */
+export interface RolePermissionRepository {
+  /** The permission keys granted to one role (deduped). */
+  permissionsForRole(roleId: string): Promise<Permission[]>;
+  /** Every grant row across all roles — for claim resolution + the panel role editor. */
+  list(): Promise<{ roleId: string; permissionKey: Permission }[]>;
+  /** Replace the entire grant set for a role (delete-then-insert), atomically. */
+  setForRole(roleId: string, permissions: Permission[]): Promise<void>;
+}
+
+/**
+ * Server-side refresh tokens (Auth/IAM). Stored only as SHA-256 hashes; rotation +
+ * `family_id` lineage drive reuse-detection. Both adapters identical (LSP).
+ */
+export interface RefreshTokenRepository {
+  issue(token: StoredRefresh): Promise<void>;
+  findByHash(tokenHash: string): Promise<StoredRefresh | null>;
+  /**
+   * Rotate: stamp the predecessor `oldId` (`revoked_at` + `replaced_by`) and insert the
+   * successor (same `family_id`), atomically — no window where both are current.
+   */
+  rotate(oldId: string, replacement: StoredRefresh): Promise<void>;
+  /** Revoke every row in a family (reuse-detection theft response). Returns the count. */
+  revokeFamily(familyId: string, at: string): Promise<number>;
+  /** Revoke every row for a user ("log out everywhere"). Returns the count. */
+  revokeAllForUser(userId: string, at: string): Promise<number>;
+  /** Cron cleanup: delete rows already past `expires_at` as of `now`. Returns the count. */
+  deleteExpired(now: Date): Promise<number>;
+}
+
+/**
+ * A tiny key/value store for global auth counters (Auth/IAM) — currently the single
+ * `perm_version` counter bumped on any `role_permissions` edit. A DEDICATED table
+ * (`auth_meta`, migration 0023), NOT the `settings` table: a `settings` row would
+ * surface in the panel's `GET /api/settings` view / trip the settings catalog. Both
+ * adapters identical (LSP).
+ */
+export interface AuthMetaRepository {
+  /** The current global permission-version counter (0 when never bumped). */
+  getPermVersion(): Promise<number>;
+  /** Atomically increment + return the new global permission-version counter. */
+  bumpPermVersion(): Promise<number>;
+}
+
 /** Aggregate handed to the composition root; groups the focused repositories. */
 export interface Database {
   sources: SourceRepository;
@@ -333,4 +445,10 @@ export interface Database {
   team: TeamRepository;
   alerts: AlertRepository;
   settings: SettingsRepository;
+  // Auth/IAM (Phase 1): the identity store + RBAC + refresh-token registry.
+  users: UserRepository;
+  roles: RoleRepository;
+  rolePermissions: RolePermissionRepository;
+  refreshTokens: RefreshTokenRepository;
+  authMeta: AuthMetaRepository;
 }

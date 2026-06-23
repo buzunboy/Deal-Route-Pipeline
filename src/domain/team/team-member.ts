@@ -16,6 +16,12 @@ export const TeamMemberStatus = z.enum([
   'active',
   /** Invited but not yet active. */
   'invited',
+  /**
+   * Deactivated. Added when `team_members` consolidated into `users` (Auth/IAM) — the
+   * Team screen is now a projection of `User`, whose status may be `disabled`. Kept in
+   * sync with `UserStatus` so a disabled user never fails the team projection.
+   */
+  'disabled',
 ]);
 export type TeamMemberStatus = z.infer<typeof TeamMemberStatus>;
 

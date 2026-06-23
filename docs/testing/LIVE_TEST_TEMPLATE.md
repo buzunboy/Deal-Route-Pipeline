@@ -151,3 +151,9 @@ AGENT=search SEARCH_PROVIDER=firecrawl AGENT_INLINE_SCRAPE=true \
   `fetchSignal` (`login_wall`/`soft_block`) best-effort reads (and that they stayed
   must-review), and that captcha still routes to manual-capture / soft-404 still skips.
   Note the per-domain rate-limit still applies.
+- **2026-06-23** — **added an auth-flow variant** of the live-test convention. Auth/IAM is
+  not extraction, so an against-a-running-`serve` auth run is recorded with a sibling
+  format (run metadata + an 11-step IdP/RBAC table + an auth trust-invariant checklist)
+  instead of per-deal tiers. The first filled run is
+  `docs/testing/results/AUTH_PHASE2_ACCEPTANCE_2026-06-23.md` — use it as the shape for a
+  future auth live run (e.g. Phase 3 Users/Roles or the post-deploy `test:live` smoke).

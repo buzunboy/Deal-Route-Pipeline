@@ -615,6 +615,78 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Fix-when**: build the `min_confidence` gate if confidence-based auto-queue is wanted; add promote/extract audit rows when the audit screen needs the full action vocabulary; set `DEPLOYMENT_ID` per deploy in prod.
 - **Logged**: 2026-06-22 (updated 2026-06-22: ACR-5/7/8/10/11/12 + the ACR-6/9/10-Metrics layer + ACR-10 Settings ALL shipped — the ACR endpoint set is complete)
 
+### Auth/IAM migrations 0019–0022 carry STALE intermediate drizzle snapshots (only 0023 is final-shape)
+- **Severity**: low (dev-time tooling only; runtime is unaffected)
+- **Area**: db / migrations
+- **Location**: `drizzle/meta/0019_snapshot.json`…`0022_snapshot.json` (vs the correct `0023_snapshot.json`); `drizzle/0019–0023_*.sql`.
+- **What**: the five auth migrations were authored via `drizzle-kit generate --custom` because drizzle-kit's table-RENAME detection is interactive (it can't run non-interactively here, and these migrations also need seeds/backfills/a column-drop it never generates). `--custom` copied the prior (0018) snapshot forward, so the intermediate `0019–0022` meta snapshots still describe `team_members`/no-auth-tables. The FINAL snapshot `0023_snapshot.json` was regenerated to the true final schema (verified: a fresh `db:generate` reports "No schema changes"), and `migrate()` uses ONLY the journal + `.sql` files (which are correct + verified applying cleanly from scratch AND on top of an existing `team_members`), so runtime + CI integration are unaffected.
+- **Why deferred**: harmless — the only consumer of intermediate snapshots is a hypothetical `db:generate` run pinned to an intermediate migration, which the repo never does; there is no `db:check` CI gate on snapshot content; the latest snapshot (the one future generates diff against) is correct.
+- **Fix-when**: if a future `db:generate` ever produces a spurious diff, or if a snapshot-integrity check is added — regenerate the intermediate snapshots in an interactive terminal (answer the rename prompt `team_members → users`) and commit them. Not worth the interactive-tooling risk now.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 1)
+
+### Phase-2 login: lockout must stay anti-enumeration (429 shape identical for known vs unknown email)
+- **Severity**: medium (a trust/anti-enumeration design constraint for the NOT-YET-BUILT login use-case; no live surface yet)
+- **Area**: auth (Phase 2)
+- **Location**: `src/domain/auth/auth-errors.ts` (`AccountLockedError`, `lockedUntil` now nullable); the future `AuthenticateUseCase` (Phase 2/3).
+- **What**: lockout is keyed to a real account's `failed_login_count`/`locked_until`, so an unknown email has no counter and never "locks". If the login use-case returns a 401 (`InvalidCredentialsError`) for an unknown email but a 429 (`AccountLockedError`) for a known-but-locked one, the differing status/shape is an account-enumeration oracle — defeating the constant-time-hasher work `DUMMY_PASSWORD_HASH` exists for. `AccountLockedError.lockedUntil` was made nullable in Phase 1 so the use-case CAN return an identical 429 shape on the unknown-email path if it chooses to model a per-email/per-IP attempt counter that doesn't require a user row (the panel already keeps such a sliding-window limiter as defense-in-depth).
+- **Why deferred**: the login use-case + HTTP handler are Phase 2/3; Phase 1 only ships the error type + the pure `lockoutPolicy`. The decision (and a timing/return-shape parity test for unknown-vs-known email) belongs with the use-case that produces these errors — `.claude/rules/testing.md` already mandates that adversarial "timing parity unknown-vs-known email" test for `/auth/login`.
+- **Fix-when**: when building `AuthenticateUseCase` (Phase 2) — decide the unknown-email-under-attack behavior, keep the 401-vs-429 distinction from leaking account existence, and add the timing/shape-parity boundary test.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 1 — code-reviewer follow-up)
+
+### Integration harness `seedAuthBaseline` reseeds the permissions catalog with `label = key` (not migration 0021's human labels)
+- **Severity**: low (test-fixture fidelity; no runtime/contract impact)
+- **Area**: testing / db
+- **Location**: `test/integration/harness.ts` (`seedAuthBaseline`, the `permissions` INSERT uses `VALUES ($1, $1)`).
+- **What**: after a TRUNCATE, the harness restores the permission KEYS but sets each `label` to the key itself, whereas migration 0021 installs human labels ("View the review queue", …). Current tests assert only keys, so this is harmless, but a future test asserting a permission label would pass against test data that diverges from prod.
+- **Why deferred**: no test reads labels yet; importing the labels would couple the harness to the migration's label strings for no current benefit.
+- **Fix-when**: when a test (or the Phase-3 `GET /api/permissions` integration test) asserts permission labels — source the labels from a shared constant the migration also uses, or assert keys only.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 1 — code-reviewer follow-up)
+
+### `team.upsert` over the consolidated `users` table loses the auth columns it can't express
+- **Severity**: low (a projection seam, by design; no data is corrupted)
+- **Area**: db / auth
+- **Location**: `PgTeamRepo`/`InMemoryTeamRepo` (`src/adapters/db/{postgres,in-memory}`); `src/domain/team/team-member.ts`.
+- **What**: `TeamMember` is now a PROJECTION of `User` (the `team_members → users` consolidation). `team.upsert` writes only name/email/role/status, defaulting the auth columns (`password_hash=null`, `token_version=0`, `auth_provider='password'`) on a fresh row — and a custom (non-admin/non-reviewer) role projects to `'reviewer'` on read (TeamMember.role is the closed admin|reviewer enum). So the legacy Team write path can't set a password or a custom role.
+- **Why deferred**: intended for the dual-accept window — the legacy `/api/team` path keeps working unchanged (invite → invited user, no password yet), and real login-capable provisioning + custom roles arrive via `ProvisionUserUseCase` / the `/api/users` screen in Phase 3. The panel migrates off `/api/team` in Phase 4; `/api/team` is removed in Phase 5.
+- **Fix-when**: when `/api/team` is retired (Phase 5) — drop the projection and the `TeamMember.role`→reviewer fallback; until then it is the correct compatibility shim.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 1)
+
+### Auth dual-accept window: the legacy static `REVIEW_API_TOKEN` is still accepted on `/api/*` (must be time-boxed; remove in Phase 5)
+- **Severity**: medium (a deliberately-temporary widening of the trust boundary)
+- **Area**: api / auth (Phase 2)
+- **Location**: `src/adapters/http/review-api.ts` (`authenticate()` legacy branch → `{ kind:'legacy' }`); wired via `serve.ts` (`auth.tokenIssuer` + `config.reviewApi.authToken`).
+- **What**: to let the panel cut over without a flag-day, the per-request guard accepts the **legacy static bearer** alongside per-user JWTs. A legacy caller is given NO identity and NO per-user permissions — it deliberately does **not** synthesize a `legacy-token@system` actor, so it cannot pollute the email-keyed `reviews.approver` audit trail (a legacy write still records the BODY `approver`, the pre-Phase-2 behaviour; the registry per-permission check is skipped for it, as the static token was always all-or-nothing). It is still a single shared all-powerful credential whose leak = full write access until retired.
+- **Why deferred**: the window is required so the panel (separate repo) can migrate to `/auth/login` + per-user tokens without a lockstep deploy. It is bounded: the plan retires `REVIEW_API_TOKEN` + this branch in **Phase 5**, after the panel cutover (Phase 4).
+- **Fix-when**: Phase 5 — delete the legacy branch in `authenticate()`, drop `REVIEW_API_TOKEN` from config + `serve.ts`, and remove the accept-but-ignore body `approver` (make it a required token-derived field). Keep `adminCorsAllowOrigin`.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 2)
+
+### Login lockout (429) remains account-specific, while unknown-email is 401 — a residual enumeration signal
+- **Severity**: medium (anti-enumeration; partially mitigated)
+- **Area**: auth (Phase 2)
+- **Location**: `src/application/auth/authenticate.ts` (`AuthenticateUseCase` — lockout is read from a real user's `getLoginState`; unknown email throws `InvalidCredentialsError`/401).
+- **What**: the login path is constant-time + generic-401 for unknown-vs-wrong-password (the `DUMMY_PASSWORD_HASH` verify runs on the unknown-email path). But lockout is keyed to a real account, so a locked **known** email returns 429 while an unknown email always returns 401 — the differing status under repeated attempts can still hint that an email exists. (Flagged in the Phase-1 note "Phase-2 login: lockout must stay anti-enumeration".)
+- **Why deferred**: closing it fully needs a per-email/per-IP sliding-window limiter that locks WITHOUT a user row (so an unknown email can also surface a 429) — the panel already runs such a limiter as defense-in-depth, and the pipeline lockout is the second layer. The status-vs-existence leak is low-signal (it requires crossing the threshold) and the higher-value fix (the per-IP limiter) belongs with a rate-limit pass, not this phase.
+- **Fix-when**: when adding a pipeline-side per-IP/per-email attempt limiter — return an identical 429 shape for an unknown-but-attacked email, and add the `testing.md`-mandated timing/shape-parity boundary test for unknown-vs-known email on `/auth/login`.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 2)
+
+### Granular `*:read` permissions are defined but not enforced on bare GETs — every authed user can read every gated GET (deliberate Phase-2 posture)
+- **Severity**: low (defense-in-depth / least-privilege; not an identity or leak hole)
+- **Area**: api / auth (Phase 2)
+- **Location**: `src/adapters/http/review-api.ts` (`requireRead` — authorizes any valid identity, no permission check); `src/domain/auth/permission.ts` (`candidate:read`/`sources:read`/`settings:read`/`team:read`).
+- **What**: the plan's route→permission registry maps "every bare `GET /api/*` read → valid token only, no named permission" — so `requireRead` grants any verified user every gated read, and the `*:read` enum keys (which exist so a FUTURE role can be *denied* a read) aren't consulted. Only `GET /api/evidence/:id/:artifact` keeps a named permission (`evidence:read`, the one sensitive GET). A reviewer with no `team:read`/`settings:read` can still read `/api/team` and `/api/settings`. Every reader is still a verified active user, and the public-DTO leak boundary is untouched — this is a least-privilege gap, not a forge/leak hole.
+- **Why deferred**: it's the intended Phase-2 design (the handoff §2.4 registry + the `permission.ts` comment both state bare GETs are "auth required" by default). Wiring per-read denial needs the Phase-3 Roles UI to even create a role that lacks a read perm — there's no way to exercise it until custom roles exist.
+- **Fix-when**: Phase 3 (Users & Roles) — add a route→read-permission lookup in `requireRead` and a "low-permission user is denied a read → 403" test, once a role without a given `*:read` can be created. (Phase 3 shipped the Roles UI but kept `requireRead` as auth-only; per-read denial remains a follow-up — a role lacking `*:read` is now *creatable*, so this is exercisable when wired.)
+- **Logged**: 2026-06-23 (Auth/IAM Phase 2 — code-reviewer follow-up)
+
+### Custom roles MAY grant the critical admin permissions (`roles:manage`/`team:manage`) — decided allowed; the last-admin guard covers all three lockout levers
+- **Severity**: low (a permission-design decision, fully guarded; recorded so the reasoning isn't lost)
+- **Area**: api / auth (Phase 3)
+- **Location**: `src/application/auth/manage-roles.ts` (`validatePermissionKeys` accepts any enum key incl. the critical ones; the last-admin guard `assertNotLastAdmin` + `assertRoleEditNotLastAdmin`); `src/domain/auth/admin-guards.ts` (`CRITICAL_ADMIN_PERMISSIONS`, `wouldRemoveLastHolder`, `wouldRoleEditRemoveLastHolder`).
+- **What**: `createRole`/`updateRole` do NOT forbid a custom role from granting `roles:manage`/`team:manage` — by design ("adding a role is data, not code"; an org may want a custom `superadmin`). The risk this creates (a custom role becomes the SOLE grantor of a critical perm, then a disable / demote / role-permission-edit strips the last holder) is closed by the last-admin lockout guard, which now covers ALL THREE levers: disable + demote (`assertNotLastAdmin`, from `setUserStatus`/`assignRoleToUser`/`updateUser`) and role-permission edit (`assertRoleEditNotLastAdmin`, from `updateRole`). All three refuse with `LastAdminError` (409). Unit + HTTP tests cover the custom-role case (the code-reviewer Blocker that prompted this).
+- **Why deferred**: nothing to fix — this records the deliberate decision (allow critical perms in custom roles) + confirms the guard's coverage, so a future reader doesn't "tighten" the validator and break the data-not-code property, or assume only the seeded `admin` role is protected.
+- **Fix-when**: revisit only if product decides custom roles must NOT grant the critical perms — then reject them in `validatePermissionKeys` and the guard's third lever becomes redundant. No action otherwise.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 3 — code-reviewer Blocker resolution)
+
 ---
 
 ## Resolved

@@ -15,3 +15,4 @@ export * from './alerting/index.js';
 export * from './markets/index.js';
 export * from './team/index.js';
 export * from './settings/index.js';
+export * from './auth/index.js';

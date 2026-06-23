@@ -1,6 +1,16 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
+import {
+  MALFORMED,
+  TOO_LARGE,
+  readBody,
+  sendJson,
+  sendError,
+  sendBytes,
+  safeEqual,
+  parseIntParam,
+  errMessage,
+} from './http-helpers.js';
 import {
   type ReviewUseCase,
   type SourceReviewUseCase,
@@ -8,13 +18,28 @@ import {
   type AlertsUseCase,
   type MetricsUseCase,
   type SettingsUseCase,
+  type AuthorizationUseCase,
+  type ProvisionUserUseCase,
+  type ManageRolesUseCase,
   ALERTS_DEFAULT_LIMIT,
   ALERTS_MAX_LIMIT,
 } from '../../application/index.js';
-import type { Logger, EvidenceStore } from '../../application/ports/index.js';
+import type {
+  Logger,
+  EvidenceStore,
+  TokenIssuer,
+  Database,
+} from '../../application/ports/index.js';
 import { toAdminEvidence } from './admin-evidence-dto.js';
 import { UUID_PATTERN } from './http-ids.js';
-import type { EvidenceArtifactKind } from '../../domain/index.js';
+import { tryMapAuthError } from './auth-error-map.js';
+import {
+  type EvidenceArtifactKind,
+  type Permission,
+  hasPermission,
+  ALL_PERMISSIONS,
+  UserNotFoundError,
+} from '../../domain/index.js';
 import {
   DealNotFoundError,
   NotReviewableError,
@@ -40,8 +65,20 @@ import {
   type CandidateFilters,
 } from '../../domain/index.js';
 
-/** Max accepted request-body size. Approve/reject bodies are a few hundred bytes. */
-const MAX_BODY_BYTES = 64 * 1024;
+/**
+ * The verified identity behind a gated `/api/*` request (Auth/IAM, Phase 2). Two shapes
+ * during the dual-accept window:
+ * - `kind:'jwt'` — a per-user ES256 token: identity + perms come from the VERIFIED claims.
+ *   `email` becomes the `approver` on every audited decision (the body field is ignored).
+ * - `kind:'legacy'` — the soon-to-be-retired static `REVIEW_API_TOKEN`. It carries NO
+ *   identity, so it is deliberately given NO `email` and NO perms — it must NEVER synthesize
+ *   a `legacy-token@system` actor onto the email-keyed reviews audit trail. A legacy caller
+ *   still supplies the `approver` in the BODY (the pre-Phase-2 behaviour); the registry
+ *   permission check is skipped for it (the static token was always all-or-nothing).
+ */
+export type Identity =
+  | { kind: 'jwt'; userId: string; email: string; role: string; perms: Set<Permission> }
+  | { kind: 'legacy' };
 
 /**
  * UUID path-segment matcher for `:id` routes whose id maps to a Postgres `uuid` column
@@ -57,10 +94,12 @@ const UUID_SEG = UUID_PATTERN;
 export interface ReviewApiOptions {
   staticPageHtml?: string;
   /**
-   * Bearer token required on state-changing (POST) endpoints. When set, an
-   * approve/reject without `Authorization: Bearer <token>` is rejected 401. When
-   * unset, state changes are open and the API MUST be bound to a trusted network
-   * (localhost / private) — see ARCHITECTURE.md. Read endpoints are never gated.
+   * The LEGACY static bearer token (`REVIEW_API_TOKEN`). During the Phase-2 dual-accept
+   * window it is accepted ALONGSIDE per-user JWTs (see {@link ReviewApi.authenticate}):
+   * a request whose bearer equals this token authenticates as a `kind:'legacy'` identity
+   * (no per-user perms; `approver` still comes from the body). It is RETIRED in Phase 5.
+   * When BOTH this and the JWT signing key are unset, the surface is open (trusted-network
+   * mode) — `serve.ts` warns at startup. Reads now also require a valid token (JWT or this).
    */
   authToken?: string;
   /**
@@ -72,6 +111,21 @@ export interface ReviewApiOptions {
    * is credentialed and state-changing, so the caller pins it to the panel's origin.
    */
   corsAllowOrigin?: string;
+  /**
+   * Auth/IAM (Phase 2) wiring for the per-user JWT guard. When present, a request may
+   * authenticate with a per-user ES256 bearer (verified by `tokenIssuer`, the user reloaded
+   * via `db`, perms resolved via `authorization`); the legacy {@link authToken} stays
+   * accepted alongside it (dual-accept). When ABSENT, only the legacy token / open mode
+   * applies (so existing constructions without auth keep working unchanged).
+   */
+  auth?: {
+    tokenIssuer: TokenIssuer;
+    db: Database;
+    authorization: AuthorizationUseCase;
+    /** Auth/IAM (Phase 3): the Users & Roles admin use-cases backing `/api/users` + `/api/roles`. */
+    provisionUser: ProvisionUserUseCase;
+    manageRoles: ManageRolesUseCase;
+  };
 }
 
 /**
@@ -127,6 +181,7 @@ export class ReviewApi {
   private readonly staticPageHtml?: string;
   private readonly authToken?: string;
   private readonly corsAllowOrigin?: string;
+  private readonly auth?: ReviewApiOptions['auth'];
 
   constructor(
     private readonly review: ReviewUseCase,
@@ -142,6 +197,7 @@ export class ReviewApi {
     this.staticPageHtml = options.staticPageHtml;
     this.authToken = options.authToken;
     this.corsAllowOrigin = options.corsAllowOrigin;
+    this.auth = options.auth;
   }
 
   listen(port: number): Promise<void> {
@@ -188,7 +244,12 @@ export class ReviewApi {
     }
 
     if (method === 'GET' && path === '/') return this.servePage(res);
+    // Liveness probe stays OPEN (no auth) — every other /api/* path now requires a token.
     if (method === 'GET' && path === '/api/health') return sendJson(res, 200, { ok: true });
+
+    // Every gated /api/* read now requires a valid token (Phase 2 — reads were open before).
+    // The test page (`GET /`), health, and the OPTIONS preflight stay unauthenticated.
+    if (path.startsWith('/api/') && !(await this.requireRead(req, res))) return;
 
     // Aggregate review-queue counts (ACR-5). Exact path — must precede the
     // `/api/candidates/:id...` patterns + the `/api/candidates` list below.
@@ -261,7 +322,8 @@ export class ReviewApi {
 
     const promote = path.match(/^\/api\/field-proposals\/([^/]+)\/promote$/);
     if (method === 'POST' && promote) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'field-proposals:promote');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -270,7 +332,7 @@ export class ReviewApi {
         return sendError(res, 400, 'approver, canonical_key and label are required');
       return this.mapErrors(res, async () => {
         const entry = await this.review.promoteFieldProposal({
-          approver: parsed.data.approver,
+          approver: this.approverFor(identity, parsed.data.approver),
           suggestedKey: decodeURIComponent(promote[1]!),
           canonicalKey: parsed.data.canonical_key,
           label: parsed.data.label,
@@ -283,7 +345,8 @@ export class ReviewApi {
     // Ad-hoc manual capture (ACR-12): create a candidate from scratch with NO
     // backing task. Distinct from `/:id/complete` (which needs an existing task id).
     if (method === 'POST' && path === '/api/manual-capture-tasks') {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'manual-capture:write');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -291,7 +354,7 @@ export class ReviewApi {
       if (!parsed.success) return sendError(res, 400, 'approver, fields and evidence are required');
       return this.mapErrors(res, async () => {
         const deal = await this.review.createManualCapture(
-          parsed.data.approver,
+          this.approverFor(identity, parsed.data.approver),
           parsed.data.fields,
           {
             sourceUrl: parsed.data.evidence.source_url,
@@ -310,7 +373,8 @@ export class ReviewApi {
       new RegExp(`^/api/manual-capture-tasks/(${UUID_SEG})/complete$`),
     );
     if (method === 'POST' && completeManual) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'manual-capture:write');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -319,7 +383,7 @@ export class ReviewApi {
       return this.mapErrors(res, async () => {
         const deal = await this.review.completeManualCapture(
           decodeURIComponent(completeManual[1]!),
-          parsed.data.approver,
+          this.approverFor(identity, parsed.data.approver),
           parsed.data.fields,
           {
             sourceUrl: parsed.data.evidence.source_url,
@@ -348,7 +412,10 @@ export class ReviewApi {
       new RegExp(`^/api/evidence/(${UUID_SEG})/(screenshot|html|terms)$`),
     );
     if (method === 'GET' && evidenceArtifact) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      // The one read with a NAMED permission: evidence bytes (raw HTML + verbatim
+      // copyrighted terms) are sensitive, so a JWT identity must hold `evidence:read`
+      // (the blanket read-gate above already required a valid token).
+      if ((await this.requireWrite(req, res, 'evidence:read')) === null) return;
       const id = decodeURIComponent(evidenceArtifact[1]!);
       const kind = evidenceArtifact[2] as EvidenceArtifactKind;
       const artifact = await this.evidenceStore.getArtifact(id, kind);
@@ -360,7 +427,8 @@ export class ReviewApi {
     // candidate resource itself (no /edit suffix) — the verb carries the intent.
     const editCandidate = path.match(new RegExp(`^/api/candidates/(${UUID_SEG})$`));
     if (method === 'PATCH' && editCandidate) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'candidate:edit');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -369,7 +437,7 @@ export class ReviewApi {
       return this.mapErrors(res, async () => {
         const deal = await this.review.editCandidate(
           decodeURIComponent(editCandidate[1]!),
-          parsed.data.approver,
+          this.approverFor(identity, parsed.data.approver),
           parsed.data.patch,
         );
         sendJson(res, 200, { deal });
@@ -378,7 +446,8 @@ export class ReviewApi {
 
     const approve = path.match(new RegExp(`^/api/candidates/(${UUID_SEG})/approve$`));
     if (method === 'POST' && approve) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'candidate:approve');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -394,7 +463,7 @@ export class ReviewApi {
           parsed.data.affiliate_disclosure ?? (await this.settings.defaultAffiliateDisclosure());
         const deal = await this.review.approve(
           decodeURIComponent(approve[1]!),
-          parsed.data.approver,
+          this.approverFor(identity, parsed.data.approver),
           { affiliateDisclosure },
         );
         sendJson(res, 200, { deal });
@@ -403,7 +472,8 @@ export class ReviewApi {
 
     const reject = path.match(new RegExp(`^/api/candidates/(${UUID_SEG})/reject$`));
     if (method === 'POST' && reject) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'candidate:reject');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -412,7 +482,7 @@ export class ReviewApi {
       return this.mapErrors(res, async () => {
         const deal = await this.review.reject(
           decodeURIComponent(reject[1]!),
-          parsed.data.approver,
+          this.approverFor(identity, parsed.data.approver),
           parsed.data.reason,
         );
         sendJson(res, 200, { deal });
@@ -426,7 +496,8 @@ export class ReviewApi {
       return sendJson(res, 200, { sources: await this.sourceReview.listRegistry() });
     }
     if (method === 'POST' && path === '/api/sources') {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'sources:write');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -435,7 +506,7 @@ export class ReviewApi {
         return sendError(res, 400, 'approver, domain, kind and tier are required');
       return this.mapErrors(res, async () => {
         const { source, created } = await this.sourceReview.createSource({
-          approver: parsed.data.approver,
+          approver: this.approverFor(identity, parsed.data.approver),
           domain: parsed.data.domain,
           kind: parsed.data.kind,
           tier: parsed.data.tier,
@@ -452,7 +523,8 @@ export class ReviewApi {
       return sendJson(res, 200, { members: await this.team.listTeam() });
     }
     if (method === 'POST' && path === '/api/team') {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'team:manage');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -460,7 +532,7 @@ export class ReviewApi {
       if (!parsed.success) return sendError(res, 400, 'approver, name and email are required');
       return this.mapErrors(res, async () => {
         const member = await this.team.inviteMember({
-          approver: parsed.data.approver,
+          approver: this.approverFor(identity, parsed.data.approver),
           name: parsed.data.name,
           email: parsed.data.email,
           role: parsed.data.role,
@@ -469,22 +541,65 @@ export class ReviewApi {
       });
     }
     if (method === 'PATCH' && path === '/api/profile') {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      // Self-service (any authed user editing their OWN row) — no named permission. The
+      // actor IS the identity: for a JWT it is the token's email, so a user can only ever
+      // edit their own profile / change their own password (both keyed on the actor's email;
+      // a `newPassword` change additionally PROVES the current password — that proof, not a
+      // permission, is the authorization).
+      const identity = await this.authenticate(req);
+      if (identity === null) return sendError(res, 401, 'unauthorized');
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = UpdateProfileBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver and name are required');
+      if (!parsed.success) {
+        return sendError(res, 400, 'name, or currentPassword + newPassword, is required');
+      }
+      const wantsPasswordChange = parsed.data.newPassword !== undefined;
+      // The self-service password change needs the IdP wired (the use-cases + hasher); a
+      // legacy/open caller (no `auth` bag) has no per-user identity to re-credential.
+      if (wantsPasswordChange && this.auth === undefined) {
+        return sendError(res, 400, 'password change requires per-user auth (no IdP configured)');
+      }
       return this.mapErrors(res, async () => {
-        const member = await this.team.updateProfile(parsed.data.approver, parsed.data.name);
-        sendJson(res, 200, { updated: true, name: member.name });
+        const actor = this.approverFor(identity, parsed.data.approver);
+        // Apply the password change FIRST so a wrong current-password (401) aborts the whole
+        // patch BEFORE a name write lands — the verify is the authorization for the request.
+        if (wantsPasswordChange) {
+          await this.auth!.manageRoles.changeOwnPassword({
+            actor,
+            currentPassword: parsed.data.currentPassword!,
+            newPassword: parsed.data.newPassword!,
+          });
+        }
+        const member =
+          parsed.data.name !== undefined
+            ? await this.team.updateProfile(actor, parsed.data.name)
+            : await this.team.getProfile(actor);
+        // `name` stays in the response (the ACR-11 contract); `password_changed` flags the
+        // self-service change so the panel can prompt a re-login (the token is now stale).
+        sendJson(res, 200, {
+          updated: true,
+          name: member?.name ?? null,
+          password_changed: wantsPasswordChange,
+        });
       });
+    }
+
+    // ── Users & Roles admin (Auth/IAM Phase 3) ───────────────────────────────
+    // The runtime IAM surface. Gated `team:manage` (users) / `roles:manage` (roles);
+    // `GET /api/permissions/me` is any-authed. These only exist when the IdP is wired
+    // (the `auth` bag) — without it they fall through to 404 (no use-cases to serve them).
+    if (this.auth !== undefined) {
+      const handled = await this.handleAdminIam(req, res, method, path);
+      if (handled) return;
     }
 
     // Update one writable setting (ACR-10 Settings). A read-only / unknown key is a 409.
     const updateSetting = path.match(/^\/api\/settings\/([^/]+)$/);
     if (method === 'PATCH' && updateSetting) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'settings:write');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -493,7 +608,7 @@ export class ReviewApi {
       return this.mapErrors(res, async () => {
         const result = await this.settings.updateSetting(
           decodeURIComponent(updateSetting[1]!),
-          parsed.data.approver,
+          this.approverFor(identity, parsed.data.approver),
           parsed.data.value,
         );
         sendJson(res, 200, result);
@@ -510,27 +625,35 @@ export class ReviewApi {
     }
     const ackAlert = path.match(new RegExp(`^/api/alerts/(${UUID_SEG})/acknowledge$`));
     if (method === 'POST' && ackAlert) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'alerts:manage');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = ApproveBody.safeParse(body);
       if (!parsed.success) return sendError(res, 400, 'approver is required');
       return this.mapErrors(res, async () => {
-        await this.alerts.acknowledge(decodeURIComponent(ackAlert[1]!), parsed.data.approver);
+        await this.alerts.acknowledge(
+          decodeURIComponent(ackAlert[1]!),
+          this.approverFor(identity, parsed.data.approver),
+        );
         sendJson(res, 200, { acknowledged: true });
       });
     }
     const resolveAlert = path.match(new RegExp(`^/api/alerts/(${UUID_SEG})/resolve$`));
     if (method === 'POST' && resolveAlert) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'alerts:manage');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = ApproveBody.safeParse(body);
       if (!parsed.success) return sendError(res, 400, 'approver is required');
       return this.mapErrors(res, async () => {
-        await this.alerts.resolve(decodeURIComponent(resolveAlert[1]!), parsed.data.approver);
+        await this.alerts.resolve(
+          decodeURIComponent(resolveAlert[1]!),
+          this.approverFor(identity, parsed.data.approver),
+        );
         sendJson(res, 200, { resolved: true });
       });
     }
@@ -549,7 +672,8 @@ export class ReviewApi {
     }
     const approveSource = path.match(new RegExp(`^/api/sources/(${UUID_SEG})/approve$`));
     if (method === 'POST' && approveSource) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'sources:review');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -558,14 +682,15 @@ export class ReviewApi {
       return this.mapErrors(res, async () => {
         const source = await this.sourceReview.approveSource(
           decodeURIComponent(approveSource[1]!),
-          parsed.data.approver,
+          this.approverFor(identity, parsed.data.approver),
         );
         sendJson(res, 200, { source });
       });
     }
     const rejectSource = path.match(new RegExp(`^/api/sources/(${UUID_SEG})/reject$`));
     if (method === 'POST' && rejectSource) {
-      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const identity = await this.requireWrite(req, res, 'sources:review');
+      if (identity === null) return;
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
@@ -574,7 +699,7 @@ export class ReviewApi {
       return this.mapErrors(res, async () => {
         const source = await this.sourceReview.rejectSource(
           decodeURIComponent(rejectSource[1]!),
-          parsed.data.approver,
+          this.approverFor(identity, parsed.data.approver),
           parsed.data.reason,
         );
         sendJson(res, 200, { source });
@@ -594,20 +719,324 @@ export class ReviewApi {
   private applyCors(res: ServerResponse): void {
     if (this.corsAllowOrigin === undefined) return;
     res.setHeader('access-control-allow-origin', this.corsAllowOrigin);
-    res.setHeader('access-control-allow-methods', 'GET, POST, PATCH, OPTIONS');
+    // DELETE is advertised for `DELETE /api/roles/:name` (Auth/IAM Phase 3).
+    res.setHeader('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     res.setHeader('access-control-allow-headers', 'Authorization, Content-Type');
     // The origin is pinned (not `*`), so the response varies by Origin — let caches
     // key on it rather than serving one origin's headers to another.
     res.setHeader('vary', 'Origin');
   }
 
-  /** True when no token is configured (open, trusted-network mode) or the bearer matches. */
-  private authorized(req: IncomingMessage): boolean {
-    if (this.authToken === undefined) return true;
+  /**
+   * Authenticate a gated `/api/*` request (Auth/IAM, Phase 2). Returns the verified
+   * {@link Identity}, or `null` (the caller 401s — a UNIFORM `{ error: 'unauthorized' }`
+   * so a probe can't tell "no token" from "bad/expired/revoked token"). DUAL-ACCEPT: a
+   * per-user ES256 JWT is preferred; the legacy static token is accepted alongside it.
+   *
+   * JWT path (the headline fix — identity is proven, never trusted from the body):
+   *   1. `tokenIssuer.verifyAccess` PINS `algorithms:['ES256']` + checks iss/aud/exp/sig.
+   *      Any failure (alg swap, `alg:none`, tamper, expiry, wrong realm) ⇒ null.
+   *   2. Reload the user; a deleted/disabled user's still-unexpired token is dead.
+   *   3. `claims.token_version !== user.token_version` ⇒ null (IMMEDIATE revoke lever).
+   *   4. On a `perm_version` mismatch, RE-RESOLVE perms from the DB (so a mid-token
+   *      permission change is honoured before exp); else trust the token's `perms`.
+   *
+   * Open mode: when NEITHER a signing key (`this.auth`) NOR a legacy token is configured,
+   * the surface is open (trusted-network) — returns a `legacy` identity so handlers run.
+   */
+  private async authenticate(req: IncomingMessage): Promise<Identity | null> {
     const header = req.headers.authorization ?? '';
     const prefix = 'Bearer ';
-    if (!header.startsWith(prefix)) return false;
-    return safeEqual(header.slice(prefix.length), this.authToken);
+    const bearer = header.startsWith(prefix) ? header.slice(prefix.length) : null;
+
+    // Legacy static token (constant-time) — accepted during the dual-accept window. It
+    // carries NO identity (no email/perms): it must never become a synthetic actor on the
+    // email-keyed reviews trail; a legacy caller's `approver` still comes from the body.
+    if (bearer !== null && this.authToken !== undefined && safeEqual(bearer, this.authToken)) {
+      return { kind: 'legacy' };
+    }
+
+    // Per-user JWT path (when auth is wired and the bearer isn't the legacy token).
+    if (bearer !== null && this.auth !== undefined) {
+      const claims = await this.auth.tokenIssuer.verifyAccess(bearer).catch(() => null);
+      if (claims === null) return null;
+      const user = await this.auth.db.users.getById(claims.sub);
+      if (user === null || user.status !== 'active') return null;
+      if (claims.token_version !== user.token_version) return null; // immediate revoke
+      const currentPermVersion = await this.auth.db.authMeta.getPermVersion();
+      const perms =
+        claims.perm_version === currentPermVersion
+          ? new Set<Permission>(claims.perms)
+          : await this.auth.authorization.permissionsForUser(user.id);
+      const role = await this.auth.db.roles.getById(user.role_id);
+      return {
+        kind: 'jwt',
+        userId: user.id,
+        email: user.email,
+        role: role?.name ?? '',
+        perms,
+      };
+    }
+
+    // No bearer (or bearer present but no JWT wiring and not the legacy token):
+    // open mode ONLY when neither credential is configured at all.
+    if (this.authToken === undefined && this.auth === undefined) return { kind: 'legacy' };
+    return null;
+  }
+
+  /**
+   * Guard a WRITE handler: authenticate, then require the route's permission. Returns the
+   * `Identity` to use, or `null` after sending the 401/403 (the caller returns early). A
+   * `jwt` identity must hold `permission`; a `legacy` identity is the all-or-nothing static
+   * token (the old behaviour) and skips the per-permission check. The `approver` the handler
+   * records is resolved via {@link approverFor}, never read straight from the body.
+   */
+  private async requireWrite(
+    req: IncomingMessage,
+    res: ServerResponse,
+    permission: Permission,
+  ): Promise<Identity | null> {
+    const identity = await this.authenticate(req);
+    if (identity === null) {
+      sendError(res, 401, 'unauthorized');
+      return null;
+    }
+    if (identity.kind === 'jwt' && !hasPermission(identity.perms, permission)) {
+      sendError(res, 403, 'forbidden');
+      return null;
+    }
+    return identity;
+  }
+
+  /**
+   * Guard a READ handler: a valid token (JWT or legacy) is now required (the Phase-2
+   * "all `/api/*` reads require auth" change — reads were open before). No named permission
+   * for a bare GET. Returns true when authorised; otherwise sends 401 and returns false.
+   */
+  private async requireRead(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+    const identity = await this.authenticate(req);
+    if (identity === null) {
+      sendError(res, 401, 'unauthorized');
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * The actor to record as `approver`/`actor` on an audited action. For a JWT identity it
+   * is the TOKEN's verified email — the body field is IGNORED (the headline trust fix); a
+   * JWT caller need not send one. For the legacy static token (no identity) it falls back to
+   * the body `approver` (the pre-Phase-2 behaviour), so the dual-accept window never
+   * fabricates a synthetic actor. A legacy caller that omits the approver gets `''`, which
+   * the use-case rejects with `MissingApproverError` (400) exactly as before.
+   */
+  private approverFor(identity: Identity, bodyApprover: string | undefined): string {
+    return identity.kind === 'jwt' ? identity.email : (bodyApprover ?? '');
+  }
+
+  /**
+   * The Users & Roles admin endpoints (Auth/IAM Phase 3). Returns `true` once it has
+   * matched + answered a request, `false` if none matched (so `handle` continues to its
+   * other routes / catch-all 404). Only called when {@link auth} is wired, so
+   * `this.auth.provisionUser`/`manageRoles` are guaranteed present.
+   *
+   * Gating: user endpoints require `team:manage`, role endpoints `roles:manage`, the
+   * permission CATALOGUE `roles:manage`; `GET /api/permissions/me` is any valid token.
+   * `PATCH /api/users/:id` additionally allows the SELF path (a user editing their own
+   * name) without `team:manage` — role/status/password sub-fields stay `team:manage`-gated.
+   * The actor recorded for the audit line is always token-derived (never the body).
+   */
+  private async handleAdminIam(
+    req: IncomingMessage,
+    res: ServerResponse,
+    method: string,
+    path: string,
+  ): Promise<boolean> {
+    const auth = this.auth!;
+
+    // ── Permissions ──
+    if (method === 'GET' && path === '/api/permissions/me') {
+      const identity = await this.authenticate(req);
+      if (identity === null) {
+        sendError(res, 401, 'unauthorized');
+        return true;
+      }
+      // A legacy static-token caller has no per-user identity; report the all-or-nothing
+      // posture honestly (the full catalogue) rather than fabricating a user.
+      const permissions =
+        identity.kind === 'jwt' ? [...identity.perms].sort() : [...ALL_PERMISSIONS];
+      const body =
+        identity.kind === 'jwt'
+          ? { email: identity.email, role: identity.role, permissions }
+          : { email: null, role: 'legacy', permissions };
+      sendJson(res, 200, body);
+      return true;
+    }
+    if (method === 'GET' && path === '/api/permissions') {
+      const identity = await this.requireWrite(req, res, 'roles:manage');
+      if (identity === null) return true;
+      // The seeded catalogue, enumerated from the closed enum so the panel role editor can
+      // render every key without the enum shipping to the client.
+      sendJson(res, 200, { permissions: ALL_PERMISSIONS.map((key) => ({ key })) });
+      return true;
+    }
+
+    // ── Users ──
+    if (method === 'GET' && path === '/api/users') {
+      const identity = await this.requireWrite(req, res, 'team:manage');
+      if (identity === null) return true;
+      sendJson(res, 200, { users: await auth.manageRoles.listUsers() });
+      return true;
+    }
+    if (method === 'POST' && path === '/api/users') {
+      const identity = await this.requireWrite(req, res, 'team:manage');
+      if (identity === null) return true;
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return (sendError(res, 413, 'request body too large'), true);
+      if (body === MALFORMED) return (sendError(res, 400, 'malformed JSON body'), true);
+      const parsed = CreateUserBody.safeParse(body);
+      if (!parsed.success) {
+        return (sendError(res, 400, 'name, email, role and password are required'), true);
+      }
+      await this.mapErrors(res, async () => {
+        const user = await auth.provisionUser.provision({
+          actor: this.approverFor(identity, parsed.data.approver),
+          name: parsed.data.name,
+          email: parsed.data.email,
+          roleName: parsed.data.role,
+          initialPassword: parsed.data.password,
+        });
+        sendJson(res, 201, { id: user.id, email: user.email, role: parsed.data.role });
+      });
+      return true;
+    }
+    const userPatch = path.match(new RegExp(`^/api/users/(${UUID_SEG})$`));
+    if (method === 'PATCH' && userPatch) {
+      // Authenticate first; the SELF path (own name) is allowed without team:manage, but
+      // role/status/password require team:manage. Mirrors PATCH /api/profile's self-intent.
+      const identity = await this.authenticate(req);
+      if (identity === null) return (sendError(res, 401, 'unauthorized'), true);
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return (sendError(res, 413, 'request body too large'), true);
+      if (body === MALFORMED) return (sendError(res, 400, 'malformed JSON body'), true);
+      const parsed = PatchUserBody.safeParse(body);
+      if (!parsed.success) return (sendError(res, 400, 'invalid user patch'), true);
+      const targetId = userPatch[1]!;
+      const wantsAdminFields =
+        parsed.data.role !== undefined ||
+        parsed.data.status !== undefined ||
+        parsed.data.password !== undefined;
+      const isSelf = identity.kind === 'jwt' && identity.userId === targetId;
+      // Any privileged sub-field, OR editing another user at all, needs team:manage.
+      const needsManage = wantsAdminFields || !isSelf;
+      if (needsManage && !this.hasManage(identity, 'team:manage')) {
+        return (sendError(res, 403, 'forbidden'), true);
+      }
+      await this.mapErrors(res, async () => {
+        const actor = this.approverFor(identity, parsed.data.approver);
+        // The admin trio (role/status/password) is applied through ONE use-case that
+        // validates everything up front, so a later invalid sub-field can't half-apply an
+        // earlier one (it also single-bumps token_version + revokes refreshes on disable).
+        const target =
+          parsed.data.role !== undefined ||
+          parsed.data.status !== undefined ||
+          parsed.data.password !== undefined
+            ? await auth.manageRoles.updateUser({
+                actor,
+                userId: targetId,
+                role: parsed.data.role,
+                status: parsed.data.status,
+                password: parsed.data.password,
+              })
+            : await auth.db.users.getById(targetId);
+        if (target === null) throw new UserNotFoundError(targetId);
+        if (parsed.data.name !== undefined) {
+          // The display-name edit reuses the self-or-admin profile path keyed on the TARGET
+          // user's email (so an admin can rename another user too). Applied LAST; the only
+          // way it can fail is a vanished row, which it can't half-apply over the trio.
+          await this.team.updateProfile(target.email, parsed.data.name);
+        }
+        sendJson(res, 200, { updated: true });
+      });
+      return true;
+    }
+
+    // ── Roles ──
+    if (method === 'GET' && path === '/api/roles') {
+      const identity = await this.requireWrite(req, res, 'roles:manage');
+      if (identity === null) return true;
+      sendJson(res, 200, { roles: await auth.manageRoles.listRoles() });
+      return true;
+    }
+    if (method === 'POST' && path === '/api/roles') {
+      const identity = await this.requireWrite(req, res, 'roles:manage');
+      if (identity === null) return true;
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return (sendError(res, 413, 'request body too large'), true);
+      if (body === MALFORMED) return (sendError(res, 400, 'malformed JSON body'), true);
+      const parsed = CreateRoleBody.safeParse(body);
+      if (!parsed.success) return (sendError(res, 400, 'name and permissions are required'), true);
+      await this.mapErrors(res, async () => {
+        const role = await auth.manageRoles.createRole({
+          actor: this.approverFor(identity, parsed.data.approver),
+          name: parsed.data.name,
+          description: parsed.data.description,
+          permissions: parsed.data.permissions,
+        });
+        sendJson(res, 201, { role });
+      });
+      return true;
+    }
+    // `/api/roles/:name` — role names are free-form string keys (like settings/:key), so a
+    // `[^/]+` capture, NOT the UUID matcher.
+    const roleByName = path.match(/^\/api\/roles\/([^/]+)$/);
+    if (method === 'PATCH' && roleByName) {
+      const identity = await this.requireWrite(req, res, 'roles:manage');
+      if (identity === null) return true;
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return (sendError(res, 413, 'request body too large'), true);
+      if (body === MALFORMED) return (sendError(res, 400, 'malformed JSON body'), true);
+      const parsed = PatchRoleBody.safeParse(body);
+      if (!parsed.success) return (sendError(res, 400, 'invalid role patch'), true);
+      await this.mapErrors(res, async () => {
+        const role = await auth.manageRoles.updateRole({
+          actor: this.approverFor(identity, parsed.data.approver),
+          roleName: decodeURIComponent(roleByName[1]!),
+          description: parsed.data.description,
+          permissions: parsed.data.permissions,
+        });
+        sendJson(res, 200, { role });
+      });
+      return true;
+    }
+    if (method === 'DELETE' && roleByName) {
+      const identity = await this.requireWrite(req, res, 'roles:manage');
+      if (identity === null) return true;
+      await this.mapErrors(res, async () => {
+        await auth.manageRoles.deleteRole({
+          actor: this.approverForActor(identity),
+          roleName: decodeURIComponent(roleByName[1]!),
+        });
+        sendJson(res, 200, { deleted: true });
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Does this identity hold a management permission? A `jwt` identity must hold the key;
+   * a `legacy` static-token identity is the all-or-nothing admin token (the dual-accept
+   * window), so it passes. The SELF-only paths call this to gate the privileged sub-fields.
+   */
+  private hasManage(identity: Identity, permission: Permission): boolean {
+    return identity.kind === 'legacy' || hasPermission(identity.perms, permission);
+  }
+
+  /** The token-derived actor for an audited action with no body (DELETE). Legacy ⇒ ''. */
+  private approverForActor(identity: Identity): string {
+    return identity.kind === 'jwt' ? identity.email : '';
   }
 
   /**
@@ -644,6 +1073,9 @@ export class ReviewApi {
         return sendError(res, 409, `manual-capture task is not open (status: ${err.status})`);
       }
       if (err instanceof SettingNotWritableError) return sendError(res, 409, err.message);
+      // Auth/IAM errors (PermissionDenied 403, etc.) share the central mapper so the auth
+      // statuses are defined once and can't drift from AuthApi's.
+      if (tryMapAuthError(res, err)) return;
       throw err;
     }
   }
@@ -655,37 +1087,64 @@ export class ReviewApi {
   }
 }
 
-const ApproveBody = z.object({ approver: z.string().min(1) });
+// `approver` is OPTIONAL at the HTTP boundary across all write bodies (Auth/IAM Phase 2):
+// a per-user JWT supplies the actor from its verified email (the body field is ignored —
+// `approverFor`), and a legacy static-token caller still sends it in the body. A legacy
+// caller that omits it reaches `MissingApproverError` → 400 in the use-case, unchanged.
+const ApproveBody = z.object({ approver: z.string().min(1).optional() });
 /** Candidate approve also accepts the reviewer's EU-Omnibus affiliate disclosure (optional). */
 const ApproveCandidateBody = z.object({
-  approver: z.string().min(1),
+  approver: z.string().min(1).optional(),
   affiliate_disclosure: z.boolean().optional(),
 });
-const RejectBody = z.object({ approver: z.string().min(1), reason: z.string().optional() });
+const RejectBody = z.object({
+  approver: z.string().min(1).optional(),
+  reason: z.string().optional(),
+});
 /** Invite / register a team member (ACR-10 Team). */
 const InviteMemberBody = z.object({
-  approver: z.string().min(1),
+  approver: z.string().min(1).optional(),
   name: z.string().min(1),
   email: z.string().email(),
   role: z.string().optional(),
 });
-/** Update the signed-in reviewer's own display name (ACR-11 Profile). */
-const UpdateProfileBody = z.object({
-  approver: z.string().min(1),
-  name: z.string().min(1),
-});
+/**
+ * Update the signed-in reviewer's OWN profile (ACR-11 Profile + Auth/IAM Phase 3 self-service
+ * password). `name` edits the display name (unchanged); `currentPassword`+`newPassword`
+ * together change the caller's own password (the current-password proof IS the authorization —
+ * no `team:manage`). All fields optional, but at least one mutation must be present, and the
+ * password fields are all-or-nothing (a `newPassword` without `currentPassword`, or vice-versa,
+ * is a 400 — never a silent partial). The actor is token-derived; any body `approver` is ignored.
+ */
+const UpdateProfileBody = z
+  .object({
+    approver: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    currentPassword: z.string().min(1).optional(),
+    newPassword: z.string().min(1).optional(),
+  })
+  .refine(
+    (b) => b.name !== undefined || b.currentPassword !== undefined || b.newPassword !== undefined,
+    {
+      message: 'name or a password change is required',
+    },
+  )
+  // Password change is all-or-nothing: both fields, or neither.
+  .refine((b) => (b.currentPassword === undefined) === (b.newPassword === undefined), {
+    message: 'currentPassword and newPassword must be supplied together',
+  });
 /**
  * Update one writable setting (ACR-10 Settings). `value` is loosely typed at the HTTP
  * boundary (a toggle sends a boolean, a value chip a string/number); the pure
  * `validateSettingValue` domain rule is the real, per-key validator.
  */
 const UpdateSettingBody = z.object({
-  approver: z.string().min(1),
+  approver: z.string().min(1).optional(),
   value: z.union([z.string(), z.number(), z.boolean()]),
 });
 /** Register a new operational source from the admin "+ Add source" flow (ACR-10). */
 const CreateSourceBody = z.object({
-  approver: z.string().min(1),
+  approver: z.string().min(1).optional(),
   domain: z.string().min(1),
   kind: z.string().min(1),
   tier: z.number().int(),
@@ -693,25 +1152,74 @@ const CreateSourceBody = z.object({
   cadence_days: z.number().int().positive().optional(),
 });
 
+// ── Auth/IAM Phase 3 request bodies ──
+// `approver` is optional everywhere (the actor is token-derived; only a legacy static-token
+// caller supplies it — the same dual-accept convention as the rest of the API). The
+// `password` floor is enforced by the pure `validatePasswordPolicy` in the use-case, so the
+// HTTP boundary only checks presence (min(1)) — never echoes the value.
+/** Provision a login-capable user (POST /api/users) — gated `team:manage`. */
+const CreateUserBody = z.object({
+  approver: z.string().min(1).optional(),
+  name: z.string().min(1),
+  email: z.string().email(),
+  role: z.string().min(1),
+  password: z.string().min(1),
+});
+/** Patch a user (PATCH /api/users/:id): name self-or-admin; role/status/password admin-only. */
+const PatchUserBody = z
+  .object({
+    approver: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    role: z.string().min(1).optional(),
+    status: z.enum(['active', 'disabled']).optional(),
+    password: z.string().min(1).optional(),
+  })
+  // At least one mutable field must be present (an empty patch is a 400, not a silent no-op).
+  .refine(
+    (b) =>
+      b.name !== undefined ||
+      b.role !== undefined ||
+      b.status !== undefined ||
+      b.password !== undefined,
+    { message: 'at least one of name/role/status/password is required' },
+  );
+/** Create a custom role (POST /api/roles) — gated `roles:manage`. */
+const CreateRoleBody = z.object({
+  approver: z.string().min(1).optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  permissions: z.array(z.string()),
+});
+/** Patch a role (PATCH /api/roles/:name): description and/or the permission set. */
+const PatchRoleBody = z
+  .object({
+    approver: z.string().min(1).optional(),
+    description: z.string().optional(),
+    permissions: z.array(z.string()).optional(),
+  })
+  .refine((b) => b.description !== undefined || b.permissions !== undefined, {
+    message: 'at least one of description/permissions is required',
+  });
+
 /**
  * PATCH candidate edit. `patch` is an opaque object — the deeper allowlist +
  * sub-schema validation happens in the pure domain rule (applyCandidatePatch),
  * which the use-case calls, so the HTTP boundary only checks the envelope.
  */
 const EditCandidateBody = z.object({
-  approver: z.string().min(1),
+  approver: z.string().min(1).optional(),
   patch: z.record(z.unknown()),
 });
 /** Promote a field proposal into the condition vocabulary. */
 const PromoteBody = z.object({
-  approver: z.string().min(1),
+  approver: z.string().min(1).optional(),
   canonical_key: z.string().min(1),
   label: z.string().min(1),
   target: z.enum(['vocabulary', 'field']).default('vocabulary'),
 });
 /** Human deal fields + referenced evidence — shared by complete + ad-hoc create. */
 const ManualCaptureBody = z.object({
-  approver: z.string().min(1),
+  approver: z.string().min(1).optional(),
   fields: z.record(z.unknown()),
   evidence: z.object({
     source_url: z.string().min(1),
@@ -725,80 +1233,6 @@ const ManualCaptureBody = z.object({
 const CompleteManualBody = ManualCaptureBody;
 /** Create a candidate from an AD-HOC capture with no backing task (ACR-12). */
 const CreateManualBody = ManualCaptureBody;
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  const json = JSON.stringify(body);
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
-  res.end(json);
-}
-
-/**
- * Stream raw evidence bytes back with the artifact's stored content-type. `private,
- * no-store` keeps a shared cache (or the browser) from retaining the raw HTML / the
- * verbatim copyrighted terms — this is a reviewer-only artifact, never publicly
- * cacheable (unlike the screenshot, which the public CDN may cache). Always 200; the
- * absent case is a 404 handled by the caller before this is reached.
- */
-function sendBytes(res: ServerResponse, contentType: string, bytes: Uint8Array): void {
-  res.writeHead(200, {
-    'content-type': contentType,
-    'cache-control': 'private, no-store',
-  });
-  res.end(Buffer.from(bytes));
-}
-
-function sendError(res: ServerResponse, status: number, message: string): void {
-  sendJson(res, status, { error: message });
-}
-
-/** Sentinels distinguishing malformed / oversized bodies from an (allowed) empty one. */
-const MALFORMED = Symbol('malformed-json');
-const TOO_LARGE = Symbol('body-too-large');
-
-/**
- * Read and JSON-parse a request body, bounding total size so a client cannot
- * exhaust memory by streaming an unbounded body (Node imposes no default cap).
- * Returns TOO_LARGE / MALFORMED sentinels for the handler to map to 413 / 400.
- */
-async function readBody(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  let oversize = false;
-  for await (const chunk of req) {
-    const buf = chunk as Buffer;
-    total += buf.length;
-    if (total > MAX_BODY_BYTES) {
-      // Stop buffering but keep draining the stream to completion, so the
-      // connection stays usable and the handler can return a clean 413
-      // (destroying the socket mid-request makes the client see a reset).
-      oversize = true;
-      chunks.length = 0;
-    } else if (!oversize) {
-      chunks.push(buf);
-    }
-  }
-  if (oversize) return TOO_LARGE;
-  const raw = Buffer.concat(chunks).toString('utf8');
-  if (raw.trim() === '') return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    // Don't swallow: signal malformed input so the handler returns a clear 400.
-    return MALFORMED;
-  }
-}
-
-/** Constant-time string compare to avoid leaking the token via timing. */
-function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}
-
-function errMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -832,13 +1266,6 @@ function parseCandidateQuery(
     return { ok: false, error: `offset must be 0..${CANDIDATES_MAX_OFFSET}` };
   }
   return { ok: true, value: { filters: filters.data, limit, offset } };
-}
-
-/** Parse an integer query param; null when present-but-not-an-integer (caller 400s). */
-function parseIntParam(raw: string | null, fallback: number): number | null {
-  if (raw === null || raw === '') return fallback;
-  if (!/^-?\d+$/.test(raw)) return null;
-  return Number.parseInt(raw, 10);
 }
 
 /**

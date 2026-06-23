@@ -29,7 +29,14 @@ export async function applyMigrations(): Promise<void> {
   }
 }
 
-/** Truncate every domain table so each test starts from a clean slate. */
+/**
+ * Truncate every domain table so each test starts from a clean slate, then restore the
+ * auth REFERENCE seed (the two system roles + their grants + perm_version=0) that the
+ * migrations install — TRUNCATE wipes it, but it is reference data, not test fixtures,
+ * and both adapters must arrive with the same seeded baseline (LSP). `team_members` was
+ * renamed to `users` (migration 0019); the auth tables (`users`, `roles`, `permissions`,
+ * `role_permissions`, `refresh_tokens`, `auth_meta`) join the truncate set.
+ */
 export async function resetDb(): Promise<void> {
   const pool = new pg.Pool({ connectionString: DB_URL });
   try {
@@ -37,12 +44,50 @@ export async function resetDb(): Promise<void> {
     await db.execute(
       sql`TRUNCATE TABLE reviews, source_reviews, changes, deals, evidence, manual_capture_tasks,
             crawl_runs, field_proposals, sources, subscription_catalog, condition_vocabulary,
-            team_members, alert_events, settings
+            users, alert_events, settings, roles, permissions, role_permissions,
+            refresh_tokens, auth_meta
           RESTART IDENTITY CASCADE`,
     );
+    await seedAuthBaseline(pool);
   } finally {
     await pool.end();
   }
+}
+
+/**
+ * Re-install the migration-seeded auth reference data (system roles, the permissions
+ * catalog, the grants, perm_version=0) after a TRUNCATE. Derived from the SAME domain
+ * constants the in-memory adapter seeds from, so a freshly-reset Postgres equals a fresh
+ * `InMemoryDb` (LSP). Idempotent (ON CONFLICT). Exported so the auth port-contract test
+ * can reuse it for its own pool reset.
+ */
+export async function seedAuthBaseline(pool: pg.Pool): Promise<void> {
+  const { SYSTEM_ROLES, ALL_PERMISSIONS } = await import('../../src/domain/index.js');
+  for (const role of SYSTEM_ROLES) {
+    await pool.query(
+      `INSERT INTO roles (id, name, description, is_system) VALUES ($1, $2, $3, true)
+         ON CONFLICT (id) DO NOTHING`,
+      [role.id, role.name, role.description],
+    );
+  }
+  for (const key of ALL_PERMISSIONS) {
+    await pool.query(
+      `INSERT INTO permissions (key, label) VALUES ($1, $1) ON CONFLICT (key) DO NOTHING`,
+      [key],
+    );
+  }
+  for (const role of SYSTEM_ROLES) {
+    for (const key of role.permissions) {
+      await pool.query(
+        `INSERT INTO role_permissions (role_id, permission_key) VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+        [role.id, key],
+      );
+    }
+  }
+  await pool.query(
+    `INSERT INTO auth_meta (key, value) VALUES ('perm_version', '0') ON CONFLICT (key) DO NOTHING`,
+  );
 }
 
 /**

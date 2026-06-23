@@ -14,6 +14,12 @@ import {
   DailyBudgetGuard,
   NoopBrowserAgent,
   DiscoverBroadUseCase,
+  AuthorizationUseCase,
+  AuthenticateUseCase,
+  RefreshUseCase,
+  LogoutUseCase,
+  ProvisionUserUseCase,
+  ManageRolesUseCase,
   SystemClock,
   type Fetcher,
   type FeedReader,
@@ -25,6 +31,8 @@ import {
   type SearchProvider,
   type BrowserAgent,
   type Alerting,
+  type PasswordHasher,
+  type TokenIssuer,
 } from '../application/index.js';
 import {
   SEED_VOCABULARY,
@@ -55,6 +63,8 @@ import { PostgresDb } from '../adapters/db/postgres/postgres-db.js';
 import { NoopAlerter } from '../adapters/alerting/noop-alerter.js';
 import { WebhookAlerter } from '../adapters/alerting/webhook-alerter.js';
 import { PersistingAlerter } from '../adapters/alerting/persisting-alerter.js';
+import { Argon2idHasher } from '../adapters/security/argon2id-hasher.js';
+import { JoseTokenIssuer } from '../adapters/security/jose-token-issuer.js';
 
 /**
  * The ONE composition root. It reads typed config and constructs concrete
@@ -83,6 +93,8 @@ export interface ContainerOptions {
     browserAgent?: BrowserAgent;
     alerting?: Alerting;
     suffixOracle?: SuffixOracle;
+    passwordHasher?: PasswordHasher;
+    tokenIssuer?: TokenIssuer;
   };
 }
 
@@ -100,6 +112,18 @@ export class Container {
   readonly browserAgent: BrowserAgent;
   readonly alerting: Alerting;
   readonly suffixOracle: SuffixOracle;
+  // Auth/IAM ports (Phase 1). Constructed here (the one composition root); the use-cases
+  // + HTTP guard that consume them are wired in Phase 2.
+  readonly passwordHasher: PasswordHasher;
+  readonly tokenIssuer: TokenIssuer;
+  // Auth/IAM use-cases (Phase 2): the IdP login/refresh/logout + permission resolution.
+  readonly authorization: AuthorizationUseCase;
+  readonly authenticateUser: AuthenticateUseCase;
+  readonly refreshSession: RefreshUseCase;
+  readonly logoutSession: LogoutUseCase;
+  // Auth/IAM use-cases (Phase 3): the runtime Users & Roles admin surface.
+  readonly provisionUser: ProvisionUserUseCase;
+  readonly manageRoles: ManageRolesUseCase;
 
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
@@ -149,6 +173,14 @@ export class Container {
       this.clock,
       this.logger,
     );
+    // Auth/IAM ports (Phase 1): the Argon2id hasher + the jose ES256 token issuer.
+    // The issuer takes the injected Clock so iat/exp are deterministic in tests; keys
+    // load lazily and fail loudly on first use (Phase 2's init() parses them at boot).
+    // Test overrides let integration tests inject a deterministic hasher/issuer while
+    // exercising the real wiring (same pattern as clock/llm/alerting).
+    this.passwordHasher = overrides.passwordHasher ?? new Argon2idHasher(config.auth.argon2);
+    this.tokenIssuer = overrides.tokenIssuer ?? new JoseTokenIssuer(config.auth.jwt, this.clock);
+
     // NB: there is intentionally no job queue wired here. v1 runs as external
     // cron invoking the CLI (`crawl --due`, `monitor --due`, `ingest
     // --community-due`) — see README "Deployment". The `Queue` port + pg-boss/
@@ -234,6 +266,51 @@ export class Container {
       config.agent.dailyBudgetEur,
       this.alerting,
     );
+
+    // Auth/IAM use-cases (Phase 2): the IdP. `authorization` is shared by the login/refresh
+    // claim-minting AND the per-request JWT guard (so they never diverge). The realm
+    // (iss/aud), TTLs, and lockout knobs come from `config.auth`.
+    const realm = { iss: config.auth.jwt.iss, aud: config.auth.jwt.aud };
+    this.authorization = new AuthorizationUseCase(this.db);
+    this.authenticateUser = new AuthenticateUseCase(
+      this.db,
+      this.passwordHasher,
+      this.tokenIssuer,
+      this.authorization,
+      this.clock,
+      this.logger,
+      config.auth.ttls,
+      config.auth.login,
+      realm,
+    );
+    this.refreshSession = new RefreshUseCase(
+      this.db,
+      this.tokenIssuer,
+      this.authorization,
+      this.clock,
+      this.logger,
+      config.auth.ttls,
+      realm,
+    );
+    this.logoutSession = new LogoutUseCase(this.db, this.clock, this.logger);
+
+    // Auth/IAM use-cases (Phase 3): the runtime Users & Roles admin surface. Both take
+    // the SAME password policy as the login path + the seed-user CLI, so a too-short
+    // admin-set/reset password is rejected identically everywhere.
+    this.provisionUser = new ProvisionUserUseCase(
+      this.db,
+      this.passwordHasher,
+      this.clock,
+      this.logger,
+      config.auth.passwordPolicy,
+    );
+    this.manageRoles = new ManageRolesUseCase(
+      this.db,
+      this.passwordHasher,
+      this.clock,
+      this.logger,
+      config.auth.passwordPolicy,
+    );
   }
 
   /**
@@ -248,6 +325,18 @@ export class Container {
   async init(): Promise<void> {
     const adopted = await this.settings.consumeQueuedBudget();
     if (adopted !== null) this.dailyBudgetGuard.setCeiling(adopted);
+
+    // Auth/IAM (Phase 2): if a JWT signing key is configured, parse it ONCE at boot and
+    // FAIL LOUDLY on a malformed/incomplete key (a format mismatch must never silently
+    // disable auth — it would leave the surface unintentionally open). When NO key is set
+    // auth is intentionally disabled (open/legacy mode); we skip the check and `serve.ts`
+    // warns instead. `ensureReady` lives on the `JoseTokenIssuer` adapter, not the port.
+    if (
+      this.config.auth.jwt.privateKey !== undefined &&
+      this.tokenIssuer instanceof JoseTokenIssuer
+    ) {
+      await this.tokenIssuer.ensureReady();
+    }
   }
 
   private buildFetcher(config: Config): Fetcher {

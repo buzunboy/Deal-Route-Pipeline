@@ -3,19 +3,22 @@ import { Container } from '../../../composition/container.js';
 import type { Config } from '../../../config/index.js';
 import { ReviewApi } from '../../http/review-api.js';
 import { PublicApi } from '../../http/public-api.js';
+import { AuthApi } from '../../http/auth-api.js';
 import { REVIEW_TEST_PAGE } from '../../http/test-page.js';
 
 /**
  * `serve` — start the HTTP surface on one port: the PUBLIC read API (`/v1/*`,
- * unauthenticated, read-only over published deals) and the gated admin review API
- * (`/api/*` + the test page). Dispatch is by path prefix and TOTAL: a `/v1/*`
- * request is ALWAYS handled by `PublicApi` (which 404s its own unknown paths) and
- * never falls through to the admin router, so a public path can never reach an
- * admin/state-changing route. Runs until interrupted.
+ * unauthenticated, read-only over published deals), the UNAUTHENTICATED auth API
+ * (`/auth/*` + the public JWKS — the IdP), and the gated admin review API (`/api/*` +
+ * the test page). Dispatch is by path prefix and TOTAL: `/auth/*` + `/.well-known/jwks.json`
+ * go to `AuthApi` (most specific first), then `/v1/*` to `PublicApi`, else `ReviewApi`. So
+ * a public/auth path can never fall through to an admin/state-changing route. Runs until
+ * interrupted.
  */
 export async function serve(config: Config): Promise<void> {
   const container = new Container(config, { usePersistence: true });
-  // Adopt a queued daily budget if one was set under a prior deployment (ACR-10 Settings).
+  // Adopt a queued daily budget if one was set under a prior deployment (ACR-10 Settings),
+  // and parse the JWT signing key once (fails loudly on a malformed key — Auth/IAM).
   await container.init();
   const reviewApi = new ReviewApi(
     container.review,
@@ -33,6 +36,34 @@ export async function serve(config: Config): Promise<void> {
       staticPageHtml: REVIEW_TEST_PAGE,
       authToken: config.reviewApi.authToken,
       corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin,
+      // Auth/IAM (Phase 2): wire the per-user JWT guard ONLY when a signing key is
+      // configured. Without a key the issuer can't verify, so passing `auth` would make
+      // EVERY /api/* request 401 (a key-less verify throws) — silently locking the surface
+      // and contradicting the open-mode banner below. Omitting it when there's no key keeps
+      // the genuinely-open trusted-network mode reachable (and the legacy `authToken` above
+      // stays accepted alongside JWTs during the dual-accept window).
+      ...(config.auth.jwt.privateKey !== undefined && {
+        auth: {
+          tokenIssuer: container.tokenIssuer,
+          db: container.db,
+          authorization: container.authorization,
+          // Auth/IAM (Phase 3): the Users & Roles admin surface (`/api/users`, `/api/roles`).
+          provisionUser: container.provisionUser,
+          manageRoles: container.manageRoles,
+        },
+      }),
+    },
+  );
+  const authApi = new AuthApi(
+    container.authenticateUser,
+    container.refreshSession,
+    container.logoutSession,
+    container.tokenIssuer,
+    container.logger,
+    {
+      corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin,
+      // With no signing key the IdP can't mint/publish tokens — /auth/* 503s clearly.
+      authConfigured: config.auth.jwt.privateKey !== undefined,
     },
   );
   const publicApi = new PublicApi(container.db.deals, container.clock, container.logger, {
@@ -42,11 +73,14 @@ export async function serve(config: Config): Promise<void> {
 
   const server = createServer((req, res) => {
     const path = new URL(req.url ?? '/', 'http://localhost').pathname;
-    // Total prefix dispatch: /v1/* is the public router's alone.
+    // Total prefix dispatch: /auth/* + JWKS first (most specific), then /v1/* (public
+    // router's alone), else the gated /api/* admin router.
     const handler =
-      path === '/v1' || path.startsWith('/v1/')
-        ? publicApi.handle(req, res)
-        : reviewApi.handle(req, res);
+      path.startsWith('/auth/') || path === '/.well-known/jwks.json'
+        ? authApi.handle(req, res)
+        : path === '/v1' || path.startsWith('/v1/')
+          ? publicApi.handle(req, res)
+          : reviewApi.handle(req, res);
     handler.catch((err) => {
       container.logger.error('HTTP request failed', {
         error: err instanceof Error ? err.message : String(err),
@@ -58,12 +92,20 @@ export async function serve(config: Config): Promise<void> {
   await new Promise<void>((resolve) => server.listen(config.reviewApi.port, () => resolve()));
   const port = config.reviewApi.port;
   console.log(`Public read API:   http://localhost:${port}/v1`);
+  console.log(`Auth API / JWKS:   http://localhost:${port}/auth  ·  /.well-known/jwks.json`);
   console.log(`Review test page:  http://localhost:${port}/`);
   console.log(`Review API base:   http://localhost:${port}/api`);
-  if (config.reviewApi.authToken === undefined) {
+  // Auth posture warnings: with NO signing key, per-user JWT auth is disabled; with NO
+  // legacy token either, the gated surface is fully OPEN (must be a trusted network).
+  if (config.auth.jwt.privateKey === undefined) {
     console.log(
-      'WARNING: no REVIEW_API_TOKEN set — approve/reject are unauthenticated. ' +
-        'Bind to a trusted network or set REVIEW_API_TOKEN.',
+      'WARNING: no AUTH_JWT_PRIVATE_KEY set — per-user JWT auth is disabled (no /auth/login).',
+    );
+  }
+  if (config.reviewApi.authToken === undefined && config.auth.jwt.privateKey === undefined) {
+    console.log(
+      'WARNING: neither AUTH_JWT_PRIVATE_KEY nor REVIEW_API_TOKEN set — /api/* is UNAUTHENTICATED. ' +
+        'Bind to a trusted network or configure auth.',
     );
   }
 
