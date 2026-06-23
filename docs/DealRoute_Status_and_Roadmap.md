@@ -179,22 +179,33 @@ No roadmap step remains. The concrete forward work, highest-value first:
    auto-queue gate if the product wants confidence-based routing. **Panel-side migrations** (ACR-6's
    `avg_review_seconds` number; Settings' `read_only` row flag + dropping the no-backing placeholders)
    are handed off in `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`.
-2. **Post-deploy hardening** [medium] — the API is live + working, but parked: **rotate** the
-   chat-exposed AWS key + GitHub PAT (before going past dev/staging), make the GHCR image private,
-   **pin** `:edge` → `:sha-…`, set **`ADMIN_CORS_ORIGIN`** when the panel deploys. Plus the deploy-time
-   **CDN scoping gate** [high — config, not code]: expose ONLY `screenshot.png`, never the whole
-   evidence bundle, before pointing `S3_CDN_BASE_URL` at a public bucket.
-3. **The rest of the deferred-findings register** — e.g. the **manual-capture upload channel**
+2. **S3 evidence — the screenshot-only CDN scoping gate** [high — deploy/security, NOT code]. The
+   S3 `EvidenceStore` is built + live on Fly (`EVIDENCE_STORE=s3`, bucket fully access-blocked, IAM
+   least-privilege). The remaining gate: a bundle stores `screenshot.png` + `page.html` + `terms.txt`
+   (verbatim copyrighted terms) under ONE `<id>/` prefix; the public DTO emits only the screenshot
+   URL, but a public CDN over that prefix would let anyone fetch `terms.txt`/`page.html` by editing the
+   URL. **Before pointing `S3_CDN_BASE_URL` at a public origin**, expose ONLY `*/screenshot.png`
+   (CloudFront + OAC + a screenshot-only path rule — documented in `deploy/fly/README.md` §2.4 but NOT
+   yet a committed artifact) and verify by fetching `…/<id>/terms.txt` against the CDN (must 403).
+   **Safe default: leave `S3_CDN_BASE_URL` unset** — the panel reads evidence via the authed path, so
+   nothing is gated until the public landing page wants screenshots. Build opportunity: a committable
+   `deploy/aws/setup-evidence-cdn.sh` + CloudFront/OAC config (handed off — see the S3/CDN follow-up).
+   _See the `Public CDN must expose ONLY screenshot.png` finding in `docs/KNOWN_ISSUES.md`._
+3. **Other post-deploy hardening** [medium] — the API is live + working, but parked: make the GHCR
+   image private, **pin** `:edge` → `:sha-…`, set **`ADMIN_CORS_ORIGIN`** when the panel deploys.
+   _(Credential rotation — the chat-exposed AWS key + GitHub PAT — is tracked in `docs/KNOWN_ISSUES.md`
+   and is the OWNER's end-of-line task; not an open action item here.)_
+4. **The rest of the deferred-findings register** — e.g. the **manual-capture upload channel**
    [medium], no `/v1/` rate-limiting [medium, CDN-fronted at deploy], the per-request active-source
    scan, the raw-IDN suffix normalisation, the pg-boss pool bound (if/when wired). Pick by the listed
    fix-when triggers. _(P1 done 2026-06-23: the Postgres contract suite now runs in CI as the LSP gate
    — per-test TRUNCATE reset + moved to the integration tier; `npm run api:check` (OpenAPI lint +
    structural Postman-drift gate) added to CI; the non-UUID `:id` → 500 fixed via a UUID boundary
    guard. All three were on this list and are now in KNOWN_ISSUES → Resolved.)_
-4. **Enable a real 2nd country** [low — feature-enablement, owner scope call] — Step 6 built the
+5. **Enable a real 2nd country** [low — feature-enablement, owner scope call] — Step 6 built the
    foundation; launching e.g. AT/CH is data/config (a `MARKETS` row + that country's
    seeds/vocab/deny-list/Tier-4 queries), NO logic change.
-5. **Operate / curate** — real seed-list curation + live tests (per-source fetcher selection, the
+6. **Operate / curate** — real seed-list curation + live tests (per-source fetcher selection, the
    dead mydealz RSS feed, JS-heavy provider homepages yielding 0 deals).
 
 **Open owner decisions that gate the above (not defaultable):**
