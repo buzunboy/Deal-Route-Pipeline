@@ -541,22 +541,6 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   preflight that asserts the S3 creds are present when `EVIDENCE_STORE=s3`.
 - **Logged**: 2026-06-20
 
-### Public landing page must NOT launch off `/v1/` without GDPR/affiliate-disclosure fields
-- **Severity**: high (legal/compliance gate — not a code defect, a launch dependency)
-- **Area**: api / schema / legal
-- **Location**: the public deal record / DTO (`src/adapters/http/public-dto.ts`); the schema
-  (`src/domain/deal-record/`). Tracked against post-C Step 2 (`docs/DealRoute_PostC_Handoff.md`).
-- **What**: P3 ships the public `/v1/` READ API but deliberately does NOT add affiliate-disclosure
-  / data-protection (EU-Omnibus / GDPR) fields — that was an explicit owner decision (P3 = API
-  surface only; the fields gate the public PAGE, not the API existing). PostC flags these as
-  "cheap to add WITH Step 1, expensive to retrofit."
-- **Why deferred**: the API can exist and be tested without them; they are a schema-owner call and
-  belong with the page launch (post-C Step 2), not the read surface.
-- **Fix-when**: BEFORE the landing page goes live off this API. Add the disclosure field(s) to the
-  deal record + the public DTO (a schema change → ask the schema owner per CLAUDE.md), and confirm
-  with legal what must be shown on a public DE deal page.
-- **Logged**: 2026-06-20
-
 ### No rate-limiting on the public unauthenticated `/v1/` API
 - **Severity**: medium
 - **Area**: api
@@ -634,6 +618,17 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 ---
 
 ## Resolved
+
+### Public landing page GDPR/affiliate-disclosure fields — RESOLVED 2026-06-23
+- **Was**: high (legal/compliance launch gate), api / schema / legal. P3 shipped the public `/v1/`
+  read API without the EU-Omnibus / GDPR affiliate-disclosure fields; the landing page could not go
+  live off the feed until they existed + legal confirmed what a DE deal page must show.
+- **Resolution**: Step 2 (schema v3) added `affiliate_disclosure` (bool, default true — over-disclose)
+  + `published_at` to the deal record, set by the reviewer at approve, and the public DTO exposes both
+  (`PublicDeal.affiliate_disclosure` / `published_at`) — contract-tested as part of the no-leak
+  allow-list. The **field side is delivered**, and the owner has **confirmed the legal/compliance side
+  is fine** (2026-06-23), so the launch gate is cleared. (Any further per-page legal copy is a landing-
+  page-repo concern, not a pipeline/schema gap.)
 
 ### Public CDN must expose ONLY `screenshot.png`, not the whole evidence bundle — RESOLVED 2026-06-23
 - **Was**: high (trust / copyright — a deployment-config gap), evidence-store / api / deployment.
