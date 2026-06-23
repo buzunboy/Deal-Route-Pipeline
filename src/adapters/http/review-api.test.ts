@@ -990,9 +990,15 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     expect((await db.deals.getById(dealId))!.status).toBe('published');
   });
 
-  it('still serves read endpoints without a token', async () => {
-    const res = await fetch(`${base}/api/candidates`);
-    expect(res.status).toBe(200);
+  it('now requires a token on read endpoints too (Phase-2 change), but health stays open', async () => {
+    // Reads were open before; they now require a valid token.
+    expect((await fetch(`${base}/api/candidates`)).status).toBe(401);
+    expect(
+      (await fetch(`${base}/api/candidates`, { headers: { authorization: 'Bearer secret-token' } }))
+        .status,
+    ).toBe(200);
+    // The liveness probe stays unauthenticated.
+    expect((await fetch(`${base}/api/health`)).status).toBe(200);
   });
 
   it('gates the new write endpoints (PATCH edit / promote / complete) with the bearer token (401)', async () => {
@@ -1135,11 +1141,17 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
     expect(setting.status).toBe(401);
     expect(await db.settings.get('affiliate_disclosure')).toBeNull(); // no override written
 
-    // Read endpoints stay open even when gated.
-    expect((await fetch(`${base}/api/sources`)).status).toBe(200);
-    expect((await fetch(`${base}/api/team`)).status).toBe(200);
-    expect((await fetch(`${base}/api/alerts`)).status).toBe(200);
-    expect((await fetch(`${base}/api/settings`)).status).toBe(200);
+    // Reads now require a valid token too (Phase-2 change — they were open before): an
+    // unauthenticated GET /api/* is 401, but WITH the (legacy) bearer it serves 200.
+    expect((await fetch(`${base}/api/sources`)).status).toBe(401);
+    expect((await fetch(`${base}/api/team`)).status).toBe(401);
+    expect((await fetch(`${base}/api/alerts`)).status).toBe(401);
+    expect((await fetch(`${base}/api/settings`)).status).toBe(401);
+    const tok = { authorization: 'Bearer secret-token' };
+    expect((await fetch(`${base}/api/sources`, { headers: tok })).status).toBe(200);
+    expect((await fetch(`${base}/api/team`, { headers: tok })).status).toBe(200);
+    expect((await fetch(`${base}/api/alerts`, { headers: tok })).status).toBe(200);
+    expect((await fetch(`${base}/api/settings`, { headers: tok })).status).toBe(200);
   });
 });
 

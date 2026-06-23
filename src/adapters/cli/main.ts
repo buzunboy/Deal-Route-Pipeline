@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { loadConfig } from '../../config/index.js';
 import { dryRunExtract } from './commands/dry-run-extract.js';
 import { seedImport } from './commands/seed-import.js';
+import { seedUser } from './commands/seed-user.js';
 import { crawl } from './commands/crawl.js';
 import { monitor } from './commands/monitor.js';
 import { review } from './commands/review.js';
@@ -20,6 +21,8 @@ Usage: dealroute <command> [options]
 Commands:
   dry-run-extract <url|file>          Fetch + extract one source, print candidates, NO writes
   seed-import [path] [--dry-run]      Import sources from the seed-list markdown (default: ${DEFAULT_SEED_PATH})
+  seed-user --email <e> --name <n>    Create ONE login-capable user (Argon2id-hashed password)
+           --role <r> --password <p>    through the real UserRepository (ops/seed; not the admin API)
   crawl --source <id> [--dry-run]     Crawl one source (Lane A: fetch→evidence→extract→candidate)
   crawl --subscription <name>         Crawl all sources for a catalog subscription
   crawl --due                         Crawl every source currently due (cadence)
@@ -81,6 +84,17 @@ async function main(): Promise<void> {
     case 'seed-import': {
       const path = rest.find((a) => !a.startsWith('--')) ?? DEFAULT_SEED_PATH;
       await seedImport(config, path, rest.includes('--dry-run'));
+      break;
+    }
+    case 'seed-user': {
+      const email = flag(rest, '--email');
+      const name = flag(rest, '--name');
+      const role = flag(rest, '--role') ?? 'reviewer';
+      const password = flag(rest, '--password');
+      if (!email || !name || !password) {
+        return fail('seed-user requires --email <e> --name <n> --password <p> [--role <r>].');
+      }
+      await seedUser(config, { email, name, role, password });
       break;
     }
     case 'crawl': {

@@ -14,6 +14,10 @@ import {
   DailyBudgetGuard,
   NoopBrowserAgent,
   DiscoverBroadUseCase,
+  AuthorizationUseCase,
+  AuthenticateUseCase,
+  RefreshUseCase,
+  LogoutUseCase,
   SystemClock,
   type Fetcher,
   type FeedReader,
@@ -110,6 +114,11 @@ export class Container {
   // + HTTP guard that consume them are wired in Phase 2.
   readonly passwordHasher: PasswordHasher;
   readonly tokenIssuer: TokenIssuer;
+  // Auth/IAM use-cases (Phase 2): the IdP login/refresh/logout + permission resolution.
+  readonly authorization: AuthorizationUseCase;
+  readonly authenticateUser: AuthenticateUseCase;
+  readonly refreshSession: RefreshUseCase;
+  readonly logoutSession: LogoutUseCase;
 
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
@@ -252,6 +261,33 @@ export class Container {
       config.agent.dailyBudgetEur,
       this.alerting,
     );
+
+    // Auth/IAM use-cases (Phase 2): the IdP. `authorization` is shared by the login/refresh
+    // claim-minting AND the per-request JWT guard (so they never diverge). The realm
+    // (iss/aud), TTLs, and lockout knobs come from `config.auth`.
+    const realm = { iss: config.auth.jwt.iss, aud: config.auth.jwt.aud };
+    this.authorization = new AuthorizationUseCase(this.db);
+    this.authenticateUser = new AuthenticateUseCase(
+      this.db,
+      this.passwordHasher,
+      this.tokenIssuer,
+      this.authorization,
+      this.clock,
+      this.logger,
+      config.auth.ttls,
+      config.auth.login,
+      realm,
+    );
+    this.refreshSession = new RefreshUseCase(
+      this.db,
+      this.tokenIssuer,
+      this.authorization,
+      this.clock,
+      this.logger,
+      config.auth.ttls,
+      realm,
+    );
+    this.logoutSession = new LogoutUseCase(this.db, this.clock, this.logger);
   }
 
   /**
@@ -266,6 +302,18 @@ export class Container {
   async init(): Promise<void> {
     const adopted = await this.settings.consumeQueuedBudget();
     if (adopted !== null) this.dailyBudgetGuard.setCeiling(adopted);
+
+    // Auth/IAM (Phase 2): if a JWT signing key is configured, parse it ONCE at boot and
+    // FAIL LOUDLY on a malformed/incomplete key (a format mismatch must never silently
+    // disable auth — it would leave the surface unintentionally open). When NO key is set
+    // auth is intentionally disabled (open/legacy mode); we skip the check and `serve.ts`
+    // warns instead. `ensureReady` lives on the `JoseTokenIssuer` adapter, not the port.
+    if (
+      this.config.auth.jwt.privateKey !== undefined &&
+      this.tokenIssuer instanceof JoseTokenIssuer
+    ) {
+      await this.tokenIssuer.ensureReady();
+    }
   }
 
   private buildFetcher(config: Config): Fetcher {

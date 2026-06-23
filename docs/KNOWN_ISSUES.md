@@ -651,6 +651,24 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Fix-when**: when `/api/team` is retired (Phase 5) — drop the projection and the `TeamMember.role`→reviewer fallback; until then it is the correct compatibility shim.
 - **Logged**: 2026-06-23 (Auth/IAM Phase 1)
 
+### Auth dual-accept window: the legacy static `REVIEW_API_TOKEN` is still accepted on `/api/*` (must be time-boxed; remove in Phase 5)
+- **Severity**: medium (a deliberately-temporary widening of the trust boundary)
+- **Area**: api / auth (Phase 2)
+- **Location**: `src/adapters/http/review-api.ts` (`authenticate()` legacy branch → `{ kind:'legacy' }`); wired via `serve.ts` (`auth.tokenIssuer` + `config.reviewApi.authToken`).
+- **What**: to let the panel cut over without a flag-day, the per-request guard accepts the **legacy static bearer** alongside per-user JWTs. A legacy caller is given NO identity and NO per-user permissions — it deliberately does **not** synthesize a `legacy-token@system` actor, so it cannot pollute the email-keyed `reviews.approver` audit trail (a legacy write still records the BODY `approver`, the pre-Phase-2 behaviour; the registry per-permission check is skipped for it, as the static token was always all-or-nothing). It is still a single shared all-powerful credential whose leak = full write access until retired.
+- **Why deferred**: the window is required so the panel (separate repo) can migrate to `/auth/login` + per-user tokens without a lockstep deploy. It is bounded: the plan retires `REVIEW_API_TOKEN` + this branch in **Phase 5**, after the panel cutover (Phase 4).
+- **Fix-when**: Phase 5 — delete the legacy branch in `authenticate()`, drop `REVIEW_API_TOKEN` from config + `serve.ts`, and remove the accept-but-ignore body `approver` (make it a required token-derived field). Keep `adminCorsAllowOrigin`.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 2)
+
+### Login lockout (429) remains account-specific, while unknown-email is 401 — a residual enumeration signal
+- **Severity**: medium (anti-enumeration; partially mitigated)
+- **Area**: auth (Phase 2)
+- **Location**: `src/application/auth/authenticate.ts` (`AuthenticateUseCase` — lockout is read from a real user's `getLoginState`; unknown email throws `InvalidCredentialsError`/401).
+- **What**: the login path is constant-time + generic-401 for unknown-vs-wrong-password (the `DUMMY_PASSWORD_HASH` verify runs on the unknown-email path). But lockout is keyed to a real account, so a locked **known** email returns 429 while an unknown email always returns 401 — the differing status under repeated attempts can still hint that an email exists. (Flagged in the Phase-1 note "Phase-2 login: lockout must stay anti-enumeration".)
+- **Why deferred**: closing it fully needs a per-email/per-IP sliding-window limiter that locks WITHOUT a user row (so an unknown email can also surface a 429) — the panel already runs such a limiter as defense-in-depth, and the pipeline lockout is the second layer. The status-vs-existence leak is low-signal (it requires crossing the threshold) and the higher-value fix (the per-IP limiter) belongs with a rate-limit pass, not this phase.
+- **Fix-when**: when adding a pipeline-side per-IP/per-email attempt limiter — return an identical 429 shape for an unknown-but-attacked email, and add the `testing.md`-mandated timing/shape-parity boundary test for unknown-vs-known email on `/auth/login`.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 2)
+
 ---
 
 ## Resolved

@@ -1,6 +1,894 @@
 {
   "item": [
     {
+      "name": "Auth",
+      "description": "Unauthenticated IdP — login / refresh / logout / JWKS (per-user ES256 tokens).",
+      "item": [
+        {
+          "name": "Exchange email + password for an access + refresh token",
+          "request": {
+            "name": "Exchange email + password for an access + refresh token",
+            "description": {
+              "content": "The credential IS the auth — unauthenticated. On success returns a short-lived\nES256 access token (Bearer for `/api/*`), a rotating opaque refresh token (returned\nONCE), and the user's flat permission list. The error is a GENERIC 401 for both an\nunknown email and a wrong password (no account enumeration); a disabled account is\n403; too many failed attempts is 429 with `Retry-After`.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "auth",
+                "login"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"<email>\",\n  \"password\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": null
+          },
+          "response": [
+            {
+              "name": "Authenticated — tokens + permissions.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "login"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"<email>\",\n  \"password\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"accessToken\": \"<string>\",\n  \"accessTokenExpires\": \"<integer>\",\n  \"refreshToken\": \"<string>\",\n  \"refreshTokenExpires\": \"<integer>\",\n  \"permissions\": [\n    \"<string>\",\n    \"<string>\"\n  ],\n  \"user\": {\n    \"id\": \"<uuid>\",\n    \"email\": \"<email>\",\n    \"name\": \"<string>\",\n    \"role\": \"<string>\"\n  }\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Malformed / missing email or password.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "login"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"<email>\",\n  \"password\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Invalid email or password (generic — no enumeration).",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "login"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"<email>\",\n  \"password\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "The account is disabled.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "login"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"<email>\",\n  \"password\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Request body too large.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "login"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"<email>\",\n  \"password\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Request Entity Too Large",
+              "code": 413,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Too many failed attempts (locked); see `Retry-After`.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "login"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"email\": \"<email>\",\n  \"password\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Too Many Requests",
+              "code": 429,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            }
+          ],
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Rotate a refresh token for a fresh access + refresh pair",
+          "request": {
+            "name": "Rotate a refresh token for a fresh access + refresh pair",
+            "description": {
+              "content": "The presented refresh token is REVOKED and a successor is issued in the same family\n(rotation). Replaying a rotated-out token is reuse-detection → the whole family is\nrevoked and the call 401s. A disabled user cannot refresh. Permissions are\nre-resolved, so a `perm_version`-driven change reaches the new access token.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "auth",
+                "refresh"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": null
+          },
+          "response": [
+            {
+              "name": "A rotated token pair (same shape as login).",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "refresh"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"accessToken\": \"<string>\",\n  \"accessTokenExpires\": \"<integer>\",\n  \"refreshToken\": \"<string>\",\n  \"refreshTokenExpires\": \"<integer>\",\n  \"permissions\": [\n    \"<string>\",\n    \"<string>\"\n  ],\n  \"user\": {\n    \"id\": \"<uuid>\",\n    \"email\": \"<email>\",\n    \"name\": \"<string>\",\n    \"role\": \"<string>\"\n  }\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Missing / malformed `refreshToken`.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "refresh"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Refresh token invalid / expired / reuse-detected.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "refresh"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "The account is disabled.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "refresh"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Forbidden",
+              "code": 403,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Request body too large.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "refresh"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Request Entity Too Large",
+              "code": 413,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            }
+          ],
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "Revoke the presented refresh token's whole family",
+          "request": {
+            "name": "Revoke the presented refresh token's whole family",
+            "description": {
+              "content": "Idempotent — an unknown / already-revoked token still returns 204 (logout never\nconfirms a token's validity). Revokes the entire rotation family.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                "auth",
+                "logout"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+              "options": {
+                "raw": {
+                  "headerFamily": "json",
+                  "language": "json"
+                }
+              }
+            },
+            "auth": null
+          },
+          "response": [
+            {
+              "name": "Logged out (empty body) — always, even for an unknown token.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "logout"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "header": [],
+              "cookie": [],
+              "_postman_previewlanguage": "text"
+            },
+            {
+              "name": "Missing / malformed `refreshToken`.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "logout"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "Request body too large.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    "auth",
+                    "logout"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "POST",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"refreshToken\": \"<string>\"\n}",
+                  "options": {
+                    "raw": {
+                      "headerFamily": "json",
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Request Entity Too Large",
+              "code": 413,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"error\": \"<string>\"\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            }
+          ],
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        },
+        {
+          "name": "The public ES256 key set (JWKS)",
+          "request": {
+            "name": "The public ES256 key set (JWKS)",
+            "description": {
+              "content": "Public key material for verifying the access token (the pipeline verifies\ninternally; this exists for external verifiers + the live smoke test). Public-only\n(never the private scalar). `Cache-Control: public, max-age=300`.\n",
+              "type": "text/plain"
+            },
+            "url": {
+              "path": [
+                ".well-known",
+                "jwks.json"
+              ],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "method": "GET",
+            "body": {},
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "The JWKS.",
+              "originalRequest": {
+                "url": {
+                  "path": [
+                    ".well-known",
+                    "jwks.json"
+                  ],
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "query": [],
+                  "variable": []
+                },
+                "header": [
+                  {
+                    "key": "Accept",
+                    "value": "application/json"
+                  }
+                ],
+                "method": "GET",
+                "body": {}
+              },
+              "status": "OK",
+              "code": 200,
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"keys\": [\n    {\n      \"kty\": \"<string>\",\n      \"crv\": \"<string>\",\n      \"x\": \"<string>\",\n      \"y\": \"<string>\",\n      \"kid\": \"<string>\",\n      \"alg\": \"<string>\",\n      \"use\": \"<string>\"\n    },\n    {\n      \"kty\": \"<string>\",\n      \"crv\": \"<string>\",\n      \"x\": \"<string>\",\n      \"y\": \"<string>\",\n      \"kid\": \"<string>\",\n      \"alg\": \"<string>\",\n      \"use\": \"<string>\"\n    }\n  ]\n}",
+              "cookie": [],
+              "_postman_previewlanguage": "json"
+            }
+          ],
+          "event": [],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          }
+        }
+      ]
+    },
+    {
       "name": "Public feed",
       "description": "Unauthenticated read-only `/v1/*` surface (landing page / public consumers).",
       "item": [
@@ -46,7 +934,7 @@
                     "type": "text/plain"
                   },
                   "key": "route_type",
-                  "value": "bundle"
+                  "value": "regional"
                 },
                 {
                   "disabled": false,
@@ -64,7 +952,7 @@
                     "type": "text/plain"
                   },
                   "key": "sort",
-                  "value": "cost_asc"
+                  "value": "verified_desc"
                 },
                 {
                   "disabled": false,
@@ -137,7 +1025,7 @@
                         "type": "text/plain"
                       },
                       "key": "route_type",
-                      "value": "bundle"
+                      "value": "regional"
                     },
                     {
                       "disabled": false,
@@ -155,7 +1043,7 @@
                         "type": "text/plain"
                       },
                       "key": "sort",
-                      "value": "cost_asc"
+                      "value": "verified_desc"
                     },
                     {
                       "disabled": false,
@@ -195,7 +1083,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deals\": [\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"headline\": \"<string>\",\n      \"route_type\": \"bundle\",\n      \"country\": \"DE\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"monthly\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"eligibility\": {\n        \"new_customer_only\": \"<boolean,null>\",\n        \"residency_kyc\": \"<boolean,null>\",\n        \"plan_tier_required\": \"<string,null>\",\n        \"min_spend\": \"<number,null>\",\n        \"stackable\": \"<boolean,null>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": true,\n              \"key_1\": false\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 3716.708972298494\n            }\n          }\n        ]\n      },\n      \"validity\": {\n        \"start\": \"<string,null>\",\n        \"end\": \"<string,null>\",\n        \"recheck_days\": \"<integer>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": true\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 4865\n            }\n          }\n        ]\n      },\n      \"included_items\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"trust\": \"stale\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"evidence_screenshot_url\": \"<string,null-uri>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"headline\": \"<string>\",\n      \"route_type\": \"promo\",\n      \"country\": \"DE\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"annual\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"eligibility\": {\n        \"new_customer_only\": \"<boolean,null>\",\n        \"residency_kyc\": \"<boolean,null>\",\n        \"plan_tier_required\": \"<string,null>\",\n        \"min_spend\": \"<number,null>\",\n        \"stackable\": \"<boolean,null>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 5842,\n              \"key_1\": 4755.191924160753,\n              \"key_2\": 3765.301215221755\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 7882.3391714048485\n            }\n          }\n        ]\n      },\n      \"validity\": {\n        \"start\": \"<string,null>\",\n        \"end\": \"<string,null>\",\n        \"recheck_days\": \"<integer>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\"\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": true\n            }\n          }\n        ]\n      },\n      \"included_items\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"trust\": \"stale\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"evidence_screenshot_url\": \"<string,null-uri>\"\n    }\n  ],\n  \"total\": \"<integer>\",\n  \"limit\": \"<integer>\",\n  \"offset\": \"<integer>\"\n}",
+              "body": "{\n  \"deals\": [\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"headline\": \"<string>\",\n      \"route_type\": \"standalone\",\n      \"country\": \"DE\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"monthly\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"eligibility\": {\n        \"new_customer_only\": \"<boolean,null>\",\n        \"residency_kyc\": \"<boolean,null>\",\n        \"plan_tier_required\": \"<string,null>\",\n        \"min_spend\": \"<number,null>\",\n        \"stackable\": \"<boolean,null>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\"\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\"\n            }\n          }\n        ]\n      },\n      \"validity\": {\n        \"start\": \"<string,null>\",\n        \"end\": \"<string,null>\",\n        \"recheck_days\": \"<integer>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\",\n              \"key_1\": false\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\"\n            }\n          }\n        ]\n      },\n      \"included_items\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"trust\": \"verified\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"evidence_screenshot_url\": \"<string,null-uri>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"headline\": \"<string>\",\n      \"route_type\": \"promo\",\n      \"country\": \"DE\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"monthly\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"eligibility\": {\n        \"new_customer_only\": \"<boolean,null>\",\n        \"residency_kyc\": \"<boolean,null>\",\n        \"plan_tier_required\": \"<string,null>\",\n        \"min_spend\": \"<number,null>\",\n        \"stackable\": \"<boolean,null>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 386,\n              \"key_1\": \"string\"\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": \"string\"\n            }\n          }\n        ]\n      },\n      \"validity\": {\n        \"start\": \"<string,null>\",\n        \"end\": \"<string,null>\",\n        \"recheck_days\": \"<integer>\",\n        \"conditions\": [\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": 6947.181301516198,\n              \"key_1\": 1998.6319518096195,\n              \"key_2\": 6685\n            }\n          },\n          {\n            \"key\": \"<string>\",\n            \"label\": \"<string>\",\n            \"value\": {\n              \"key_0\": false,\n              \"key_1\": 5074.254322421469\n            }\n          }\n        ]\n      },\n      \"included_items\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"trust\": \"stale\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"evidence_screenshot_url\": \"<string,null-uri>\"\n    }\n  ],\n  \"total\": \"<integer>\",\n  \"limit\": \"<integer>\",\n  \"offset\": \"<integer>\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -236,7 +1124,7 @@
                         "type": "text/plain"
                       },
                       "key": "route_type",
-                      "value": "bundle"
+                      "value": "regional"
                     },
                     {
                       "disabled": false,
@@ -254,7 +1142,7 @@
                         "type": "text/plain"
                       },
                       "key": "sort",
-                      "value": "cost_asc"
+                      "value": "verified_desc"
                     },
                     {
                       "disabled": false,
@@ -388,7 +1276,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"service\": \"<string>\",\n    \"provider\": \"<string>\",\n    \"headline\": \"<string>\",\n    \"route_type\": \"regional\",\n    \"country\": \"DE\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"prepaid\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 7153.703497828638,\n            \"key_1\": false,\n            \"key_2\": \"string\",\n            \"key_3\": 3490\n          }\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 5626,\n            \"key_1\": true,\n            \"key_2\": true\n          }\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": 7976\n          }\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": \"string\",\n            \"key_2\": 4398\n          }\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"trust\": \"stale\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"evidence_screenshot_url\": \"<string,null-uri>\"\n  }\n}",
+              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"service\": \"<string>\",\n    \"provider\": \"<string>\",\n    \"headline\": \"<string>\",\n    \"route_type\": \"regional\",\n    \"country\": \"DE\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"prepaid\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 8414,\n            \"key_1\": 1721,\n            \"key_2\": true\n          }\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\"\n          }\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true,\n            \"key_1\": 9234.26726981021,\n            \"key_2\": 6351.595578685046\n          }\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": 6759\n          }\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"trust\": \"stale\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"evidence_screenshot_url\": \"<string,null-uri>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -602,7 +1490,7 @@
           "request": {
             "name": "List candidates awaiting review (filtered, paginated)",
             "description": {
-              "content": "Lowest-confidence first. Defaults to the reviewable pair (`candidate` +\n`in_review`) when `status` is omitted. Read endpoint — not gated. Each item's\n`evidence` carries `evidence_screenshot_url` / `evidence_html_url` /\n`evidence_terms_url` pointing at the gated `GET /api/evidence/:id/:artifact`\nendpoint (ACR-13).\n",
+              "content": "Lowest-confidence first. Defaults to the reviewable pair (`candidate` +\n`in_review`) when `status` is omitted. Requires a valid token (Auth/IAM Phase 2 —\nall `/api/*` reads now require auth). Each item's `evidence` carries\n`evidence_screenshot_url` / `evidence_html_url` / `evidence_terms_url` pointing at\nthe gated `GET /api/evidence/:id/:artifact` endpoint (ACR-13).\n",
               "type": "text/plain"
             },
             "url": {
@@ -621,7 +1509,7 @@
                     "type": "text/plain"
                   },
                   "key": "status",
-                  "value": "candidate"
+                  "value": "published"
                 },
                 {
                   "disabled": false,
@@ -694,7 +1582,7 @@
                         "type": "text/plain"
                       },
                       "key": "status",
-                      "value": "candidate"
+                      "value": "published"
                     },
                     {
                       "disabled": false,
@@ -739,6 +1627,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -752,7 +1648,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"deal\": {\n      \"id\": \"<uuid>\",\n      \"schema_version\": \"<integer>\",\n      \"service\": \"<string>\",\n      \"route_type\": \"bundle\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"one_time\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"country\": \"DE\",\n      \"status\": \"candidate\",\n      \"provider\": \"<string,null>\",\n      \"headline\": \"<string,null>\",\n      \"confidence\": \"<number>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"verified_by\": \"<string,null>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"evidence_id\": \"<string,null-uuid>\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\"\n    },\n    \"evidence\": {\n      \"id\": \"<uuid>\",\n      \"source_url\": \"<uri>\",\n      \"screenshot_ref\": \"<string>\",\n      \"html_ref\": \"<string>\",\n      \"terms_ref\": \"<string>\",\n      \"captured_at\": \"<dateTime>\",\n      \"content_hash\": \"<string>\",\n      \"evidence_screenshot_url\": \"<string>\",\n      \"evidence_html_url\": \"<string>\",\n      \"evidence_terms_url\": \"<string>\"\n    }\n  },\n  {\n    \"deal\": {\n      \"id\": \"<uuid>\",\n      \"schema_version\": \"<integer>\",\n      \"service\": \"<string>\",\n      \"route_type\": \"standalone\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"annual\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"country\": \"DE\",\n      \"status\": \"candidate\",\n      \"provider\": \"<string,null>\",\n      \"headline\": \"<string,null>\",\n      \"confidence\": \"<number>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"verified_by\": \"<string,null>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"evidence_id\": \"<string,null-uuid>\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\"\n    },\n    \"evidence\": {\n      \"id\": \"<uuid>\",\n      \"source_url\": \"<uri>\",\n      \"screenshot_ref\": \"<string>\",\n      \"html_ref\": \"<string>\",\n      \"terms_ref\": \"<string>\",\n      \"captured_at\": \"<dateTime>\",\n      \"content_hash\": \"<string>\",\n      \"evidence_screenshot_url\": \"<string>\",\n      \"evidence_html_url\": \"<string>\",\n      \"evidence_terms_url\": \"<string>\"\n    }\n  }\n]",
+              "body": "[\n  {\n    \"deal\": {\n      \"id\": \"<uuid>\",\n      \"schema_version\": \"<integer>\",\n      \"service\": \"<string>\",\n      \"route_type\": \"promo\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"prepaid\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"country\": \"DE\",\n      \"status\": \"candidate\",\n      \"provider\": \"<string,null>\",\n      \"headline\": \"<string,null>\",\n      \"confidence\": \"<number>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"verified_by\": \"<string,null>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"evidence_id\": \"<string,null-uuid>\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\"\n    },\n    \"evidence\": {\n      \"id\": \"<uuid>\",\n      \"source_url\": \"<uri>\",\n      \"screenshot_ref\": \"<string>\",\n      \"html_ref\": \"<string>\",\n      \"terms_ref\": \"<string>\",\n      \"captured_at\": \"<dateTime>\",\n      \"content_hash\": \"<string>\",\n      \"evidence_screenshot_url\": \"<string>\",\n      \"evidence_html_url\": \"<string>\",\n      \"evidence_terms_url\": \"<string>\"\n    }\n  },\n  {\n    \"deal\": {\n      \"id\": \"<uuid>\",\n      \"schema_version\": \"<integer>\",\n      \"service\": \"<string>\",\n      \"route_type\": \"promo\",\n      \"price\": {\n        \"amount\": \"<number>\",\n        \"currency\": \"EUR\",\n        \"billing\": \"one_time\",\n        \"prepaid_months\": \"<integer>\"\n      },\n      \"true_cost_monthly\": \"<number>\",\n      \"country\": \"DE\",\n      \"status\": \"published\",\n      \"provider\": \"<string,null>\",\n      \"headline\": \"<string,null>\",\n      \"confidence\": \"<number>\",\n      \"affiliate_disclosure\": \"<boolean>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"verified_by\": \"<string,null>\",\n      \"verified_at\": \"<string,null-date-time>\",\n      \"evidence_id\": \"<string,null-uuid>\",\n      \"human_edited\": [\n        \"<string>\",\n        \"<string>\"\n      ],\n      \"source_url\": \"<uri>\"\n    },\n    \"evidence\": {\n      \"id\": \"<uuid>\",\n      \"source_url\": \"<uri>\",\n      \"screenshot_ref\": \"<string>\",\n      \"html_ref\": \"<string>\",\n      \"terms_ref\": \"<string>\",\n      \"captured_at\": \"<dateTime>\",\n      \"content_hash\": \"<string>\",\n      \"evidence_screenshot_url\": \"<string>\",\n      \"evidence_html_url\": \"<string>\",\n      \"evidence_terms_url\": \"<string>\"\n    }\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -775,7 +1671,7 @@
                         "type": "text/plain"
                       },
                       "key": "status",
-                      "value": "candidate"
+                      "value": "published"
                     },
                     {
                       "disabled": false,
@@ -820,6 +1716,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -848,7 +1752,7 @@
           "request": {
             "name": "Aggregate review-queue counts for the view-cards + filter rail (ACR-5)",
             "description": {
-              "content": "One call returns the queue's headline counts: `all_pending` (reviewable\ndeals), `low_confidence` (confidence ≤ 0.5), `human_edited`, a per-route\nbreakdown, and `rejected_today` (rejections on the current UTC day, from the\nreviews audit log — a true date-bounded count). Read endpoint — not gated.\n",
+              "content": "One call returns the queue's headline counts: `all_pending` (reviewable\ndeals), `low_confidence` (confidence ≤ 0.5), `human_edited`, a per-route\nbreakdown, and `rejected_today` (rejections on the current UTC day, from the\nreviews audit log — a true date-bounded count). Requires a valid token (Phase 2).\n",
               "type": "text/plain"
             },
             "url": {
@@ -895,6 +1799,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -923,7 +1835,7 @@
           "request": {
             "name": "Pending-queue freshness age-buckets (ACR-9)",
             "description": {
-              "content": "The share of the pending review queue (`candidate` + `in_review`) in each age\nband, where age is `now − evidence.captured_at`. The three bands are always\nreturned, summing to 100 (an empty queue returns all three at 0). Backs the\nDashboard \"Queue freshness\" card. Read endpoint — not gated.\n",
+              "content": "The share of the pending review queue (`candidate` + `in_review`) in each age\nband, where age is `now − evidence.captured_at`. The three bands are always\nreturned, summing to 100 (an empty queue returns all three at 0). Backs the\nDashboard \"Queue freshness\" card. Requires a valid token (Phase 2).\n",
               "type": "text/plain"
             },
             "url": {
@@ -970,6 +1882,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -983,7 +1903,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"bucket\": \">3d\",\n    \"percent\": \"<integer>\"\n  },\n  {\n    \"bucket\": \">3d\",\n    \"percent\": \"<integer>\"\n  }\n]",
+              "body": "[\n  {\n    \"bucket\": \">3d\",\n    \"percent\": \"<integer>\"\n  },\n  {\n    \"bucket\": \"1-3d\",\n    \"percent\": \"<integer>\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -1037,7 +1957,7 @@
             "method": "PATCH",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"standalone\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6613.629289637028,\n            \"key_1\": 6467.079001756937,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6359.713627774706,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\"\n    }\n  }\n}",
+              "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": false\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 2846.1513064538512,\n            \"key_1\": 9361,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3122\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -1103,7 +2023,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"standalone\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6613.629289637028,\n            \"key_1\": 6467.079001756937,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6359.713627774706,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\"\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": false\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 2846.1513064538512,\n            \"key_1\": 9361,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3122\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1120,7 +2040,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"prepaid\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"candidate\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
+              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"candidate\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -1171,7 +2091,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"standalone\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6613.629289637028,\n            \"key_1\": 6467.079001756937,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6359.713627774706,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\"\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": false\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 2846.1513064538512,\n            \"key_1\": 9361,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3122\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1239,7 +2159,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"standalone\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6613.629289637028,\n            \"key_1\": 6467.079001756937,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6359.713627774706,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\"\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": false\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 2846.1513064538512,\n            \"key_1\": 9361,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3122\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1307,7 +2227,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"standalone\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6613.629289637028,\n            \"key_1\": 6467.079001756937,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6359.713627774706,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\"\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": false\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 2846.1513064538512,\n            \"key_1\": 9361,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3122\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1375,7 +2295,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"standalone\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6613.629289637028,\n            \"key_1\": 6467.079001756937,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6359.713627774706,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\"\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": false\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 2846.1513064538512,\n            \"key_1\": 9361,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3122\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1443,7 +2363,7 @@
                 "method": "PATCH",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"standalone\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6613.629289637028,\n            \"key_1\": 6467.079001756937,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 6359.713627774706,\n            \"key_1\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": true\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": \"string\"\n    }\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"patch\": {\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"one_time\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"route_type\": \"bundle\",\n    \"headline\": \"<string>\",\n    \"eligibility\": {\n      \"new_customer_only\": \"<boolean,null>\",\n      \"residency_kyc\": \"<boolean,null>\",\n      \"plan_tier_required\": \"<string,null>\",\n      \"min_spend\": \"<number,null>\",\n      \"stackable\": \"<boolean,null>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": \"string\",\n            \"key_1\": false\n          },\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": {\n            \"key_0\": 2846.1513064538512,\n            \"key_1\": 9361,\n            \"key_2\": \"string\"\n          },\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"validity\": {\n      \"start\": \"<string,null>\",\n      \"end\": \"<string,null>\",\n      \"recheck_days\": \"<integer>\",\n      \"conditions\": [\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        },\n        {\n          \"key\": \"<string>\",\n          \"label\": \"<string>\",\n          \"value\": null,\n          \"source_quote\": \"<string>\"\n        }\n      ]\n    },\n    \"included_items\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"attributes\": {\n      \"key_0\": 3122\n    }\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -1599,7 +2519,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"prepaid\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"candidate\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
+              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"candidate\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -2080,7 +3000,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"prepaid\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"candidate\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
+              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"candidate\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -2508,6 +3428,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -2849,6 +3777,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -2862,7 +3798,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"suggested_key\": \"<string>\",\n    \"label\": \"<string>\",\n    \"rationale\": \"<string>\",\n    \"example_quote\": \"<string>\",\n    \"count\": \"<integer>\",\n    \"status\": \"promoted\",\n    \"first_seen_at\": \"<dateTime>\",\n    \"last_seen_at\": \"<dateTime>\",\n    \"key_0\": 4020\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"suggested_key\": \"<string>\",\n    \"label\": \"<string>\",\n    \"rationale\": \"<string>\",\n    \"example_quote\": \"<string>\",\n    \"count\": \"<integer>\",\n    \"status\": \"open\",\n    \"first_seen_at\": \"<dateTime>\",\n    \"last_seen_at\": \"<dateTime>\"\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"suggested_key\": \"<string>\",\n    \"label\": \"<string>\",\n    \"rationale\": \"<string>\",\n    \"example_quote\": \"<string>\",\n    \"count\": \"<integer>\",\n    \"status\": \"rejected\",\n    \"first_seen_at\": \"<dateTime>\",\n    \"last_seen_at\": \"<dateTime>\"\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"suggested_key\": \"<string>\",\n    \"label\": \"<string>\",\n    \"rationale\": \"<string>\",\n    \"example_quote\": \"<string>\",\n    \"count\": \"<integer>\",\n    \"status\": \"rejected\",\n    \"first_seen_at\": \"<dateTime>\",\n    \"last_seen_at\": \"<dateTime>\",\n    \"key_0\": true,\n    \"key_1\": false,\n    \"key_2\": false\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3340,6 +4276,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -3353,7 +4297,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"status\": \"<string>\",\n    \"reason\": \"<string>\",\n    \"source_url\": \"<string,null-uri>\"\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"status\": \"<string>\",\n    \"reason\": \"<string>\",\n    \"source_url\": \"<string,null-uri>\"\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"status\": \"<string>\",\n    \"reason\": \"<string>\",\n    \"source_url\": \"<string,null-uri>\",\n    \"key_0\": 8235,\n    \"key_1\": 5832.5705752768245\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"status\": \"<string>\",\n    \"reason\": \"<string>\",\n    \"source_url\": \"<string,null-uri>\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -3395,7 +4339,7 @@
             "method": "POST",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+              "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -3449,7 +4393,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3505,7 +4449,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3561,7 +4505,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3617,7 +4561,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3689,7 +4633,7 @@
             "method": "POST",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+              "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -3756,7 +4700,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3773,7 +4717,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"prepaid\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"candidate\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
+              "body": "{\n  \"deal\": {\n    \"id\": \"<uuid>\",\n    \"schema_version\": \"<integer>\",\n    \"service\": \"<string>\",\n    \"route_type\": \"standalone\",\n    \"price\": {\n      \"amount\": \"<number>\",\n      \"currency\": \"EUR\",\n      \"billing\": \"unknown\",\n      \"prepaid_months\": \"<integer>\"\n    },\n    \"true_cost_monthly\": \"<number>\",\n    \"country\": \"DE\",\n    \"status\": \"candidate\",\n    \"provider\": \"<string,null>\",\n    \"headline\": \"<string,null>\",\n    \"confidence\": \"<number>\",\n    \"affiliate_disclosure\": \"<boolean>\",\n    \"published_at\": \"<string,null-date-time>\",\n    \"verified_by\": \"<string,null>\",\n    \"verified_at\": \"<string,null-date-time>\",\n    \"evidence_id\": \"<string,null-uuid>\",\n    \"human_edited\": [\n      \"<string>\",\n      \"<string>\"\n    ],\n    \"source_url\": \"<uri>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -3825,7 +4769,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3894,7 +4838,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -3963,7 +4907,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4032,7 +4976,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4101,7 +5045,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 7394\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"fields\": {\n    \"key_0\": 3773,\n    \"key_1\": 7072.236856791575,\n    \"key_2\": \"string\"\n  },\n  \"evidence\": {\n    \"source_url\": \"<uri>\",\n    \"screenshot_ref\": \"<string>\",\n    \"html_ref\": \"<string>\",\n    \"terms_ref\": \"<string>\",\n    \"terms_text\": \"<string>\"\n  }\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4139,7 +5083,7 @@
           "request": {
             "name": "Sources registry — operational sources (active + disabled), ACR-10",
             "description": {
-              "content": "The operational source list (NOT the pending-promotion queue). Curated rows:\ndomain, capitalised kind, tier, cadence, reliability, last_seen, and a panel\nstatus (`active` · `degraded` for a flaky active source · `disabled`). Read.\n",
+              "content": "The operational source list (NOT the pending-promotion queue). Curated rows:\ndomain, capitalised kind, tier, cadence, reliability, last_seen, and a panel\nstatus (`active` · `degraded` for a flaky active source · `disabled`). Token req.\n",
               "type": "text/plain"
             },
             "url": {
@@ -4184,6 +5128,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -4197,7 +5149,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"sources\": [\n    {\n      \"id\": \"<uuid>\",\n      \"domain\": \"<string>\",\n      \"kind\": \"<string>\",\n      \"tier\": 2,\n      \"cadence\": \"<integer>\",\n      \"reliability\": \"<number>\",\n      \"last_seen_at\": \"<string,null-date-time>\",\n      \"status\": \"disabled\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"domain\": \"<string>\",\n      \"kind\": \"<string>\",\n      \"tier\": 4,\n      \"cadence\": \"<integer>\",\n      \"reliability\": \"<number>\",\n      \"last_seen_at\": \"<string,null-date-time>\",\n      \"status\": \"degraded\"\n    }\n  ]\n}",
+              "body": "{\n  \"sources\": [\n    {\n      \"id\": \"<uuid>\",\n      \"domain\": \"<string>\",\n      \"kind\": \"<string>\",\n      \"tier\": 2,\n      \"cadence\": \"<integer>\",\n      \"reliability\": \"<number>\",\n      \"last_seen_at\": \"<string,null-date-time>\",\n      \"status\": \"disabled\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"domain\": \"<string>\",\n      \"kind\": \"<string>\",\n      \"tier\": 1,\n      \"cadence\": \"<integer>\",\n      \"reliability\": \"<number>\",\n      \"last_seen_at\": \"<string,null-date-time>\",\n      \"status\": \"active\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -4239,7 +5191,7 @@
             "method": "POST",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+              "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
               "options": {
                 "raw": {
                   "headerFamily": "json",
@@ -4293,7 +5245,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4349,7 +5301,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4405,7 +5357,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4461,7 +5413,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4517,7 +5469,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4573,7 +5525,7 @@
                 "method": "POST",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 4,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
+                  "raw": "{\n  \"approver\": \"<string>\",\n  \"domain\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"tier\": 1,\n  \"country\": \"<string>\",\n  \"cadence_days\": \"<integer>\"\n}",
                   "options": {
                     "raw": {
                       "headerFamily": "json",
@@ -4649,6 +5601,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -4662,7 +5622,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"provider\",\n    \"tier\": 3,\n    \"status\": \"disabled\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\",\n    \"key_0\": 1114.3431241389812,\n    \"key_1\": \"string\"\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"bundler\",\n    \"tier\": 4,\n    \"status\": \"disabled\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"bundler\",\n    \"tier\": 4,\n    \"status\": \"disabled\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  },\n  {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"bundler\",\n    \"tier\": 1,\n    \"status\": \"active\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -4798,7 +5758,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"source\": {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"community\",\n    \"tier\": 4,\n    \"status\": \"rejected\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  }\n}",
+              "body": "{\n  \"source\": {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"bundler\",\n    \"tier\": 1,\n    \"status\": \"active\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -5279,7 +6239,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"source\": {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"community\",\n    \"tier\": 4,\n    \"status\": \"rejected\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  }\n}",
+              "body": "{\n  \"source\": {\n    \"id\": \"<uuid>\",\n    \"url\": \"<uri>\",\n    \"type\": \"bundler\",\n    \"tier\": 1,\n    \"status\": \"active\",\n    \"reliability_score\": \"<number>\",\n    \"registrable_domain\": \"<string,null>\",\n    \"resolved_url\": \"<string,null-uri>\",\n    \"proposal_reason\": \"<string,null>\"\n  }\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -5707,6 +6667,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -5720,7 +6688,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"id\": \"<string>\",\n    \"source_id\": \"<uuid>\",\n    \"action\": \"reject\",\n    \"approver\": \"<string>\",\n    \"reason\": \"<string,null>\",\n    \"decided_at\": \"<dateTime>\",\n    \"key_0\": 7654,\n    \"key_1\": 6903.587839036457\n  },\n  {\n    \"id\": \"<string>\",\n    \"source_id\": \"<uuid>\",\n    \"action\": \"reject\",\n    \"approver\": \"<string>\",\n    \"reason\": \"<string,null>\",\n    \"decided_at\": \"<dateTime>\"\n  }\n]",
+              "body": "[\n  {\n    \"id\": \"<string>\",\n    \"source_id\": \"<uuid>\",\n    \"action\": \"reject\",\n    \"approver\": \"<string>\",\n    \"reason\": \"<string,null>\",\n    \"decided_at\": \"<dateTime>\",\n    \"key_0\": 1369\n  },\n  {\n    \"id\": \"<string>\",\n    \"source_id\": \"<uuid>\",\n    \"action\": \"approve\",\n    \"approver\": \"<string>\",\n    \"reason\": \"<string,null>\",\n    \"decided_at\": \"<dateTime>\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -5741,7 +6709,7 @@
           "request": {
             "name": "Cross-deal audit feed of recent review decisions (ACR-7)",
             "description": {
-              "content": "Recent human review decisions across all deals, newest first — backs the\nDashboard \"recent activity\" card and the Audit-log screen. Only the persisted\nreview actions appear (`approve` · `reject` · `edit`); `promote`/`extract` are\nnot yet recorded as audit rows (deferred). Read endpoint — not gated.\n",
+              "content": "Recent human review decisions across all deals, newest first — backs the\nDashboard \"recent activity\" card and the Audit-log screen. Only the persisted\nreview actions appear (`approve` · `reject` · `edit`); `promote`/`extract` are\nnot yet recorded as audit rows (deferred). Requires a valid token (Phase 2).\n",
               "type": "text/plain"
             },
             "url": {
@@ -5860,6 +6828,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -5873,7 +6849,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"entries\": [\n    {\n      \"id\": \"<string>\",\n      \"initials\": \"<string>\",\n      \"actor\": \"<string>\",\n      \"action\": \"reject\",\n      \"detail\": \"<string,null>\",\n      \"entity_id\": \"<uuid>\",\n      \"at\": \"<dateTime>\"\n    },\n    {\n      \"id\": \"<string>\",\n      \"initials\": \"<string>\",\n      \"actor\": \"<string>\",\n      \"action\": \"reject\",\n      \"detail\": \"<string,null>\",\n      \"entity_id\": \"<uuid>\",\n      \"at\": \"<dateTime>\"\n    }\n  ]\n}",
+              "body": "{\n  \"entries\": [\n    {\n      \"id\": \"<string>\",\n      \"initials\": \"<string>\",\n      \"actor\": \"<string>\",\n      \"action\": \"approve\",\n      \"detail\": \"<string,null>\",\n      \"entity_id\": \"<uuid>\",\n      \"at\": \"<dateTime>\"\n    },\n    {\n      \"id\": \"<string>\",\n      \"initials\": \"<string>\",\n      \"actor\": \"<string>\",\n      \"action\": \"edit\",\n      \"detail\": \"<string,null>\",\n      \"entity_id\": \"<uuid>\",\n      \"at\": \"<dateTime>\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -5932,6 +6908,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -5966,7 +6950,7 @@
           "request": {
             "name": "Admin \"Published deals\" screen — publication history (ACR-10)",
             "description": {
-              "content": "Live (`published`) + unpublished (`expired`) deals — publication HISTORY, not\njust the live feed — newest-published-first, paginated. Curated admin row\n(not the public allow-list, but not the whole record either). Read — not gated.\n",
+              "content": "Live (`published`) + unpublished (`expired`) deals — publication HISTORY, not\njust the live feed — newest-published-first, paginated. Curated admin row\n(not the public allow-list, but not the whole record either). Requires a token.\n",
               "type": "text/plain"
             },
             "url": {
@@ -6049,6 +7033,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -6062,7 +7054,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"deals\": [\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"geo\": \"<string>\",\n      \"true_monthly\": \"<number>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"status\": \"live\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"geo\": \"<string>\",\n      \"true_monthly\": \"<number>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"status\": \"re-review\"\n    }\n  ],\n  \"total\": \"<integer>\"\n}",
+              "body": "{\n  \"deals\": [\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"geo\": \"<string>\",\n      \"true_monthly\": \"<number>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"status\": \"re-review\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"service\": \"<string>\",\n      \"provider\": \"<string>\",\n      \"geo\": \"<string>\",\n      \"true_monthly\": \"<number>\",\n      \"published_at\": \"<string,null-date-time>\",\n      \"status\": \"live\"\n    }\n  ],\n  \"total\": \"<integer>\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -6103,6 +7095,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -6137,7 +7137,7 @@
           "request": {
             "name": "List team members with derived review counts (ACR-10)",
             "description": {
-              "content": "Reviewer registry — the pipeline is the system of record for reviewer\nidentity. Each member's `review_count` is DERIVED from the reviews audit log\n(by email = approver), so it never drifts. Read — not gated.\n",
+              "content": "Reviewer registry — the pipeline is the system of record for reviewer\nidentity. Each member's `review_count` is DERIVED from the reviews audit log\n(by email = approver), so it never drifts. Requires a valid token (Phase 2).\n",
               "type": "text/plain"
             },
             "url": {
@@ -6182,6 +7182,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -6195,7 +7203,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"members\": [\n    {\n      \"id\": \"<uuid>\",\n      \"name\": \"<string>\",\n      \"email\": \"<email>\",\n      \"role\": \"admin\",\n      \"status\": \"active\",\n      \"review_count\": \"<integer>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"name\": \"<string>\",\n      \"email\": \"<email>\",\n      \"role\": \"reviewer\",\n      \"status\": \"active\",\n      \"review_count\": \"<integer>\"\n    }\n  ]\n}",
+              "body": "{\n  \"members\": [\n    {\n      \"id\": \"<uuid>\",\n      \"name\": \"<string>\",\n      \"email\": \"<email>\",\n      \"role\": \"reviewer\",\n      \"status\": \"active\",\n      \"review_count\": \"<integer>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"name\": \"<string>\",\n      \"email\": \"<email>\",\n      \"role\": \"admin\",\n      \"status\": \"active\",\n      \"review_count\": \"<integer>\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -6778,7 +7786,7 @@
           "request": {
             "name": "List persisted alerts + the open count (ACR-8)",
             "description": {
-              "content": "Recent alerts (newest first) with their EFFECTIVE status — a budget alert from\na past UTC day and a reliability alert whose source has recovered auto-resolve\nat read time; a manual ack/resolve always wins. `open_count` feeds the top-bar\nbell badge. Read — not gated.\n",
+              "content": "Recent alerts (newest first) with their EFFECTIVE status — a budget alert from\na past UTC day and a reliability alert whose source has recovered auto-resolve\nat read time; a manual ack/resolve always wins. `open_count` feeds the top-bar\nbell badge. Requires a valid token (Phase 2).\n",
               "type": "text/plain"
             },
             "url": {
@@ -6843,6 +7851,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -6856,7 +7872,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"alerts\": [\n    {\n      \"id\": \"<uuid>\",\n      \"title\": \"<string>\",\n      \"body\": \"<string>\",\n      \"severity\": \"warning\",\n      \"status\": \"resolved\",\n      \"at\": \"<dateTime>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"title\": \"<string>\",\n      \"body\": \"<string>\",\n      \"severity\": \"warning\",\n      \"status\": \"open\",\n      \"at\": \"<dateTime>\"\n    }\n  ],\n  \"open_count\": \"<integer>\"\n}",
+              "body": "{\n  \"alerts\": [\n    {\n      \"id\": \"<uuid>\",\n      \"title\": \"<string>\",\n      \"body\": \"<string>\",\n      \"severity\": \"warning\",\n      \"status\": \"open\",\n      \"at\": \"<dateTime>\"\n    },\n    {\n      \"id\": \"<uuid>\",\n      \"title\": \"<string>\",\n      \"body\": \"<string>\",\n      \"severity\": \"warning\",\n      \"status\": \"open\",\n      \"at\": \"<dateTime>\"\n    }\n  ],\n  \"open_count\": \"<integer>\"\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             },
@@ -6888,6 +7904,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -7608,7 +8632,7 @@
           "request": {
             "name": "Pending-queue freshness age-buckets (ACR-9)",
             "description": {
-              "content": "The share of the pending review queue (`candidate` + `in_review`) in each age\nband, where age is `now − evidence.captured_at`. The three bands are always\nreturned, summing to 100 (an empty queue returns all three at 0). Backs the\nDashboard \"Queue freshness\" card. Read endpoint — not gated.\n",
+              "content": "The share of the pending review queue (`candidate` + `in_review`) in each age\nband, where age is `now − evidence.captured_at`. The three bands are always\nreturned, summing to 100 (an empty queue returns all three at 0). Backs the\nDashboard \"Queue freshness\" card. Requires a valid token (Phase 2).\n",
               "type": "text/plain"
             },
             "url": {
@@ -7655,6 +8679,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -7668,7 +8700,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "[\n  {\n    \"bucket\": \">3d\",\n    \"percent\": \"<integer>\"\n  },\n  {\n    \"bucket\": \">3d\",\n    \"percent\": \"<integer>\"\n  }\n]",
+              "body": "[\n  {\n    \"bucket\": \">3d\",\n    \"percent\": \"<integer>\"\n  },\n  {\n    \"bucket\": \"1-3d\",\n    \"percent\": \"<integer>\"\n  }\n]",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -7683,7 +8715,7 @@
           "request": {
             "name": "Today's reviewer-throughput summary (ACR-6)",
             "description": {
-              "content": "Counts of today's (UTC) approve/reject/edit decisions plus the mean\ncapture→decision latency (`avg_review_seconds`, or null when no decision today\nhas a resolvable capture time). Backs the Dashboard \"Today's throughput\" card.\nRead endpoint — not gated.\n",
+              "content": "Counts of today's (UTC) approve/reject/edit decisions plus the mean\ncapture→decision latency (`avg_review_seconds`, or null when no decision today\nhas a resolvable capture time). Backs the Dashboard \"Today's throughput\" card.\nRequires a valid token (Phase 2).\n",
               "type": "text/plain"
             },
             "url": {
@@ -7750,6 +8782,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -7796,6 +8836,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -7824,7 +8872,7 @@
           "request": {
             "name": "Metrics screen rollup — KPIs / cost-per-day / confidence (ACR-10 Metrics)",
             "description": {
-              "content": "KPI cards, the last 14 UTC days of crawl cost, and the pending-queue confidence\ndistribution — all derived from real pipeline data (`crawl_runs` + the `reviews`\nlog + the pending `deals`). Backs the Metrics screen. Read endpoint — not gated.\n",
+              "content": "KPI cards, the last 14 UTC days of crawl cost, and the pending-queue confidence\ndistribution — all derived from real pipeline data (`crawl_runs` + the `reviews`\nlog + the pending `deals`). Backs the Metrics screen. Requires a valid token.\n",
               "type": "text/plain"
             },
             "url": {
@@ -7869,6 +8917,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",
@@ -7882,7 +8938,7 @@
                   "value": "application/json"
                 }
               ],
-              "body": "{\n  \"kpis\": [\n    {\n      \"key\": \"<string>\",\n      \"label\": \"<string>\",\n      \"value\": \"<string>\",\n      \"trend\": \"<string>\",\n      \"direction\": \"flat\"\n    },\n    {\n      \"key\": \"<string>\",\n      \"label\": \"<string>\",\n      \"value\": \"<string>\",\n      \"trend\": \"<string>\",\n      \"direction\": \"up-good\"\n    }\n  ],\n  \"cost_per_day\": [\n    {\n      \"day\": \"<string>\",\n      \"cost\": \"<number>\",\n      \"highlight\": \"<boolean>\"\n    },\n    {\n      \"day\": \"<string>\",\n      \"cost\": \"<number>\",\n      \"highlight\": \"<boolean>\"\n    }\n  ],\n  \"confidence_distribution\": [\n    {\n      \"label\": \"<string>\",\n      \"percent\": \"<integer>\",\n      \"level\": \"warning\"\n    },\n    {\n      \"label\": \"<string>\",\n      \"percent\": \"<integer>\",\n      \"level\": \"warning\"\n    }\n  ]\n}",
+              "body": "{\n  \"kpis\": [\n    {\n      \"key\": \"<string>\",\n      \"label\": \"<string>\",\n      \"value\": \"<string>\",\n      \"trend\": \"<string>\",\n      \"direction\": \"flat\"\n    },\n    {\n      \"key\": \"<string>\",\n      \"label\": \"<string>\",\n      \"value\": \"<string>\",\n      \"trend\": \"<string>\",\n      \"direction\": \"flat\"\n    }\n  ],\n  \"cost_per_day\": [\n    {\n      \"day\": \"<string>\",\n      \"cost\": \"<number>\",\n      \"highlight\": \"<boolean>\"\n    },\n    {\n      \"day\": \"<string>\",\n      \"cost\": \"<number>\",\n      \"highlight\": \"<boolean>\"\n    }\n  ],\n  \"confidence_distribution\": [\n    {\n      \"label\": \"<string>\",\n      \"percent\": \"<integer>\",\n      \"level\": \"danger\"\n    },\n    {\n      \"label\": \"<string>\",\n      \"percent\": \"<integer>\",\n      \"level\": \"success\"\n    }\n  ]\n}",
               "cookie": [],
               "_postman_previewlanguage": "json"
             }
@@ -7903,7 +8959,7 @@
           "request": {
             "name": "Read the operational settings (ACR-10 Settings)",
             "description": {
-              "content": "The grouped settings view: panel-editable knobs PLUS read-only env/derived\nmirrors (each row carries `read_only`). A writable knob shows its stored override\nif set, else the live config value. Read endpoint — not gated.\n",
+              "content": "The grouped settings view: panel-editable knobs PLUS read-only env/derived\nmirrors (each row carries `read_only`). A writable knob shows its stored override\nif set, else the live config value. Requires a valid token (Phase 2).\n",
               "type": "text/plain"
             },
             "url": {
@@ -7948,6 +9004,14 @@
                   {
                     "key": "Accept",
                     "value": "application/json"
+                  },
+                  {
+                    "description": {
+                      "content": "Added as a part of security scheme: bearer",
+                      "type": "text/plain"
+                    },
+                    "key": "Authorization",
+                    "value": "Bearer <token>"
                   }
                 ],
                 "method": "GET",

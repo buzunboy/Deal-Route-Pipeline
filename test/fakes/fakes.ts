@@ -14,6 +14,7 @@ import type {
   Clock,
   Logger,
   Alerting,
+  PasswordHasher,
 } from '../../src/application/ports/index.js';
 import { assertCaptureComplete, EVIDENCE_ARTIFACTS } from '../../src/domain/index.js';
 import type {
@@ -236,4 +237,37 @@ export class FakeAlerter implements Alerting {
 
 export function sha256(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/**
+ * Deterministic fake `PasswordHasher` for fast use-case unit tests. NOT a real hash —
+ * the encoding is `fakehash:v<paramVersion>:<sha256(salt+plaintext)>` with a random salt
+ * per `hash()` call (so re-hashing the same password yields a different encoding, like a
+ * real salted hasher). It passes the SAME `passwordHasherContract` the `Argon2idHasher`
+ * does, so it's substitutable behind the port (LSP) — the use-cases can't tell them apart.
+ *
+ * `verify` NEVER throws (a malformed/non-fakehash string is a quiet `false`), preserving
+ * the constant-time unknown-email contract. `needsRehash` flips when `paramVersion`
+ * differs from the version baked into the stored encoding, so a "params changed" rehash
+ * path is testable without a slow real KDF.
+ */
+export class FakePasswordHasher implements PasswordHasher {
+  constructor(private readonly paramVersion = 1) {}
+
+  async hash(plaintext: string): Promise<string> {
+    const salt = randomUUID();
+    return `fakehash:v${this.paramVersion}:${salt}:${sha256(salt + plaintext)}`;
+  }
+
+  async verify(hash: string, plaintext: string): Promise<boolean> {
+    const m = /^fakehash:v\d+:([^:]+):([0-9a-f]{64})$/.exec(hash);
+    if (m === null) return false; // garbage / non-fakehash → false, never throws
+    return sha256(m[1]! + plaintext) === m[2];
+  }
+
+  needsRehash(hash: string): boolean {
+    const m = /^fakehash:v(\d+):/.exec(hash);
+    if (m === null) return true;
+    return Number(m[1]) !== this.paramVersion;
+  }
 }
