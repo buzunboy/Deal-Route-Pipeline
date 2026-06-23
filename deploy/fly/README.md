@@ -239,7 +239,8 @@ fly postgres attach dealroute-db -a dealroute-api
 Everything sensitive goes here (NOT in `fly.toml`). One command:
 ```sh
 fly secrets set -a dealroute-api \
-  REVIEW_API_TOKEN="$(openssl rand -hex 32)" \
+  AUTH_JWT_PRIVATE_KEY="$(cat es256-private.pem)" \
+  AUTH_JWT_KID="prod-1" \
   ADMIN_CORS_ORIGIN="https://admin.dealroute.example" \
   PUBLIC_CORS_ORIGIN="https://dealroute.example" \
   S3_BUCKET="dealroute-evidence-prod" \
@@ -250,8 +251,14 @@ fly secrets set -a dealroute-api \
   # ^ OMIT DATABASE_URL if you used `fly postgres attach` (it set it for you)
   # Add S3_CDN_BASE_URL="https://dxxxx.cloudfront.net" only if you did §2.4
 ```
-- **`REVIEW_API_TOKEN`** — the bearer the admin panel sends (`Authorization: Bearer <token>`).
-  Save the generated value; the panel needs it.
+- **`AUTH_JWT_PRIVATE_KEY`** — **REQUIRED** (Auth/IAM Phase 5: the legacy `REVIEW_API_TOKEN` is
+  retired; per-user JWT is the only auth path). The ES256 signing key for the IdP — a PKCS8 PEM
+  (generate: `openssl ecparam -name prime256v1 -genkey -noout -out k.pem && openssl pkcs8 -topk8
+  -nocrypt -in k.pem -out es256-private.pem`) or a JWK JSON string. `serve` HARD-FAILS at startup
+  without it — there is no static-token or open fallback. Also set `AUTH_JWT_KID` (any stable id).
+  After deploy, seed the reviewers: `fly ssh console -a dealroute-api -C "node … cli seed-user …"`
+  (or run the seed-user CLI as a one-off machine). The panel forwards each reviewer's per-user token;
+  it holds NO shared pipeline secret.
 - **`ADMIN_CORS_ORIGIN`** — the panel's EXACT deployed origin (scheme+host, no trailing slash).
   Must NOT be `*` (the surface is credentialed).
 
@@ -286,10 +293,15 @@ curl -i -X OPTIONS $API/api/candidates/x/approve \
   -H "Origin: https://admin.dealroute.example" \
   -H "Access-Control-Request-Method: POST"
 
-# Auth: write without the token → 401; with it → reaches the handler:
+# Auth (per-user JWT only): a read without a token → 401; the IdP JWKS is public:
+curl -s $API/.well-known/jwks.json      # the IdP public key(s)
+curl -i $API/api/candidates             # 401 unauthorized
+
+# Get a per-user token, then call a gated endpoint with it:
+TOKEN=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"you@dealroute.example","password":"<seeded-pw>"}' | jq -r .accessToken)
 curl -i -X POST $API/api/candidates/<uuid>/approve \
-  -H "Authorization: Bearer <REVIEW_API_TOKEN>" -H "Content-Type: application/json" \
-  -d '{"approver":"me"}'
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{}'
 ```
 
 ---
@@ -297,8 +309,9 @@ curl -i -X POST $API/api/candidates/<uuid>/approve \
 ## 6. Point the admin panel at it
 
 In the admin panel repo's deployed env:
-- API base URL → `https://dealroute-api.fly.dev`
-- Bearer token → the `REVIEW_API_TOKEN` you generated (sent as `Authorization: Bearer <token>`)
+- API base URL → `https://dealroute-api.fly.dev` (also where `/auth/login` lives)
+- No shared token — the panel authenticates Credentials against `/auth/login` and forwards each
+  reviewer's per-user access token. There is no `PIPELINE_TOKEN`/`REVIEW_API_TOKEN` (Auth/IAM Phase 5).
 - The panel's deployed origin MUST equal `ADMIN_CORS_ORIGIN`. If it changes, update the
   secret and redeploy:
   ```sh
@@ -345,7 +358,7 @@ host cron). Keep Tier-4 (`discover`) dark unless you set `AGENT=search` + a sear
 | Secret | Required | From | Notes |
 |---|---|---|---|
 | `DATABASE_URL` | ✅ | §1 | `fly postgres attach` sets it, or set manually |
-| `REVIEW_API_TOKEN` | ✅ (once public) | §4.2 (`openssl rand -hex 32`) | bearer the panel sends; unset = open writes |
+| `AUTH_JWT_PRIVATE_KEY` | ✅ (required) | §4.2 (ES256 PEM/JWK) | the IdP signing key; `serve` HARD-FAILS without it (per-user JWT is the only auth path — Phase 5). Set `AUTH_JWT_KID` too. |
 | `ADMIN_CORS_ORIGIN` | ✅ (browser panel) | the panel's deployed origin | exact origin, never `*` |
 | `PUBLIC_CORS_ORIGIN` | optional | landing origin | defaults to `*` |
 | `S3_BUCKET` / `S3_REGION` | ✅ | §2.1 | `dealroute-evidence-prod` / `eu-central-1` |

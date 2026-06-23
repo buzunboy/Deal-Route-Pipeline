@@ -16,6 +16,20 @@ import { REVIEW_TEST_PAGE } from '../../http/test-page.js';
  * interrupted.
  */
 export async function serve(config: Config): Promise<void> {
+  // Auth/IAM Phase 5: per-user JWT is the ONLY auth path — the legacy static REVIEW_API_TOKEN
+  // and the open trusted-network mode are retired. With no signing key the IdP can't verify
+  // tokens, which would silently lock the entire `/api/*` surface (every request 401s) with
+  // no fallback — so fail LOUDLY at startup instead. This is the documented post-cutover
+  // posture (was a soft warning during the dual-accept window).
+  if (config.auth.jwt.privateKey === undefined) {
+    console.error(
+      'FATAL: AUTH_JWT_PRIVATE_KEY is not set. Per-user JWT is the only auth path since the ' +
+        'Phase-5 cutover (the legacy REVIEW_API_TOKEN was retired). Configure an ES256 signing ' +
+        'key (see .env.example) before starting `serve`.',
+    );
+    process.exit(1);
+  }
+
   const container = new Container(config, { usePersistence: true });
   // Adopt a queued daily budget if one was set under a prior deployment (ACR-10 Settings),
   // and parse the JWT signing key once (fails loudly on a malformed key — Auth/IAM).
@@ -34,24 +48,19 @@ export async function serve(config: Config): Promise<void> {
     container.logger,
     {
       staticPageHtml: REVIEW_TEST_PAGE,
-      authToken: config.reviewApi.authToken,
       corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin,
-      // Auth/IAM (Phase 2): wire the per-user JWT guard ONLY when a signing key is
-      // configured. Without a key the issuer can't verify, so passing `auth` would make
-      // EVERY /api/* request 401 (a key-less verify throws) — silently locking the surface
-      // and contradicting the open-mode banner below. Omitting it when there's no key keeps
-      // the genuinely-open trusted-network mode reachable (and the legacy `authToken` above
-      // stays accepted alongside JWTs during the dual-accept window).
-      ...(config.auth.jwt.privateKey !== undefined && {
-        auth: {
-          tokenIssuer: container.tokenIssuer,
-          db: container.db,
-          authorization: container.authorization,
-          // Auth/IAM (Phase 3): the Users & Roles admin surface (`/api/users`, `/api/roles`).
-          provisionUser: container.provisionUser,
-          manageRoles: container.manageRoles,
-        },
-      }),
+      // Per-user JWT guard — ALWAYS wired (the hard-fail above guarantees a signing key).
+      // Every `/api/*` request is verified against a per-user ES256 bearer; identity +
+      // permissions come from the claims, the `approver` is the token email, and there is no
+      // static-token or open fallback.
+      auth: {
+        tokenIssuer: container.tokenIssuer,
+        db: container.db,
+        authorization: container.authorization,
+        // Auth/IAM (Phase 3): the Users & Roles admin surface (`/api/users`, `/api/roles`).
+        provisionUser: container.provisionUser,
+        manageRoles: container.manageRoles,
+      },
     },
   );
   const authApi = new AuthApi(
@@ -62,8 +71,8 @@ export async function serve(config: Config): Promise<void> {
     container.logger,
     {
       corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin,
-      // With no signing key the IdP can't mint/publish tokens — /auth/* 503s clearly.
-      authConfigured: config.auth.jwt.privateKey !== undefined,
+      // A signing key is guaranteed present (the hard-fail above), so the IdP is configured.
+      authConfigured: true,
     },
   );
   const publicApi = new PublicApi(container.db.deals, container.clock, container.logger, {
@@ -95,19 +104,10 @@ export async function serve(config: Config): Promise<void> {
   console.log(`Auth API / JWKS:   http://localhost:${port}/auth  ·  /.well-known/jwks.json`);
   console.log(`Review test page:  http://localhost:${port}/`);
   console.log(`Review API base:   http://localhost:${port}/api`);
-  // Auth posture warnings: with NO signing key, per-user JWT auth is disabled; with NO
-  // legacy token either, the gated surface is fully OPEN (must be a trusted network).
-  if (config.auth.jwt.privateKey === undefined) {
-    console.log(
-      'WARNING: no AUTH_JWT_PRIVATE_KEY set — per-user JWT auth is disabled (no /auth/login).',
-    );
-  }
-  if (config.reviewApi.authToken === undefined && config.auth.jwt.privateKey === undefined) {
-    console.log(
-      'WARNING: neither AUTH_JWT_PRIVATE_KEY nor REVIEW_API_TOKEN set — /api/* is UNAUTHENTICATED. ' +
-        'Bind to a trusted network or configure auth.',
-    );
-  }
+  // Auth posture (Phase 5): per-user JWT is the only path. A signing key is guaranteed present
+  // (the hard-fail above), so the gated surface is always authenticated — there is no
+  // static-token or open mode left to warn about.
+  console.log('Auth: per-user JWT (ES256) — every /api/* request requires a valid token.');
 
   const shutdown = async (): Promise<void> => {
     await new Promise<void>((resolve, reject) =>

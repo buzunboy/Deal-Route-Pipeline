@@ -11,11 +11,12 @@ import { makeDealRecord } from '../factories/deal.js';
 import type { Container } from '../../src/composition/container.js';
 
 /**
- * Auth/IAM Phase 2 end-to-end through the REAL composition root + REAL Postgres + the REAL
- * AuthApi/ReviewApi over a socket: login → access token → gated write → the recorded
+ * Auth/IAM (post-Phase-5) end-to-end through the REAL composition root + REAL Postgres + the
+ * REAL AuthApi/ReviewApi over a socket: login → access token → gated write → the recorded
  * `approver` is the TOKEN's email (not a body value) → disable the user → the same
- * still-unexpired token 401s (immediate revocation) → refresh-after-disable fails. This is
- * the wiring + SQL round-trip a unit test with fakes can't prove (real users/roles/
+ * still-unexpired token 401s (immediate revocation) → refresh-after-disable fails. Plus the
+ * Phase-5 retirement proof: the legacy static token no longer authorises ANYTHING (401). This
+ * is the wiring + SQL round-trip a unit test with fakes can't prove (real users/roles/
  * refresh_tokens/reviews tables, the real Argon2 hasher, the real jose verifier).
  */
 const suite = hasDb ? describe : describe.skip;
@@ -35,7 +36,7 @@ const overrides = {
   llm: new RoleAwareFakeLlm({ extraction: JSON.stringify({ deals: [] }) }),
 };
 
-suite('Auth/IAM Phase 2 flow (Container + Postgres + HTTP)', () => {
+suite('Auth/IAM flow — per-user JWT only (Container + Postgres + HTTP)', () => {
   beforeAll(applyMigrations);
   beforeEach(resetDb);
 
@@ -51,7 +52,7 @@ suite('Auth/IAM Phase 2 flow (Container + Postgres + HTTP)', () => {
       AUTH_JWT_KID: 'it-key-1',
       // A short, deterministic access TTL keeps the test fast while still real.
       AUTH_ACCESS_TTL_SECONDS: '900',
-      REVIEW_API_TOKEN: 'legacy-it-token',
+      // Phase 5: NO REVIEW_API_TOKEN — the legacy static token is retired.
     });
     await container.init(); // parses the signing key (fails loudly if malformed)
     reviewApi = new ReviewApi(
@@ -65,7 +66,7 @@ suite('Auth/IAM Phase 2 flow (Container + Postgres + HTTP)', () => {
       container.logger,
       {
         staticPageHtml: REVIEW_TEST_PAGE,
-        authToken: container.config.reviewApi.authToken,
+        // No `authToken` — per-user JWT is the only path.
         auth: {
           tokenIssuer: container.tokenIssuer,
           db: container.db,
@@ -206,7 +207,7 @@ suite('Auth/IAM Phase 2 flow (Container + Postgres + HTTP)', () => {
     expect(reuse.status).toBe(401);
   });
 
-  it('the legacy static token still authorises a write during dual-accept', async () => {
+  it('Phase 5: the OLD static token no longer authorises a write (401, nothing recorded)', async () => {
     await boot();
     const ev = await container.evidenceStore.save({
       sourceUrl: 'https://x.de',
@@ -220,14 +221,14 @@ suite('Auth/IAM Phase 2 flow (Container + Postgres + HTTP)', () => {
     const deal = makeDealRecord({ evidence_id: ev.id, status: 'candidate' });
     await container.db.deals.insert(deal);
 
+    // A bearer that was the legacy REVIEW_API_TOKEN is now just a non-JWT string → 401.
     const res = await fetch(`${reviewBase}/api/candidates/${deal.id}/approve`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: 'Bearer legacy-it-token' },
-      body: JSON.stringify({ approver: 'human@dealroute.de' }),
+      body: JSON.stringify({}),
     });
-    expect(res.status).toBe(200);
-    const reviews = await container.db.reviews.listForDeal(deal.id, 10);
-    // Legacy path records the BODY approver — never a synthetic 'legacy-token@system'.
-    expect(reviews[0]!.approver).toBe('human@dealroute.de');
+    expect(res.status).toBe(401);
+    expect((await container.db.reviews.listForDeal(deal.id, 10)).length).toBe(0);
+    expect((await container.db.deals.getById(deal.id))!.status).toBe('candidate');
   });
 });

@@ -14,11 +14,12 @@ info:
       * **Public read feed** — `/v1/*`: unauthenticated, READ-ONLY over `published`
         deals. Returns a curated DTO that NEVER leaks an internal field.
       * **Gated admin API** — `/api/*`: the review/approval surface consumed by the
-        admin panel. As of Auth/IAM Phase 2, **every `/api/*` endpoint requires a Bearer
-        token** (reads were open before); writes additionally require a permission. The
-        actor recorded on an audited decision is derived from the verified token, never the
-        request body. A legacy static token is accepted alongside per-user JWTs during the
-        dual-accept window (retired in Phase 5). `/api/health` stays open.
+        admin panel. **Every `/api/*` endpoint requires a per-user ES256 Bearer token**
+        (reads + writes); writes additionally require a permission. The actor recorded on an
+        audited decision is ALWAYS derived from the verified token — request bodies carry no
+        `approver` field. As of Auth/IAM Phase 5 the per-user JWT is the ONLY auth path: the
+        legacy static token (`REVIEW_API_TOKEN`) is retired (a stale token now 401s).
+        `/api/health` stays open.
       * **Test page** — `/`: a thin built-in HTML harness over the `/api/*` endpoints.
 
     Trust invariants (see CLAUDE.md): the LLM only proposes candidates; **nothing
@@ -721,7 +722,7 @@ paths:
                   candidate_id: { type: string, format: uuid }
                 additionalProperties: false
         '400':
-          description: Missing approver/fields, or incomplete evidence bundle.
+          description: Missing fields, or incomplete evidence bundle.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -749,7 +750,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/DealEnvelope' }
         '400':
-          description: Missing approver/fields, or incomplete evidence bundle.
+          description: Missing fields, or incomplete evidence bundle.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -798,9 +799,8 @@ paths:
           application/json:
             schema:
               type: object
-              required: [approver, domain, kind, tier]
+              required: [domain, kind, tier]
               properties:
-                approver: { type: string, minLength: 1 }
                 domain:
                   type: string
                   minLength: 1
@@ -838,7 +838,7 @@ paths:
                   created: { type: boolean }
                 additionalProperties: false
         '400':
-          description: Missing/invalid approver, domain, kind, tier, or country.
+          description: Missing/invalid domain, kind, tier, or country.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -967,9 +967,8 @@ paths:
           application/json:
             schema:
               type: object
-              required: [approver, name, email]
+              required: [name, email]
               properties:
-                approver: { type: string, minLength: 1 }
                 name: { type: string, minLength: 1 }
                 email: { type: string, format: email }
                 role: { type: string, enum: [admin, reviewer] }
@@ -988,7 +987,7 @@ paths:
                   email: { type: string }
                 additionalProperties: false
         '400':
-          description: Missing/invalid approver, name, email, or role.
+          description: Missing/invalid name, email, or role.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1001,7 +1000,7 @@ paths:
       summary: Update the signed-in reviewer's own profile — name and/or own password (ACR-11 + Phase 3)
       operationId: updateProfile
       description: |
-        SELF-service, keyed by the caller's TOKEN email (a body `approver` is ignored) — a
+        SELF-service, keyed by the caller's TOKEN email (the request carries no `approver`) — a
         user can only ever edit their OWN row. `name` edits the display name. `currentPassword`
         + `newPassword` (all-or-nothing) change the caller's OWN password: the current-password
         proof IS the authorization (no `team:manage` needed, unlike the admin reset on
@@ -1018,7 +1017,6 @@ paths:
               type: object
               minProperties: 1
               properties:
-                approver: { type: string, minLength: 1 }
                 name: { type: string, minLength: 1 }
                 currentPassword:
                   type: string
@@ -1090,8 +1088,8 @@ paths:
       description: |
         One admin action creates a login-capable account (name/email/role + admin-set
         initial password): the user can `POST /auth/login` immediately and is restricted
-        on the pipeline by their role. The actor recorded for the audit is derived from
-        the TOKEN (the body `approver` is ignored when a JWT is present). Gated `team:manage`.
+        on the pipeline by their role. The actor recorded for the audit is the verified
+        TOKEN email (the request carries no `approver`). Gated `team:manage`.
       security:
         - bearerAuth: []
       requestBody:
@@ -1102,10 +1100,6 @@ paths:
               type: object
               required: [name, email, role, password]
               properties:
-                approver:
-                  type: string
-                  minLength: 1
-                  description: 'Ignored for a JWT caller (actor is token-derived); used only by a legacy static-token caller.'
                 name: { type: string, minLength: 1 }
                 email: { type: string, format: email }
                 role:
@@ -1173,7 +1167,6 @@ paths:
               type: object
               minProperties: 1
               properties:
-                approver: { type: string, minLength: 1 }
                 name: { type: string, minLength: 1 }
                 role:
                   type: string
@@ -1255,7 +1248,6 @@ paths:
               type: object
               required: [name, permissions]
               properties:
-                approver: { type: string, minLength: 1 }
                 name: { type: string, minLength: 1 }
                 description: { type: string }
                 permissions:
@@ -1313,7 +1305,6 @@ paths:
               type: object
               minProperties: 1
               properties:
-                approver: { type: string, minLength: 1 }
                 description: { type: string }
                 permissions:
                   type: array
@@ -1433,8 +1424,9 @@ paths:
                 required: [email, role, permissions]
                 properties:
                   email:
-                    type: [string, 'null']
-                    description: The token email; null for a legacy static-token caller.
+                    type: string
+                    format: email
+                    description: The verified token email (the signed-in user).
                   role: { type: string }
                   permissions:
                     type: array
@@ -1666,15 +1658,16 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+      bearerFormat: JWT
       description: |
-        `Authorization: Bearer <token>` on EVERY `/api/*` endpoint — reads included (the
-        Auth/IAM Phase 2 change; `/api/health` is the one exception). The token is normally
-        a per-user ES256 access token from `POST /auth/login`; identity + permissions come
-        from the verified claims and the recorded actor is derived from the token (never the
-        request body). The legacy static `REVIEW_API_TOKEN` is also accepted during the
-        dual-accept window (retired in Phase 5). When NEITHER a signing key nor the legacy
-        token is configured server-side the API is open and MUST be bound to a trusted
-        network. Writes additionally require the route's permission.
+        `Authorization: Bearer <token>` on EVERY `/api/*` endpoint — reads included
+        (`/api/health` is the one exception). The token is a per-user ES256 access token from
+        `POST /auth/login`; identity + permissions come from the verified claims and the
+        recorded actor is ALWAYS derived from the token (request bodies carry no `approver`).
+        As of Auth/IAM Phase 5 this is the ONLY auth path: the legacy static `REVIEW_API_TOKEN`
+        is retired (a stale token 401s), and `serve` hard-fails at startup without a signing
+        key (there is no open/trusted-network fallback). Writes additionally require the
+        route's permission.
 
   parameters:
     IdParam:
@@ -2254,9 +2247,8 @@ components:
         PATCH body for one writable setting (ACR-10 Settings). `value` is loosely typed
         (a toggle sends a boolean, a value chip a string/number); the pipeline's per-key
         rule validates + normalises it. A read-only / unknown key is a 409.
-      required: [approver, value]
+      required: [value]
       properties:
-        approver: { type: string, minLength: 1 }
         value:
           oneOf:
             - { type: string }
@@ -2451,30 +2443,26 @@ components:
       additionalProperties: true
 
     # ── Request bodies (mirror the zod schemas in review-api.ts) ────────────
+    # Auth/IAM Phase 5: NO body carries `approver` — the actor is the verified token email.
     ApproverBody:
       type: object
-      required: [approver]
-      properties:
-        approver: { type: string, minLength: 1 }
+      description: |
+        An empty body; the actor is the verified token email (no `approver` field). Any extra
+        property a stale client sends is silently stripped by the zod boundary (not rejected).
     RejectBody:
       type: object
-      required: [approver]
       properties:
-        approver: { type: string, minLength: 1 }
         reason: { type: string }
     ApproveCandidateBody:
       type: object
-      required: [approver]
       properties:
-        approver: { type: string, minLength: 1 }
         affiliate_disclosure:
           type: boolean
           description: EU-Omnibus disclosure; omitted ⇒ defaults true (over-disclose) + flagged.
     EditCandidateBody:
       type: object
-      required: [approver, patch]
+      required: [patch]
       properties:
-        approver: { type: string, minLength: 1 }
         patch: { $ref: '#/components/schemas/CandidatePatch' }
     CandidatePatch:
       type: object
@@ -2507,9 +2495,8 @@ components:
           additionalProperties: true
     PromoteBody:
       type: object
-      required: [approver, canonical_key, label]
+      required: [canonical_key, label]
       properties:
-        approver: { type: string, minLength: 1 }
         canonical_key: { type: string, minLength: 1 }
         label: { type: string, minLength: 1 }
         target:
@@ -2519,9 +2506,8 @@ components:
           description: '`field` returns 400 (not supported).'
     CompleteManualBody:
       type: object
-      required: [approver, fields, evidence]
+      required: [fields, evidence]
       properties:
-        approver: { type: string, minLength: 1 }
         fields:
           type: object
           additionalProperties: true

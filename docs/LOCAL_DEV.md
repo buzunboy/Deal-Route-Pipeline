@@ -33,7 +33,9 @@ $PSQL -d postgres -c "CREATE DATABASE dealroute_test OWNER dealroute;"   # for i
 A local `.env` already exists at the repo root (gitignored). Key values:
 - `DATABASE_URL=postgres://dealroute:dealroute@localhost:5432/dealroute`
 - `REVIEW_API_PORT=3000`
-- `REVIEW_API_TOKEN=local-dev-token` — the panel sends this as `Authorization: Bearer local-dev-token`
+- `AUTH_JWT_PRIVATE_KEY=…` — **required to `serve`** (Auth/IAM Phase 5: the legacy `REVIEW_API_TOKEN`
+  is retired; per-user JWT is the only auth path). An ES256 PKCS8 PEM or JWK; `serve` HARD-FAILS without
+  it. `AUTH_JWT_KID=dev-1` too. Generate a dev key — see the pipeline `.env.example` → "Auth / IdP".
 - `ADMIN_CORS_ORIGIN=http://localhost:5173` — **the admin panel's dev origin**. Vite defaults to 5173;
   Next.js dev defaults to 3000 (which collides with this API — change one). Must match the panel's
   origin exactly (scheme + host + port, no trailing slash).
@@ -44,37 +46,42 @@ A local `.env` already exists at the repo root (gitignored). Key values:
 > **`.env` is auto-loaded** by the `dev`/`cli`/`db:migrate`/`seed:import`/`dry-run-extract` npm
 > scripts (via `tsx --env-file-if-exists=.env`). CI/Docker set env explicitly and ignore `.env`.
 
-### 4. Apply migrations
+### 4. Apply migrations + seed a login user
 ```sh
-npm run db:migrate                 # creates the 11 tables in `dealroute`
+npm run db:migrate                 # applies all migrations (incl. the auth tables)
+npm run cli -- seed-user …         # create at least one admin user — the only way to sign in
 ```
 
 ## Run the API
 ```sh
 npm run cli -- serve
 ```
-You'll see the three URLs printed. **No** "no REVIEW_API_TOKEN" warning = the token loaded
-(writes are gated). Stop with Ctrl-C (or `lsof -ti:3000 | xargs kill`).
+You'll see the URLs printed + `Auth: per-user JWT (ES256)`. If `AUTH_JWT_PRIVATE_KEY` is unset,
+`serve` exits with a FATAL message (per-user JWT is the only path). Stop with Ctrl-C (or
+`lsof -ti:3000 | xargs kill`).
 
 ## Verify it works
 ```sh
-curl http://localhost:3000/api/health                 # {"ok":true}
-curl http://localhost:3000/v1/deals                   # {"deals":[],"total":0,...}
+curl http://localhost:3000/api/health                 # {"ok":true}  (the one open /api/* path)
+curl http://localhost:3000/v1/deals                   # {"deals":[],"total":0,...}  (public, open)
+curl http://localhost:3000/.well-known/jwks.json      # the IdP public key(s)
 
-# CORS preflight from the panel origin → 204 with the headers the browser needs:
-curl -i -X OPTIONS http://localhost:3000/api/candidates/x/approve \
-  -H "Origin: http://localhost:5173" -H "Access-Control-Request-Method: POST"
+# A read WITHOUT a token → 401 (all /api/* require auth):
+curl -i http://localhost:3000/api/candidates           # 401 unauthorized
 
-# Write without the token → 401; with it → reaches the handler:
+# Get a per-user token, then call a gated endpoint with it:
+TOKEN=$(curl -s -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"<seeded-pw>"}' | jq -r .accessToken)
 curl -i -X POST http://localhost:3000/api/candidates/<uuid>/approve \
-  -H "Authorization: Bearer local-dev-token" -H "Content-Type: application/json" \
-  -d '{"approver":"me"}'
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{}'
 ```
 
 ## Connecting the admin panel repo
 In the admin panel's own env (e.g. `.env.local`):
-- API base URL → `http://localhost:3000`
-- Bearer token → `local-dev-token` (sent as `Authorization: Bearer <token>` on every write)
+- API base URL → `http://localhost:3000` (also where `/auth/login` lives)
+- No shared token — the panel authenticates Credentials against `/auth/login` and forwards each
+  reviewer's **per-user** access token. Sign in as a seeded pipeline user.
 - Run the panel on `http://localhost:5173` (or update `ADMIN_CORS_ORIGIN` in this repo's `.env` to
   whatever port it uses, then restart `serve`).
 

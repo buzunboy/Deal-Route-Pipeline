@@ -23,8 +23,12 @@ endpoint instead. The public `/v1/` feed is unchanged (still the CDN screenshot 
 
 ```
 GET /api/evidence/:id/:artifact          artifact ∈ screenshot | html | terms
-Authorization: Bearer <REVIEW_API_TOKEN>     ← REQUIRED (unlike the other GETs)
+Authorization: Bearer <per-user access token>     ← REQUIRED
 ```
+> Auth/IAM Phase 5: this is the per-user access token from `POST /auth/login` (the panel
+> already forwards it on every `/api/*` proxy call). The legacy static `REVIEW_API_TOKEN` is
+> retired — there is no shared token. (Every `/api/*` GET now requires a token, so this
+> endpoint is no longer "unlike the other GETs"; it's gated like all of them.)
 
 - **200** → the raw bytes with the stored content-type (`image/png` /
   `text/html; charset=utf-8` / `text/plain; charset=utf-8`) +

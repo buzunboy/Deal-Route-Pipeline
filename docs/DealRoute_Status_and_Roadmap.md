@@ -155,10 +155,24 @@ monitor, review, public API). **All hold.**
   handed off in `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`.
 - **Cloud deploy — the API is LIVE** (head `5d2c781`, 2026-06-22). Always-on `serve` deployed to
   Fly.io (`https://dealroute-api.fly.dev`, region `fra`): managed Postgres attached, S3 evidence
-  bucket + scoped IAM, GHCR image, `REVIEW_API_TOKEN`/`S3_*` Fly secrets; health/CORS/auth verified.
+  bucket + scoped IAM, GHCR image, `S3_*` Fly secrets; health/CORS/auth verified. (Auth at deploy time
+  was the static `REVIEW_API_TOKEN`; the Phase-5 cutover replaces it with the `AUTH_JWT_PRIVATE_KEY`
+  signing-key secret — set it before deploying the P5 build, which hard-fails without it.)
   Shipped with it: idempotent `sources.upsert` on `url` (migration **0014**), 2 GB lane machines
   (512 MB OOMs Chromium), a Playwright base-image pin, and one-click/manual Fly deploy workflows.
   Artifacts: `deploy/fly/` (fly.toml + setup README), the committed AWS IAM policy + S3 setup script.
+- **Auth/IAM — the pipeline is the IdP; per-user JWT RBAC; DONE through Phase 5 (2026-06-23).** Replaced
+  the old static shared bearer + untrusted body `approver` with a self-hosted identity provider: a real
+  `users`/`roles`/`permissions`/`role_permissions`/`refresh_tokens` store (migrations **0019–0023**;
+  `team_members`→`users` consolidation preserves ids + emails, so the `reviews.approver` audit trail is
+  intact), **per-user ES256 JWTs** the pipeline verifies on every `/api/*` call, **permission-based RBAC**
+  configurable from the panel, immediate revocation (`token_version` + rotating refresh tokens with
+  family-reuse detection), Argon2id password hashing, and `/auth/login|refresh|logout` + JWKS. Phases:
+  P1 domain+DB, P2 auth HTTP + per-request guard, P3 Users/Roles admin API, P4 panel cutover, **P5 —
+  legacy retired: per-user JWT is the ONLY path** (the static `REVIEW_API_TOKEN` + dual-accept + open
+  mode deleted; an unset signing key hard-fails `serve`; every `/api/*` request requires a token; the
+  `approver` is ALWAYS the verified token email — request bodies carry no `approver`; `/v1/*` stays open).
+  Cross-repo (panel deploys before this pipeline removal). Handoff: `docs/handoffs/AUTH_IAM_CROSS_PROJECT.md`.
 
 **Architecture health (audited):** clean layering — zero vendor imports in `domain`, strict DIP
 (no `new Vendor()` outside `src/composition/container.ts`), every adapter behind a port with a

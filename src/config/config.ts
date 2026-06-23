@@ -151,8 +151,9 @@ const ConfigSchema = z.object({
   }),
   reviewApi: z.object({
     port: z.coerce.number().int().positive(),
-    /** Bearer token gating approve/reject. Unset ⇒ open (bind to a trusted network). */
-    authToken: z.string().min(1).optional(),
+    // Auth/IAM Phase 5: the legacy static `authToken` (REVIEW_API_TOKEN) is RETIRED. The gated
+    // `/api/*` surface is authenticated ONLY by per-user ES256 JWTs (see `auth` below); there
+    // is no shared token. `serve` hard-fails at startup without a signing key.
     /**
      * `Access-Control-Allow-Origin` for the gated admin `/api/*` router — the origin
      * of the browser admin panel. UNSET ⇒ no CORS headers are emitted (same-origin /
@@ -312,7 +313,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     reviewApi: {
       port: env.REVIEW_API_PORT ?? '3000',
-      authToken: emptyToUndefined(env.REVIEW_API_TOKEN),
       adminCorsAllowOrigin: emptyToUndefined(env.ADMIN_CORS_ORIGIN),
     },
     publicApi: {
