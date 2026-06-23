@@ -589,12 +589,20 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   evidence-store change (P2 territory) that would touch the write-once / no-partial-bundle
   guarantees, so it's documented + enforced at deploy rather than re-architected for P3.
 - **Mitigation in place**: the deployment contract is documented loudly next to `S3_CDN_BASE_URL`
-  (config JSDoc + README + ARCHITECTURE.md "Public read surface").
-- **Fix-when**: BEFORE pointing `S3_CDN_BASE_URL` at a public bucket — scope the CDN/bucket policy
-  to `*/screenshot.png` objects only (deny `page.html`/`terms.txt`/`evidence.json`), or write
-  screenshots to a separate public prefix/bucket from the rest of the bundle. Verify by attempting
-  to fetch `…/<id>/terms.txt` against the public CDN (must be denied).
-- **Logged**: 2026-06-20
+  (config JSDoc + README + ARCHITECTURE.md "Public read surface"). **The committable scoping artifact
+  now exists** (2026-06-23): `deploy/aws/setup-evidence-cdn.sh` (idempotent; mirrors
+  `setup-evidence-s3.sh`) builds CloudFront + Origin Access Control over the fully-access-blocked
+  bucket + a CloudFront Function (`deploy/aws/cloudfront-screenshot-only.js`) that 403s any path NOT
+  ending in `/screenshot.png`, and applies an OAC-only bucket policy
+  (`deploy/aws/evidence-cdn-bucket-policy.json`). The function's allow-list regex is unit-verified
+  against bypass shapes (`terms.txt`, `x-screenshot.png`, `screenshot.png.txt`, nested prefixes, …).
+- **Fix-when**: BEFORE pointing `S3_CDN_BASE_URL` at a public origin — run `setup-evidence-cdn.sh`,
+  then the **scoping acceptance test** (`deploy/fly/README.md` §2.4): against the public CloudFront
+  URL, `…/<id>/screenshot.png` MUST be 200 and `…/<id>/terms.txt` / `…/page.html` MUST be 403, AND a
+  direct-bucket fetch (no CloudFront) MUST be denied. Only when that passes, set the `S3_CDN_BASE_URL`
+  Fly secret — and **move this finding to Resolved**. Until then, leaving `S3_CDN_BASE_URL` unset is
+  the safe default (the panel reads evidence via the authed path).
+- **Logged**: 2026-06-20 (committable scoping artifact added 2026-06-23; awaiting owner setup + the acceptance test)
 
 ### Inline `DealRecord` test literals don't satisfy the full schema type (only caught by `tsconfig.test.json`)
 - **Severity**: low (test-only; runtime-correct via zod defaults + esbuild type-stripping)

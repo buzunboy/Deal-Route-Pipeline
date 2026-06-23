@@ -146,15 +146,56 @@ the authenticated path. Set it only if the landing page should show screenshots.
 
 If you set it, the **hard rule** (see `ARCHITECTURE.md` "Public read surface"): only
 `*/screenshot.png` may be publicly reachable — `page.html`, `terms.txt`, `evidence.json`
-must stay private. The clean AWS way:
-1. Create a **CloudFront distribution**, origin = the S3 bucket, with **Origin Access
-   Control (OAC)** so only CloudFront can read the bucket.
-2. Restrict the cache behavior / bucket policy to the `*/screenshot.png` key pattern
-   only (a single behavior with a path pattern, or a Lambda@Edge/CloudFront Function
-   that 403s any non-`screenshot.png` path).
-3. Set `S3_CDN_BASE_URL` = the CloudFront domain (e.g. `https://dxxxx.cloudfront.net`).
+(the raw HTML snapshot + the verbatim, copyrighted terms text) must stay private.
 
-If you can't scope it tightly, **leave `S3_CDN_BASE_URL` unset.** Safer default.
+> **Shortcut — do all of §2.4 with one script.** `deploy/aws/setup-evidence-cdn.sh`
+> builds the screenshot-only CDN end to end: a CloudFront **Function** (from
+> [`deploy/aws/cloudfront-screenshot-only.js`](../aws/cloudfront-screenshot-only.js))
+> that 403s any path not ending in `/screenshot.png`, an **Origin Access Control (OAC)**
+> so only CloudFront can read the bucket, a CloudFront **distribution** wiring them
+> together, and a **bucket policy**
+> ([`deploy/aws/evidence-cdn-bucket-policy.json`](../aws/evidence-cdn-bucket-policy.json))
+> granting read to that one distribution only. The bucket stays fully access-blocked —
+> CloudFront is the single public door, the function is the lock. Idempotent; it prints
+> the `fly secrets set S3_CDN_BASE_URL=…` line. Run it with an **admin** AWS profile
+> (after §2.1–§2.3):
+> ```sh
+> deploy/aws/setup-evidence-cdn.sh
+> # override defaults if needed: BUCKET=... REGION=... deploy/aws/setup-evidence-cdn.sh
+> ```
+
+The clean AWS way (what the script does, if you'd rather click through it):
+1. Create a **CloudFront distribution**, origin = the S3 bucket, with **Origin Access
+   Control (OAC)** so only CloudFront can read the bucket (the bucket stays fully
+   public-access-blocked from §2.1).
+2. Attach a **CloudFront Function** on the viewer-request event that 403s any path NOT
+   ending in `/screenshot.png` (the committed `cloudfront-screenshot-only.js`). This
+   is the load-bearing gate — a single key-pattern cache behavior can't express
+   "ends with `screenshot.png`" across arbitrary `<id>/` prefixes; the function can.
+3. Set `S3_CDN_BASE_URL` = the CloudFront domain (e.g. `https://dxxxx.cloudfront.net`):
+   `fly secrets set -a dealroute-api S3_CDN_BASE_URL=https://dxxxx.cloudfront.net`.
+
+#### The SCOPING acceptance test (run this BEFORE relying on public screenshots)
+After the distribution deploys (status `Deployed`), produce a real bundle (a small
+crawl/dry-run — see §7) and against the **public CloudFront URL**:
+```sh
+CDN=https://dxxxx.cloudfront.net          # the distribution domain
+ID=<a-real-bundle-id>                      # from aws s3 ls s3://dealroute-evidence-prod/
+
+curl -sI "$CDN/$ID/screenshot.png"   # MUST be 200
+curl -sI "$CDN/$ID/terms.txt"        # MUST be 403  (verbatim terms — never public)
+curl -sI "$CDN/$ID/page.html"        # MUST be 403  (raw HTML snapshot — never public)
+```
+If `terms.txt` is reachable, **STOP — do not go live.** Unset the secret
+(`fly secrets unset -a dealroute-api S3_CDN_BASE_URL`) until the scoping is fixed.
+Also confirm the bucket itself is NOT public (a direct fetch without CloudFront is denied):
+```sh
+aws s3api get-object --bucket dealroute-evidence-prod --key "$ID/terms.txt" /tmp/x \
+  --no-sign-request                  # MUST fail (AccessDenied) — the bucket stays private
+```
+
+If you can't scope it tightly / the acceptance test doesn't pass, **leave
+`S3_CDN_BASE_URL` unset.** Safer default — the public feed simply omits screenshot URLs.
 
 ---
 
@@ -296,5 +337,5 @@ host cron). Keep Tier-4 (`discover`) dark unless you set `AGENT=search` + a sear
 | `PUBLIC_CORS_ORIGIN` | optional | landing origin | defaults to `*` |
 | `S3_BUCKET` / `S3_REGION` | ✅ | §2.1 | `dealroute-evidence-prod` / `eu-central-1` |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | ✅ | §2.3 | scoped IAM user key |
-| `S3_CDN_BASE_URL` | optional | §2.4 (CloudFront) | only if exposing public screenshots, scoped to `*/screenshot.png` |
+| `S3_CDN_BASE_URL` | optional | §2.4 (`deploy/aws/setup-evidence-cdn.sh`) | only if exposing public screenshots; CloudFront scoped to `*/screenshot.png`. Unset = safe default |
 | `ANTHROPIC_API_KEY` | only for lanes | Anthropic console | `serve` doesn't need it; crawl/extract do |

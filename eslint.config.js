@@ -6,7 +6,11 @@ import prettier from 'eslint-config-prettier';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'drizzle/**'],
+    // `deploy/**` is infrastructure tooling (shell scripts, JSON policies, and the
+    // CloudFront edge Function) — not app source: it isn't built or imported, and the
+    // CloudFront Function intentionally defines a global `handler` the edge runtime
+    // invokes (which the app's `no-unused-vars`/module rules would misflag).
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'drizzle/**', 'deploy/**'],
   },
   eslint.configs.recommended,
   {

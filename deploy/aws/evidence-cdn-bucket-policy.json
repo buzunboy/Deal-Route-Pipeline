@@ -1,0 +1,18 @@
+{
+  "__comment": "S3 bucket policy granting ONLY this CloudFront distribution (via Origin Access Control) read access to objects. The bucket stays fully public-access-blocked; CloudFront is the single public door, and the cloudfront-screenshot-only.js function restricts that door to */screenshot.png. setup-evidence-cdn.sh substitutes BUCKET_NAME, ACCOUNT_ID, and DISTRIBUTION_ID before applying — do NOT apply this template verbatim. The aws:SourceArn condition scopes the grant to exactly one distribution, so no other distribution (or a future one) can read the bucket through OAC.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowCloudFrontOACReadObjects",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudfront.amazonaws.com" },
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::BUCKET_NAME/*",
+      "Condition": {
+        "StringEquals": {
+          "AWS:SourceArn": "arn:aws:cloudfront::ACCOUNT_ID:distribution/DISTRIBUTION_ID"
+        }
+      }
+    }
+  ]
+}

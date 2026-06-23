@@ -196,9 +196,12 @@ so it carries the load-bearing trust contract:
   **Deployment contract (load-bearing):** a bundle stores `screenshot.png` + `page.html` +
   `terms.txt` + `evidence.json` under the SAME `<id>/` prefix. The public CDN must expose ONLY
   `*/screenshot.png` — the raw HTML snapshot and the **verbatim (copyrighted) terms text** must
-  stay private (editing the screenshot URL to `…/terms.txt` must NOT resolve). Scope the
-  CDN/bucket policy to `screenshot.png` objects, or serve screenshots from a separate public
-  prefix. See `docs/KNOWN_ISSUES.md`.
+  stay private (editing the screenshot URL to `…/terms.txt` must NOT resolve). The committed
+  artifact that enforces this is `deploy/aws/setup-evidence-cdn.sh` (CloudFront + Origin Access
+  Control over a fully-blocked bucket + a CloudFront Function, `deploy/aws/cloudfront-screenshot-only.js`,
+  that 403s any path not ending in `/screenshot.png`). Verify with the scoping acceptance test in
+  `deploy/fly/README.md` §2.4 (`…/screenshot.png` → 200, `…/terms.txt` → 403) before pointing
+  `S3_CDN_BASE_URL` at it; leaving `S3_CDN_BASE_URL` unset is the safe default. See `docs/KNOWN_ISSUES.md`.
 - **Condition `value` is sanitized.** A condition's `value` is an open object from LLM/source
   output; `toPublicCondition` strips any reserved/internal key name out of it, so the no-leak
   contract holds even for nested data the pipeline doesn't control.

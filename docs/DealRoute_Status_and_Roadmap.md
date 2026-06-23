@@ -181,15 +181,19 @@ No roadmap step remains. The concrete forward work, highest-value first:
    are handed off in `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`.
 2. **S3 evidence — the screenshot-only CDN scoping gate** [high — deploy/security, NOT code]. The
    S3 `EvidenceStore` is built + live on Fly (`EVIDENCE_STORE=s3`, bucket fully access-blocked, IAM
-   least-privilege). The remaining gate: a bundle stores `screenshot.png` + `page.html` + `terms.txt`
-   (verbatim copyrighted terms) under ONE `<id>/` prefix; the public DTO emits only the screenshot
-   URL, but a public CDN over that prefix would let anyone fetch `terms.txt`/`page.html` by editing the
-   URL. **Before pointing `S3_CDN_BASE_URL` at a public origin**, expose ONLY `*/screenshot.png`
-   (CloudFront + OAC + a screenshot-only path rule — documented in `deploy/fly/README.md` §2.4 but NOT
-   yet a committed artifact) and verify by fetching `…/<id>/terms.txt` against the CDN (must 403).
-   **Safe default: leave `S3_CDN_BASE_URL` unset** — the panel reads evidence via the authed path, so
-   nothing is gated until the public landing page wants screenshots. Build opportunity: a committable
-   `deploy/aws/setup-evidence-cdn.sh` + CloudFront/OAC config (handed off — see the S3/CDN follow-up).
+   least-privilege). The gate: a bundle stores `screenshot.png` + `page.html` + `terms.txt` (verbatim
+   copyrighted terms) under ONE `<id>/` prefix; the public DTO emits only the screenshot URL, but a
+   public CDN over that prefix would let anyone fetch `terms.txt`/`page.html` by editing the URL.
+   **The committable artifact now exists** (2026-06-23): `deploy/aws/setup-evidence-cdn.sh` (idempotent;
+   mirrors `setup-evidence-s3.sh`) builds CloudFront + Origin Access Control over the fully-blocked
+   bucket + a CloudFront Function (`deploy/aws/cloudfront-screenshot-only.js`) that 403s any path not
+   ending in `/screenshot.png`, applies an OAC-only bucket policy
+   (`deploy/aws/evidence-cdn-bucket-policy.json`), and prints the `fly secrets set S3_CDN_BASE_URL=…`
+   line. **The owner runs the SETUP + the SCOPING acceptance test** (in `deploy/fly/README.md` §2.4:
+   `…/screenshot.png` → 200, `…/terms.txt`/`page.html` → 403; direct-bucket fetch denied) **before
+   pointing `S3_CDN_BASE_URL` at it.** **Safe default: leave `S3_CDN_BASE_URL` unset** — the panel
+   reads evidence via the authed path, so nothing is gated until the public landing page wants
+   screenshots. The remaining work here is owner setup + the acceptance test (AWS/Fly, not code).
    _See the `Public CDN must expose ONLY screenshot.png` finding in `docs/KNOWN_ISSUES.md`._
 3. **Other post-deploy hardening** [medium] — the API is live + working, but parked: make the GHCR
    image private, **pin** `:edge` → `:sha-…`, set **`ADMIN_CORS_ORIGIN`** when the panel deploys.
