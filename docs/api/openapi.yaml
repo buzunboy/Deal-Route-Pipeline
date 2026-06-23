@@ -36,6 +36,8 @@ tags:
     description: Liveness probes.
   - name: Candidates
     description: Review queue — list, edit, approve, reject, audit. (admin)
+  - name: Evidence
+    description: Bearer-gated reviewer fetch of evidence artifact bytes (screenshot/html/terms). (admin)
   - name: Field proposals
     description: LLM-proposed novel condition keys awaiting promotion. (admin)
   - name: Manual capture
@@ -170,8 +172,9 @@ paths:
       description: |
         Lowest-confidence first. Defaults to the reviewable pair (`candidate` +
         `in_review`) when `status` is omitted. Read endpoint — not gated. Each item's
-        `evidence` carries resolved `evidence_screenshot_url` / `evidence_html_url`
-        when a CDN base is configured (ACR-13).
+        `evidence` carries `evidence_screenshot_url` / `evidence_html_url` /
+        `evidence_terms_url` pointing at the gated `GET /api/evidence/:id/:artifact`
+        endpoint (ACR-13).
       security: []
       parameters:
         - name: status
@@ -332,6 +335,46 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ReviewRecord' }
+
+  /api/evidence/{id}/{artifact}:
+    get:
+      tags: [Evidence]
+      summary: Fetch one evidence artifact's bytes (Bearer-gated, reviewer-only)
+      description: >
+        Stream the raw bytes of ONE artifact (screenshot / archived HTML / verbatim
+        terms text) of an evidence bundle. This is the AUTHENTICATED complement of the
+        screenshot-only public CDN: the public CDN exposes only `screenshot.png`
+        (it 403s html/terms), so a reviewer reaches the full bundle here instead. The
+        admin `AdminEvidence` URLs (`evidence_*_url`) point at this path. Unlike the
+        other read endpoints this GET REQUIRES the bearer — evidence bytes (raw HTML +
+        verbatim copyrighted terms) are sensitive. Responses carry
+        `Cache-Control: private, no-store`. `evidence.json` (metadata) is deliberately
+        NOT exposed (it duplicates `GET /api/candidates`); an unknown artifact kind
+        (or a non-UUID id) is a 404.
+      operationId: getEvidenceArtifact
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdParam'
+        - name: artifact
+          in: path
+          required: true
+          description: Which artifact of the bundle to stream.
+          schema:
+            type: string
+            enum: [screenshot, html, terms]
+      responses:
+        '200':
+          description: The artifact bytes, with the stored content-type.
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            text/html:
+              schema: { type: string, format: binary }
+            text/plain:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /api/audit:
     get:
@@ -1319,10 +1362,14 @@ components:
         Evidence bundle as projected into a gated `/api/candidates` item
         (src/adapters/http/admin-evidence-dto.ts). The raw store pointers
         (`screenshot_ref`/`html_ref`/`terms_ref`) are kept — this is the reviewer
-        console, not the public allow-list — and resolved CDN URLs are ADDED so the
-        panel can render the captured screenshot / link the archived HTML directly
-        (ACR-13). `evidence_screenshot_url` / `evidence_html_url` are `null` when no
-        CDN base (`S3_CDN_BASE_URL`) is configured (e.g. local-fs evidence).
+        console, not the public allow-list — and the three `evidence_*_url` fields are
+        ADDED so the panel can render the captured screenshot / link the archived HTML
+        + terms (ACR-13). These URLs point at the AUTHED endpoint
+        `GET /api/evidence/:id/:artifact` (NOT the public CDN — which is screenshot-only
+        and 403s html/terms), so they work for a reviewer regardless of CDN config. They
+        are RELATIVE (`/api/evidence/<id>/<kind>`) and always present when a bundle
+        exists; the panel must fetch them with its bearer header (an `<img src>` can't
+        carry it) and render via a blob URL.
       properties:
         id: { type: string, format: uuid }
         source_url: { type: string, format: uri }
@@ -1332,13 +1379,14 @@ components:
         captured_at: { type: string, format: date-time }
         content_hash: { type: string }
         evidence_screenshot_url:
-          type: [string, 'null']
-          format: uri
-          description: Resolved CDN URL of the screenshot, or null when no CDN base is set.
+          type: string
+          description: Authed-path URL of the screenshot (`/api/evidence/:id/screenshot`).
         evidence_html_url:
-          type: [string, 'null']
-          format: uri
-          description: Resolved CDN URL of the archived HTML, or null when no CDN base is set.
+          type: string
+          description: Authed-path URL of the archived HTML (`/api/evidence/:id/html`).
+        evidence_terms_url:
+          type: string
+          description: Authed-path URL of the terms text (`/api/evidence/:id/terms`).
       additionalProperties: true
     CandidateView:
       type: object

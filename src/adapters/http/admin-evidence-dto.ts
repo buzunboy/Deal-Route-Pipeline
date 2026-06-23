@@ -1,18 +1,26 @@
-import { resolveEvidenceUrl, type Evidence } from '../../domain/index.js';
+import type { Evidence } from '../../domain/index.js';
 
 /**
  * The admin (gated) projection of an evidence bundle, returned inside each
  * `GET /api/candidates` item. Unlike the PUBLIC DTO (`public-dto.ts`) this is NOT a
  * trust allow-list — the review console is for reviewers, so the raw store
- * pointers (`screenshot_ref` / `html_ref` / `terms_ref`) stay on the wire. It only
- * ADDS resolved CDN URLs so the panel's evidence frame can render the captured
- * screenshot (and link the archived HTML) directly, instead of holding an opaque
- * object key it cannot fetch (ACR-13).
+ * pointers (`screenshot_ref` / `html_ref` / `terms_ref`) stay on the wire. It ADDS
+ * resolved URLs pointing at the gated, authed evidence-fetch endpoint
+ * (`GET /api/evidence/:id/:artifact`) so the panel can render the captured
+ * screenshot and link the archived HTML/terms directly (ACR-13).
  *
- * The URLs are `null` when no CDN base is configured (e.g. local-fs evidence has no
- * public URL) — the panel then shows its "no screenshot" placeholder, exactly as
- * the public DTO does. Derived purely from the deterministic evidence layout, so
- * there is no per-row store lookup.
+ * These URLs point at the AUTHED path, NOT the public CDN: the public CloudFront CDN
+ * is screenshot-only (it 403s html/terms), so html/terms could never resolve there.
+ * Pointing all three at the gated endpoint means the panel works fully even when no
+ * public CDN is configured (local-fs / `S3_CDN_BASE_URL` unset). The panel fetches
+ * each with its `Authorization: Bearer` header and renders the bytes via a blob URL
+ * (an `<img src>`/`<iframe src>` can't carry the header itself).
+ *
+ * The URLs are RELATIVE (`/api/evidence/<id>/<kind>`) — the panel already knows the
+ * API origin (its configured base URL), so the DTO need not (and should not) re-plumb
+ * the app's own public URL. They are non-null whenever a bundle exists (the authed
+ * path always resolves for an authorized reviewer); a `null` evidence (no bundle yet)
+ * passes through as `null`.
  */
 export interface AdminEvidence {
   id: string;
@@ -22,21 +30,25 @@ export interface AdminEvidence {
   terms_ref: string;
   captured_at: string;
   content_hash: string;
-  /** Resolved CDN URL of the screenshot artifact, or null when no CDN base is set. */
-  evidence_screenshot_url: string | null;
-  /** Resolved CDN URL of the archived HTML artifact, or null when no CDN base is set. */
-  evidence_html_url: string | null;
+  /** Authed-path URL of the screenshot artifact (`/api/evidence/:id/screenshot`). */
+  evidence_screenshot_url: string;
+  /** Authed-path URL of the archived HTML artifact (`/api/evidence/:id/html`). */
+  evidence_html_url: string;
+  /** Authed-path URL of the terms-text artifact (`/api/evidence/:id/terms`). */
+  evidence_terms_url: string;
+}
+
+/** Build the gated authed-path URL for one artifact kind of a bundle. */
+function evidenceArtifactUrl(id: string, kind: 'screenshot' | 'html' | 'terms'): string {
+  return `/api/evidence/${id}/${kind}`;
 }
 
 /**
- * Project a stored {@link Evidence} bundle into its admin view, resolving the
- * artifact CDN URLs from the stored refs + the configured base. PURE — no I/O. A
- * `null` evidence (the candidate has no bundle yet) passes through as `null`.
+ * Project a stored {@link Evidence} bundle into its admin view, attaching the gated
+ * authed-path artifact URLs. PURE — no I/O. A `null` evidence (the candidate has no
+ * bundle yet) passes through as `null`.
  */
-export function toAdminEvidence(
-  evidence: Evidence | null,
-  cdnBaseUrl: string | undefined,
-): AdminEvidence | null {
+export function toAdminEvidence(evidence: Evidence | null): AdminEvidence | null {
   if (evidence === null) return null;
   return {
     id: evidence.id,
@@ -46,7 +58,8 @@ export function toAdminEvidence(
     terms_ref: evidence.terms_ref,
     captured_at: evidence.captured_at,
     content_hash: evidence.content_hash,
-    evidence_screenshot_url: resolveEvidenceUrl(evidence.screenshot_ref, cdnBaseUrl),
-    evidence_html_url: resolveEvidenceUrl(evidence.html_ref, cdnBaseUrl),
+    evidence_screenshot_url: evidenceArtifactUrl(evidence.id, 'screenshot'),
+    evidence_html_url: evidenceArtifactUrl(evidence.id, 'html'),
+    evidence_terms_url: evidenceArtifactUrl(evidence.id, 'terms'),
   };
 }

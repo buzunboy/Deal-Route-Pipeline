@@ -8,10 +8,12 @@ import {
   EVIDENCE_HTML_FILE,
   EVIDENCE_TERMS_FILE,
   EVIDENCE_META_FILE,
+  EVIDENCE_ARTIFACTS,
   type Evidence,
   type EvidenceCapture,
+  type EvidenceArtifactKind,
 } from '../../domain/index.js';
-import type { EvidenceStore } from '../../application/ports/index.js';
+import type { EvidenceStore, EvidenceArtifact } from '../../application/ports/index.js';
 
 /**
  * Infrastructure failure writing/reading a local evidence bundle. Local to this
@@ -131,6 +133,23 @@ export class LocalFsEvidenceStore implements EvidenceStore {
     // terms file, so re-hashing here would couple the store to a producer detail.)
     await this.verifyBundleComplete(id, parsed.data);
     return parsed.data;
+  }
+
+  async getArtifact(id: string, kind: EvidenceArtifactKind): Promise<EvidenceArtifact | null> {
+    // Map (id, kind) → the in-bundle file via the domain layout, so the caller never
+    // needs the storage layout and `kind` (a closed union) can't smuggle a path.
+    const { file, contentType } = EVIDENCE_ARTIFACTS[kind];
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(join(this.baseDir, id, file));
+    } catch (err) {
+      // A missing bundle/artifact is "not found" — mirror get()'s ENOENT → null.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw new EvidenceStoreError(`Failed to read evidence artifact ${id}/${file}.`, {
+        cause: err,
+      });
+    }
+    return { bytes, contentType };
   }
 
   private async verifyBundleComplete(id: string, evidence: Evidence): Promise<void> {

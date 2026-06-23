@@ -79,13 +79,21 @@ class FakeS3Client {
   }
 
   private getObject(input: GetObjectCommand['input']): {
-    Body: { transformToString: () => Promise<string> };
+    Body: {
+      transformToString: () => Promise<string>;
+      transformToByteArray: () => Promise<Uint8Array>;
+    };
     ContentLength: number;
   } {
     const obj = this.objects.get(input.Key as string);
     if (!obj) throw notFoundError('NoSuchKey', this.namedErrors);
+    // The real SDK Body exposes BOTH transforms; the adapter uses transformToString
+    // for the meta JSON and transformToByteArray for raw artifact bytes (getArtifact).
     return {
-      Body: { transformToString: async () => new TextDecoder().decode(obj.body) },
+      Body: {
+        transformToString: async () => new TextDecoder().decode(obj.body),
+        transformToByteArray: async () => obj.body,
+      },
       ContentLength: obj.body.byteLength,
     };
   }

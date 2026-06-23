@@ -70,5 +70,42 @@ export function evidenceStoreContract(
       const store = await makeStore();
       await expect(store.save({ ...capture, termsText: '' })).rejects.toThrow();
     });
+
+    // getArtifact (the gated reviewer evidence-fetch read path): every adapter returns
+    // the saved bytes + the domain content-type for each kind, and null when absent.
+    it('getArtifact returns the saved screenshot bytes + image/png', async () => {
+      const store = await makeStore();
+      const saved = await store.save(capture);
+      const art = await store.getArtifact(saved.id, 'screenshot');
+      expect(art).not.toBeNull();
+      expect(art!.contentType).toBe('image/png');
+      // Bytes round-trip exactly (the screenshot is binary — must not be mangled).
+      expect(Array.from(art!.bytes)).toEqual(Array.from(capture.screenshot));
+    });
+
+    it('getArtifact returns the saved HTML text + text/html', async () => {
+      const store = await makeStore();
+      const saved = await store.save(capture);
+      const art = await store.getArtifact(saved.id, 'html');
+      expect(art).not.toBeNull();
+      expect(art!.contentType).toBe('text/html; charset=utf-8');
+      expect(new TextDecoder().decode(art!.bytes)).toBe(capture.html);
+    });
+
+    it('getArtifact returns the saved terms text + text/plain', async () => {
+      const store = await makeStore();
+      const saved = await store.save(capture);
+      const art = await store.getArtifact(saved.id, 'terms');
+      expect(art).not.toBeNull();
+      expect(art!.contentType).toBe('text/plain; charset=utf-8');
+      expect(new TextDecoder().decode(art!.bytes)).toBe(capture.termsText);
+    });
+
+    it('getArtifact returns null for an unknown id', async () => {
+      const store = await makeStore();
+      expect(
+        await store.getArtifact('00000000-0000-0000-0000-000000000000', 'screenshot'),
+      ).toBeNull();
+    });
   });
 }

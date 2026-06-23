@@ -656,6 +656,19 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   The gate holds. (Setting the `S3_CDN_BASE_URL` Fly secret to switch on public screenshot URLs is a
   separate, deliberate go-live step; leaving it unset remains the safe default.)
 
+### Reviewer access to evidence HTML/terms over the screenshot-only public CDN — RESOLVED 2026-06-23
+- **Was**: a usability/contract gap surfaced when `S3_CDN_BASE_URL` was set — the admin DTO resolved
+  `evidence_html_url` against the public CDN, but that CDN is screenshot-only (it 403s `page.html` /
+  `terms.txt`), so the panel's archived-HTML link would 403. Root cause: reviewers (full bundle) and
+  the public page (screenshot only) were both reading evidence through one public CDN.
+- **Resolution**: a Bearer-gated `GET /api/evidence/:id/:artifact` (artifact ∈ screenshot|html|terms)
+  that streams the bytes from the `EvidenceStore` (new `getArtifact(id,kind)` port method, implemented
+  by local-fs + S3 + the fake, covered by the shared contract). The admin DTO's `evidence_*_url` now
+  point at this authed path (relative, always present) + a new `evidence_terms_url`; the public `/v1/`
+  feed keeps its CDN screenshot URL untouched. `Cache-Control: private, no-store`; the only gated GET.
+  This is the READ-side twin of the still-open "manual-capture UPLOAD channel" finding below. Panel
+  handoff: `docs/handoffs/ADMIN_PANEL_evidence_fetch.md` (the panel must fetch-with-bearer → blob URL).
+
 ### Postgres `Database` contract suite isn't isolated per-test and isn't run in CI — RESOLVED 2026-06-23 (P1)
 - **Was**: medium, ci / db / testing, `src/adapters/db/postgres/postgres-db.test.ts` +
   `test/contracts/database-contract.ts` + the vitest configs.

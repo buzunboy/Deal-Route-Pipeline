@@ -11,9 +11,10 @@ import {
   ALERTS_DEFAULT_LIMIT,
   ALERTS_MAX_LIMIT,
 } from '../../application/index.js';
-import type { Logger } from '../../application/ports/index.js';
+import type { Logger, EvidenceStore } from '../../application/ports/index.js';
 import { toAdminEvidence } from './admin-evidence-dto.js';
 import { UUID_PATTERN } from './http-ids.js';
+import type { EvidenceArtifactKind } from '../../domain/index.js';
 import {
   DealNotFoundError,
   NotReviewableError,
@@ -71,15 +72,6 @@ export interface ReviewApiOptions {
    * is credentialed and state-changing, so the caller pins it to the panel's origin.
    */
   corsAllowOrigin?: string;
-  /**
-   * Public CDN base URL for evidence artifacts (config.evidence.s3.cdnBaseUrl). When
-   * set, each `GET /api/candidates` item's evidence carries resolved
-   * `evidence_screenshot_url` / `evidence_html_url` so the panel can render the
-   * captured screenshot directly (ACR-13). Unset (e.g. local-fs evidence) ⇒ those
-   * URLs are null and the panel shows its "no screenshot" placeholder. Mirrors the
-   * `cdnBaseUrl` the public API already uses for its screenshot URL.
-   */
-  evidenceCdnBaseUrl?: string;
 }
 
 /**
@@ -100,6 +92,7 @@ export interface ReviewApiOptions {
  *   POST  /api/candidates/:id/approve     { approver, affiliate_disclosure? } → { deal }
  *   POST  /api/candidates/:id/reject      { approver, reason? }   → { deal }
  *   GET   /api/candidates/:id/reviews     → [ReviewRecord]   (audit history)
+ *   GET   /api/evidence/:id/:artifact     → raw bytes   (Bearer-GATED; artifact ∈ screenshot|html|terms)
  *   GET   /api/field-proposals            → [FieldProposalRecord]
  *   GET   /api/audit                      → { entries: [AuditEntry] }   (ACR-7)
  *           ?actor=&entity_id=&since=&limit=
@@ -134,7 +127,6 @@ export class ReviewApi {
   private readonly staticPageHtml?: string;
   private readonly authToken?: string;
   private readonly corsAllowOrigin?: string;
-  private readonly evidenceCdnBaseUrl?: string;
 
   constructor(
     private readonly review: ReviewUseCase,
@@ -143,13 +135,13 @@ export class ReviewApi {
     private readonly alerts: AlertsUseCase,
     private readonly metrics: MetricsUseCase,
     private readonly settings: SettingsUseCase,
+    private readonly evidenceStore: EvidenceStore,
     private readonly logger: Logger,
     options: ReviewApiOptions = {},
   ) {
     this.staticPageHtml = options.staticPageHtml;
     this.authToken = options.authToken;
     this.corsAllowOrigin = options.corsAllowOrigin;
-    this.evidenceCdnBaseUrl = options.evidenceCdnBaseUrl;
   }
 
   listen(port: number): Promise<void> {
@@ -214,13 +206,14 @@ export class ReviewApi {
       const parsed = parseCandidateQuery(url.searchParams);
       if (!parsed.ok) return sendError(res, 400, parsed.error);
       const views = await this.review.listCandidates(parsed.value);
-      // Project each evidence bundle to the admin DTO — adding resolved CDN URLs so
-      // the panel can render the captured screenshot (ACR-13), not just an opaque
-      // store key. The deal is passed through unchanged (the review console sees the
-      // full internal record; only the public DTO is an allow-list).
+      // Project each evidence bundle to the admin DTO — adding the gated authed-path
+      // artifact URLs (`/api/evidence/:id/:kind`) so the panel can render the captured
+      // screenshot + link the HTML/terms (ACR-13), not just an opaque store key. The
+      // deal is passed through unchanged (the review console sees the full internal
+      // record; only the public DTO is an allow-list).
       const body = views.map((view) => ({
         deal: view.deal,
-        evidence: toAdminEvidence(view.evidence, this.evidenceCdnBaseUrl),
+        evidence: toAdminEvidence(view.evidence),
       }));
       return sendJson(res, 200, body);
     }
@@ -343,6 +336,24 @@ export class ReviewApi {
     const reviews = path.match(new RegExp(`^/api/candidates/(${UUID_SEG})/reviews$`));
     if (method === 'GET' && reviews) {
       return sendJson(res, 200, await this.review.listReviews(decodeURIComponent(reviews[1]!)));
+    }
+
+    // Gated reviewer evidence-fetch (the authed complement of the screenshot-only
+    // public CDN): stream ONE artifact's bytes for a bundle. `:artifact` is pinned to
+    // the closed kind set in the route regex, so an unknown kind (or a path like `..`)
+    // simply doesn't match → 404, and the store is never handed an arbitrary path.
+    // This is the ONLY gated GET — evidence bytes (raw HTML + verbatim copyrighted
+    // terms) are sensitive, so unlike the other reads it requires the bearer.
+    const evidenceArtifact = path.match(
+      new RegExp(`^/api/evidence/(${UUID_SEG})/(screenshot|html|terms)$`),
+    );
+    if (method === 'GET' && evidenceArtifact) {
+      if (!this.authorized(req)) return sendError(res, 401, 'unauthorized');
+      const id = decodeURIComponent(evidenceArtifact[1]!);
+      const kind = evidenceArtifact[2] as EvidenceArtifactKind;
+      const artifact = await this.evidenceStore.getArtifact(id, kind);
+      if (artifact === null) return sendError(res, 404, 'evidence artifact not found');
+      return sendBytes(res, artifact.contentType, artifact.bytes);
     }
 
     // Edit a candidate's reviewer-correctable fields before approve. PATCH on the
@@ -719,6 +730,21 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const json = JSON.stringify(body);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   res.end(json);
+}
+
+/**
+ * Stream raw evidence bytes back with the artifact's stored content-type. `private,
+ * no-store` keeps a shared cache (or the browser) from retaining the raw HTML / the
+ * verbatim copyrighted terms — this is a reviewer-only artifact, never publicly
+ * cacheable (unlike the screenshot, which the public CDN may cache). Always 200; the
+ * absent case is a 404 handled by the caller before this is reached.
+ */
+function sendBytes(res: ServerResponse, contentType: string, bytes: Uint8Array): void {
+  res.writeHead(200, {
+    'content-type': contentType,
+    'cache-control': 'private, no-store',
+  });
+  res.end(Buffer.from(bytes));
 }
 
 function sendError(res: ServerResponse, status: number, message: string): void {

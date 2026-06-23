@@ -28,9 +28,11 @@ describe('ReviewApi (HTTP integration)', () => {
   let db: InMemoryDb;
   let api: ReviewApi;
   let base: string;
+  // One store per test, shared by seedCandidate + the ReviewApi (so the gated
+  // /api/evidence endpoint reads back the same bundle seedCandidate wrote).
+  let evidenceStore: LocalFsEvidenceStore;
 
   async function seedCandidate(overrides: Partial<DealRecord> = {}): Promise<DealRecord> {
-    const evidenceStore = new LocalFsEvidenceStore(mkdtempSync(join(tmpdir(), 'ev-')));
     const ev = await evidenceStore.save({
       sourceUrl: 'https://x.de',
       screenshot: new Uint8Array([1]),
@@ -47,6 +49,7 @@ describe('ReviewApi (HTTP integration)', () => {
 
   beforeEach(async () => {
     db = new InMemoryDb();
+    evidenceStore = new LocalFsEvidenceStore(mkdtempSync(join(tmpdir(), 'ev-')));
     const review = new ReviewUseCase(
       db,
       new SystemClock(),
@@ -76,6 +79,7 @@ describe('ReviewApi (HTTP integration)', () => {
       alerts,
       metrics,
       settings,
+      evidenceStore,
       new ConsoleLogger('error'),
       {
         staticPageHtml: '<html>page</html>',
@@ -721,50 +725,26 @@ describe('ReviewApi (HTTP integration)', () => {
     expect(res.status).toBe(400);
   });
 
-  // ── ACR-13: resolved evidence screenshot/html URLs on the admin evidence ──
-  it('GET /api/candidates resolves evidence URLs from the configured CDN base', async () => {
+  // ── ACR-13: gated authed-path evidence URLs on the admin evidence ──────────
+  it('GET /api/candidates carries gated authed-path evidence URLs + keeps raw refs', async () => {
     const deal = await seedCandidate();
     const ev = (await db.evidence.getById(deal.evidence_id))!;
-    const withCdn = new ReviewApi(
-      new ReviewUseCase(db, new SystemClock(), new ConsoleLogger('error'), tldtsSuffixOracle),
-      new SourceReviewUseCase(db, new SystemClock(), new ConsoleLogger('error')),
-      new TeamUseCase(db, new SystemClock(), new ConsoleLogger('error')),
-      new AlertsUseCase(db, new SystemClock(), new ConsoleLogger('error')),
-      new MetricsUseCase(db, new SystemClock(), new ConsoleLogger('error')),
-      new SettingsUseCase(db, loadConfig({}), new SystemClock(), new ConsoleLogger('error')),
-      new ConsoleLogger('error'),
-      { evidenceCdnBaseUrl: 'https://cdn.dealroute.example' },
-    );
-    await withCdn.listen(0);
-    try {
-      // @ts-expect-error reach into the underlying server for the assigned port
-      const port = (withCdn['server'].address() as AddressInfo).port;
-      const items = (await (await fetch(`http://localhost:${port}/api/candidates`)).json()) as {
-        evidence: {
-          screenshot_ref: string;
-          evidence_screenshot_url: string | null;
-          evidence_html_url: string | null;
-        } | null;
-      }[];
-      const got = items[0]!.evidence!;
-      // the raw store ref is still present (reviewer console isn't an allow-list)…
-      expect(got.screenshot_ref).toBe(ev.screenshot_ref);
-      // …and the resolvable CDN URLs are added (ACR-13).
-      expect(got.evidence_screenshot_url).toBe(
-        `https://cdn.dealroute.example/${ev.screenshot_ref}`,
-      );
-      expect(got.evidence_html_url).toBe(`https://cdn.dealroute.example/${ev.html_ref}`);
-    } finally {
-      await withCdn.close();
-    }
-  });
-
-  it('GET /api/candidates evidence URLs are null when no CDN base is configured', async () => {
-    await seedCandidate();
     const items = (await (await fetch(`${base}/api/candidates`)).json()) as {
-      evidence: { evidence_screenshot_url: string | null } | null;
+      evidence: {
+        screenshot_ref: string;
+        evidence_screenshot_url: string;
+        evidence_html_url: string;
+        evidence_terms_url: string;
+      } | null;
     }[];
-    expect(items[0]!.evidence!.evidence_screenshot_url).toBeNull();
+    const got = items[0]!.evidence!;
+    // The raw store ref is still present (reviewer console isn't an allow-list)…
+    expect(got.screenshot_ref).toBe(ev.screenshot_ref);
+    // …and all three artifact URLs point at the gated authed endpoint (NOT the public
+    // CDN — html/terms are screenshot-only-403'd there). Relative, keyed by id+kind.
+    expect(got.evidence_screenshot_url).toBe(`/api/evidence/${ev.id}/screenshot`);
+    expect(got.evidence_html_url).toBe(`/api/evidence/${ev.id}/html`);
+    expect(got.evidence_terms_url).toBe(`/api/evidence/${ev.id}/terms`);
   });
 
   // ── POST /api/field-proposals/:key/promote ───────────────────────────────
@@ -933,19 +913,21 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
   let api: ReviewApi;
   let base: string;
   let dealId: string;
+  let evidenceId: string;
 
   beforeEach(async () => {
     db = new InMemoryDb();
     const evidenceStore = new LocalFsEvidenceStore(mkdtempSync(join(tmpdir(), 'ev-')));
     const ev = await evidenceStore.save({
       sourceUrl: 'https://x.de',
-      screenshot: new Uint8Array([1]),
-      html: '<html>',
-      termsText: 't',
+      screenshot: new Uint8Array([1, 2, 3, 4]),
+      html: '<html>archived</html>',
+      termsText: 'verbatim terms',
       capturedAt: '2026-06-19T00:00:00.000Z',
       contentHash: 'h',
     });
     await db.evidence.insert(ev);
+    evidenceId = ev.id;
     const deal = makeDealRecord({ evidence_id: ev.id, status: 'candidate' });
     await db.deals.insert(deal);
     dealId = deal.id;
@@ -973,6 +955,7 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
       alerts,
       metrics,
       settings,
+      evidenceStore,
       new ConsoleLogger('error'),
       {
         authToken: 'secret-token',
@@ -1034,6 +1017,56 @@ describe('ReviewApi — auth (bearer token gating state changes)', () => {
       body: JSON.stringify({ approver: 'a', fields: {}, evidence: {} }),
     });
     expect(complete.status).toBe(401);
+  });
+
+  // ── GET /api/evidence/:id/:artifact (gated reviewer evidence-fetch) ────────
+  const auth = { authorization: 'Bearer secret-token' };
+
+  it('streams the screenshot bytes with image/png + private no-store (with token)', async () => {
+    const res = await fetch(`${base}/api/evidence/${evidenceId}/screenshot`, { headers: auth });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(Array.from(bytes)).toEqual([1, 2, 3, 4]); // round-trips exactly
+  });
+
+  it('streams the archived HTML with text/html (with token)', async () => {
+    const res = await fetch(`${base}/api/evidence/${evidenceId}/html`, { headers: auth });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    expect(await res.text()).toBe('<html>archived</html>');
+  });
+
+  it('streams the terms text with text/plain (with token)', async () => {
+    const res = await fetch(`${base}/api/evidence/${evidenceId}/terms`, { headers: auth });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+    expect(await res.text()).toBe('verbatim terms');
+  });
+
+  it('GATES the evidence fetch: 401 without a bearer token', async () => {
+    const res = await fetch(`${base}/api/evidence/${evidenceId}/terms`);
+    expect(res.status).toBe(401);
+  });
+
+  it('404s a known-shaped but absent evidence id', async () => {
+    const res = await fetch(`${base}/api/evidence/${randomUUID()}/screenshot`, { headers: auth });
+    expect(res.status).toBe(404);
+  });
+
+  it('404s an unknown artifact kind (route regex never matches it)', async () => {
+    // `evidence.json`/metadata is deliberately NOT exposed; an arbitrary kind falls
+    // through to the catch-all 404 and never reaches the store as a path.
+    for (const kind of ['evidence.json', 'meta', 'terms.txt', '..']) {
+      const res = await fetch(`${base}/api/evidence/${evidenceId}/${kind}`, { headers: auth });
+      expect(res.status).toBe(404);
+    }
+  });
+
+  it('404s a non-UUID evidence id (UUID-segment guard)', async () => {
+    const res = await fetch(`${base}/api/evidence/not-a-uuid/screenshot`, { headers: auth });
+    expect(res.status).toBe(404);
   });
 
   it('gates the ACR write endpoints (ad-hoc capture / sources / team / profile / alerts) with the bearer token (401)', async () => {
@@ -1115,7 +1148,7 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
   let db: InMemoryDb;
 
   /** Spin up an API with the given options and return its base URL. */
-  async function start(options: ConstructorParameters<typeof ReviewApi>[5]): Promise<{
+  async function start(options: ConstructorParameters<typeof ReviewApi>[8]): Promise<{
     api: ReviewApi;
     base: string;
   }> {
@@ -1142,6 +1175,7 @@ describe('ReviewApi — CORS for the browser admin panel', () => {
       alerts,
       metrics,
       settings,
+      new LocalFsEvidenceStore(mkdtempSync(join(tmpdir(), 'ev-'))),
       new ConsoleLogger('error'),
       options,
     );

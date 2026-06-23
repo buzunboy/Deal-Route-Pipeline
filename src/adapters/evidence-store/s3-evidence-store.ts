@@ -12,10 +12,16 @@ import {
   EVIDENCE_HTML_FILE,
   EVIDENCE_TERMS_FILE,
   EVIDENCE_META_FILE,
+  EVIDENCE_ARTIFACTS,
+  EVIDENCE_SCREENSHOT_CONTENT_TYPE,
+  EVIDENCE_HTML_CONTENT_TYPE,
+  EVIDENCE_TERMS_CONTENT_TYPE,
+  EVIDENCE_META_CONTENT_TYPE,
   type Evidence,
   type EvidenceCapture,
+  type EvidenceArtifactKind,
 } from '../../domain/index.js';
-import type { EvidenceStore } from '../../application/ports/index.js';
+import type { EvidenceStore, EvidenceArtifact } from '../../application/ports/index.js';
 
 /**
  * Infrastructure failure writing/reading an S3/R2 evidence bundle. Local to this
@@ -42,10 +48,12 @@ const HTML_FILE = EVIDENCE_HTML_FILE;
 const TERMS_FILE = EVIDENCE_TERMS_FILE;
 const META_FILE = EVIDENCE_META_FILE;
 
-const PNG_CONTENT_TYPE = 'image/png';
-const HTML_CONTENT_TYPE = 'text/html; charset=utf-8';
-const TEXT_CONTENT_TYPE = 'text/plain; charset=utf-8';
-const JSON_CONTENT_TYPE = 'application/json';
+// Content-types come from the domain layout (the ONE source of truth) so a write here
+// and a read-back (local-fs, or the authed reviewer endpoint) tag the same type.
+const PNG_CONTENT_TYPE = EVIDENCE_SCREENSHOT_CONTENT_TYPE;
+const HTML_CONTENT_TYPE = EVIDENCE_HTML_CONTENT_TYPE;
+const TEXT_CONTENT_TYPE = EVIDENCE_TERMS_CONTENT_TYPE;
+const JSON_CONTENT_TYPE = EVIDENCE_META_CONTENT_TYPE;
 
 /**
  * S3/R2 EvidenceStore — the production sibling of {@link LocalFsEvidenceStore}
@@ -193,6 +201,27 @@ export class S3EvidenceStore implements EvidenceStore {
     // bundle. (Deliberately structural, NOT a content-hash recompute: see local-fs.)
     await this.verifyBundleComplete(id, parsed.data);
     return parsed.data;
+  }
+
+  async getArtifact(id: string, kind: EvidenceArtifactKind): Promise<EvidenceArtifact | null> {
+    // Map (id, kind) → the object key via the domain layout; the closed `kind` union
+    // means an arbitrary key can never be requested. content-type is the one the write
+    // tagged (single source of truth), not a re-sniff.
+    const { file, contentType } = EVIDENCE_ARTIFACTS[kind];
+    const key = `${id}/${file}`;
+    try {
+      const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+      if (!res.Body) {
+        throw new S3EvidenceStoreError(`Evidence artifact ${key} returned an empty body.`);
+      }
+      const bytes = await res.Body.transformToByteArray();
+      return { bytes, contentType };
+    } catch (err) {
+      // A missing bundle/artifact is "not found" — mirror get()'s NoSuchKey → null.
+      if (isNotFound(err)) return null;
+      if (err instanceof S3EvidenceStoreError) throw err;
+      throw new S3EvidenceStoreError(`Failed to read evidence artifact ${key}.`, { cause: err });
+    }
   }
 
   private async putObject(

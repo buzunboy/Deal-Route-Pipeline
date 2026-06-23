@@ -24,14 +24,15 @@ export async function serve(config: Config): Promise<void> {
     container.alerts,
     container.metrics,
     container.settings,
+    // The evidence store backs the gated `GET /api/evidence/:id/:artifact` endpoint
+    // that streams screenshot/html/terms bytes to the panel (the authed complement of
+    // the screenshot-only public CDN).
+    container.evidenceStore,
     container.logger,
     {
       staticPageHtml: REVIEW_TEST_PAGE,
       authToken: config.reviewApi.authToken,
       corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin,
-      // Same CDN base the public API resolves screenshot URLs from — so the admin
-      // panel's evidence frame gets resolvable artifact URLs (ACR-13).
-      evidenceCdnBaseUrl: config.evidence.s3?.cdnBaseUrl,
     },
   );
   const publicApi = new PublicApi(container.db.deals, container.clock, container.logger, {

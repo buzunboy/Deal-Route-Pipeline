@@ -10,12 +10,18 @@ import type {
   FeedReader,
   FeedItem,
   EvidenceStore,
+  EvidenceArtifact,
   Clock,
   Logger,
   Alerting,
 } from '../../src/application/ports/index.js';
-import { assertCaptureComplete } from '../../src/domain/index.js';
-import type { Evidence, EvidenceCapture, AlertEvent } from '../../src/domain/index.js';
+import { assertCaptureComplete, EVIDENCE_ARTIFACTS } from '../../src/domain/index.js';
+import type {
+  Evidence,
+  EvidenceCapture,
+  EvidenceArtifactKind,
+  AlertEvent,
+} from '../../src/domain/index.js';
 
 /** Fetcher fake: returns a scripted result. Default is a clean OK page. */
 export class FakeFetcher implements Fetcher {
@@ -148,6 +154,12 @@ export class FakeFeedReader implements FeedReader {
 /** EvidenceStore fake: keeps captures in memory, returns deterministic refs. */
 export class FakeEvidenceStore implements EvidenceStore {
   public saved: Evidence[] = [];
+  // Retain the body bytes per bundle id so getArtifact is substitutable with the real
+  // stores (LSP) — the production stores read these back off disk / S3.
+  private readonly bodies = new Map<
+    string,
+    { screenshot: Uint8Array; html: string; terms: string }
+  >();
   async save(capture: EvidenceCapture): Promise<Evidence> {
     // Mirror the production store: reject a hollow capture before "persisting" it,
     // so the fake stays substitutable under the contract (LSP) and tests relying
@@ -164,10 +176,25 @@ export class FakeEvidenceStore implements EvidenceStore {
       content_hash: capture.contentHash,
     };
     this.saved.push(evidence);
+    this.bodies.set(id, {
+      screenshot: capture.screenshot,
+      html: capture.html,
+      terms: capture.termsText,
+    });
     return evidence;
   }
   async get(id: string): Promise<Evidence | null> {
     return this.saved.find((e) => e.id === id) ?? null;
+  }
+  async getArtifact(id: string, kind: EvidenceArtifactKind): Promise<EvidenceArtifact | null> {
+    const body = this.bodies.get(id);
+    if (!body) return null;
+    const { contentType } = EVIDENCE_ARTIFACTS[kind];
+    const bytes =
+      kind === 'screenshot'
+        ? body.screenshot
+        : new TextEncoder().encode(kind === 'html' ? body.html : body.terms);
+    return { bytes, contentType };
   }
 }
 
