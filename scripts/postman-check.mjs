@@ -71,7 +71,9 @@ if (missing.length === 0 && extra.length === 0) {
   process.exit(0);
 }
 
-console.error(`postman-check: DRIFT — the committed Postman collection is out of sync with ${SPEC}.`);
+console.error(
+  `postman-check: DRIFT — the committed Postman collection is out of sync with ${SPEC}.`,
+);
 if (missing.length) {
   console.error('\n  In the spec but MISSING from the collection (regenerate to add):');
   for (const l of missing) console.error(`    + ${l}`);
@@ -80,5 +82,7 @@ if (extra.length) {
   console.error('\n  In the collection but NOT in the spec (stale — regenerate to drop):');
   for (const l of extra) console.error(`    - ${l}`);
 }
-console.error('\n  Fix: run `npm run api:postman` and commit docs/api/dealroute.postman_collection.json.');
+console.error(
+  '\n  Fix: run `npm run api:postman` and commit docs/api/dealroute.postman_collection.json.',
+);
 process.exit(1);
