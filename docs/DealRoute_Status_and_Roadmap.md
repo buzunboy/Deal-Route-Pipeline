@@ -179,22 +179,21 @@ No roadmap step remains. The concrete forward work, highest-value first:
    auto-queue gate if the product wants confidence-based routing. **Panel-side migrations** (ACR-6's
    `avg_review_seconds` number; Settings' `read_only` row flag + dropping the no-backing placeholders)
    are handed off in `docs/handoffs/ADMIN_PANEL_metrics_endpoints.md`.
-2. **S3 evidence — the screenshot-only CDN scoping gate** [high — deploy/security, NOT code]. The
-   S3 `EvidenceStore` is built + live on Fly (`EVIDENCE_STORE=s3`, bucket fully access-blocked, IAM
-   least-privilege). The gate: a bundle stores `screenshot.png` + `page.html` + `terms.txt` (verbatim
-   copyrighted terms) under ONE `<id>/` prefix; the public DTO emits only the screenshot URL, but a
-   public CDN over that prefix would let anyone fetch `terms.txt`/`page.html` by editing the URL.
-   **The committable artifact now exists** (2026-06-23): `deploy/aws/setup-evidence-cdn.sh` (idempotent;
+2. **S3 evidence — the screenshot-only CDN scoping gate** [✅ RESOLVED + VERIFIED 2026-06-23]. The
+   S3 `EvidenceStore` is live on Fly (`EVIDENCE_STORE=s3`, bucket fully access-blocked, IAM
+   least-privilege). The gate (a bundle stores `screenshot.png` + `page.html` + `terms.txt` (verbatim
+   copyrighted terms) + `evidence.json` under ONE `<id>/` prefix, and only the screenshot may be
+   public) is now closed by a committable artifact: `deploy/aws/setup-evidence-cdn.sh` (idempotent;
    mirrors `setup-evidence-s3.sh`) builds CloudFront + Origin Access Control over the fully-blocked
    bucket + a CloudFront Function (`deploy/aws/cloudfront-screenshot-only.js`) that 403s any path not
-   ending in `/screenshot.png`, applies an OAC-only bucket policy
-   (`deploy/aws/evidence-cdn-bucket-policy.json`), and prints the `fly secrets set S3_CDN_BASE_URL=…`
-   line. **The owner runs the SETUP + the SCOPING acceptance test** (in `deploy/fly/README.md` §2.4:
-   `…/screenshot.png` → 200, `…/terms.txt`/`page.html` → 403; direct-bucket fetch denied) **before
-   pointing `S3_CDN_BASE_URL` at it.** **Safe default: leave `S3_CDN_BASE_URL` unset** — the panel
-   reads evidence via the authed path, so nothing is gated until the public landing page wants
-   screenshots. The remaining work here is owner setup + the acceptance test (AWS/Fly, not code).
-   _See the `Public CDN must expose ONLY screenshot.png` finding in `docs/KNOWN_ISSUES.md`._
+   ending in `/screenshot.png`, and applies an OAC-only bucket policy
+   (`deploy/aws/evidence-cdn-bucket-policy.json`). **Provisioned + acceptance-tested live against a real
+   bundle** (distribution `EWO9T0BEK3PYG`, `d31ssbttp5kfu7.cloudfront.net`): `…/screenshot.png` → 200;
+   `…/terms.txt` / `…/page.html` / `…/evidence.json` → 403; direct-bucket fetch → 403. **One deliberate
+   go-live toggle remains** (not blocking): set `fly secrets set -a dealroute-api S3_CDN_BASE_URL=…` to
+   switch on public screenshot URLs when the landing page wants them — until then it stays UNSET (the
+   safe default; the panel reads evidence via the authed path). _See the resolved
+   `Public CDN must expose ONLY screenshot.png` finding in `docs/KNOWN_ISSUES.md`._
 3. **Other post-deploy hardening** [medium] — the API is live + working, but parked: make the GHCR
    image private, **pin** `:edge` → `:sha-…`, set **`ADMIN_CORS_ORIGIN`** when the panel deploys.
    _(Credential rotation — the chat-exposed AWS key + GitHub PAT — is tracked in `docs/KNOWN_ISSUES.md`
@@ -213,8 +212,10 @@ No roadmap step remains. The concrete forward work, highest-value first:
    dead mydealz RSS feed, JS-heavy provider homepages yielding 0 deals).
 
 **Open owner decisions that gate the above (not defaultable):**
-- **CDN exposure scope** (the deployment gate): same S3 prefix as the bundle, or a separate public
-  prefix? *Rec: separate public prefix; never make the bundle prefix listable.* (Item 2 above.)
+- **CDN exposure scope** — ✅ DECIDED + IMPLEMENTED 2026-06-23: kept the SAME S3 prefix as the bundle
+  and scoped access at the CDN layer (CloudFront Function 403ing any non-`screenshot.png` path + OAC
+  over a fully-blocked bucket), rather than splitting screenshots into a separate prefix. The bundle
+  prefix is never listable (bucket access-blocked; no `s3:ListBucket` grant). (Item 2 above.)
 - **ACR-11 reviewer identity**: move profile/team into the pipeline, or keep it the panel's allow-list?
   (Confirm before building ACR-11.)
 - The Step 2 / 3 / 4 / 5 decisions are all **DECIDED + DONE** (recorded in the SUPERSEDED handoff §7

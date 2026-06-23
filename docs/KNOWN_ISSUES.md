@@ -573,37 +573,6 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   add a lightweight in-process limiter before exposing `/v1/` publicly.
 - **Logged**: 2026-06-20
 
-### Public CDN must expose ONLY `screenshot.png`, not the whole evidence bundle
-- **Severity**: high (trust / copyright — a deployment-config gap, not a code defect)
-- **Area**: evidence-store / api / deployment
-- **Location**: `src/adapters/evidence-store/s3-evidence-store.ts` (bundle layout); consumed by
-  `src/adapters/http/public-dto.ts` (`resolveScreenshotUrl`) via `S3_CDN_BASE_URL`.
-- **What**: a bundle stores `screenshot.png` + `page.html` + `terms.txt` + `evidence.json` under one
-  `<id>/` prefix with fixed public-constant names (`src/domain/evidence/evidence-layout.ts`). The
-  public DTO only emits the `screenshot.png` URL, but if `S3_CDN_BASE_URL` fronts that prefix
-  publicly, a consumer can edit the URL to `…/<id>/terms.txt` / `…/page.html` and fetch the raw HTML
-  snapshot + the **verbatim (copyrighted) terms text** the DTO deliberately drops. That re-exposes
-  exactly the data the `source_quote`/`raw_conditions_text` no-leak invariant protects.
-- **Why deferred**: it's a deployment/bucket-policy concern, not a code path — the API exposes only
-  the screenshot URL. Fully separating screenshots into their own public bucket/prefix is an
-  evidence-store change (P2 territory) that would touch the write-once / no-partial-bundle
-  guarantees, so it's documented + enforced at deploy rather than re-architected for P3.
-- **Mitigation in place**: the deployment contract is documented loudly next to `S3_CDN_BASE_URL`
-  (config JSDoc + README + ARCHITECTURE.md "Public read surface"). **The committable scoping artifact
-  now exists** (2026-06-23): `deploy/aws/setup-evidence-cdn.sh` (idempotent; mirrors
-  `setup-evidence-s3.sh`) builds CloudFront + Origin Access Control over the fully-access-blocked
-  bucket + a CloudFront Function (`deploy/aws/cloudfront-screenshot-only.js`) that 403s any path NOT
-  ending in `/screenshot.png`, and applies an OAC-only bucket policy
-  (`deploy/aws/evidence-cdn-bucket-policy.json`). The function's allow-list regex is unit-verified
-  against bypass shapes (`terms.txt`, `x-screenshot.png`, `screenshot.png.txt`, nested prefixes, …).
-- **Fix-when**: BEFORE pointing `S3_CDN_BASE_URL` at a public origin — run `setup-evidence-cdn.sh`,
-  then the **scoping acceptance test** (`deploy/fly/README.md` §2.4): against the public CloudFront
-  URL, `…/<id>/screenshot.png` MUST be 200 and `…/<id>/terms.txt` / `…/page.html` MUST be 403, AND a
-  direct-bucket fetch (no CloudFront) MUST be denied. Only when that passes, set the `S3_CDN_BASE_URL`
-  Fly secret — and **move this finding to Resolved**. Until then, leaving `S3_CDN_BASE_URL` unset is
-  the safe default (the panel reads evidence via the authed path).
-- **Logged**: 2026-06-20 (committable scoping artifact added 2026-06-23; awaiting owner setup + the acceptance test)
-
 ### Inline `DealRecord` test literals don't satisfy the full schema type (only caught by `tsconfig.test.json`)
 - **Severity**: low (test-only; runtime-correct via zod defaults + esbuild type-stripping)
 - **Area**: ci / testing
@@ -665,6 +634,27 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 ---
 
 ## Resolved
+
+### Public CDN must expose ONLY `screenshot.png`, not the whole evidence bundle — RESOLVED 2026-06-23
+- **Was**: high (trust / copyright — a deployment-config gap), evidence-store / api / deployment.
+  A bundle stores `screenshot.png` + `page.html` + `terms.txt` + `evidence.json` under one `<id>/`
+  prefix; the public DTO emits only the screenshot URL, but a public CDN over that prefix would let a
+  consumer edit the URL to `…/<id>/terms.txt` / `…/page.html` and fetch the raw HTML snapshot + the
+  verbatim (copyrighted) terms text the DTO deliberately drops.
+- **Resolution**: a committable screenshot-only CDN artifact under `deploy/aws/` —
+  `setup-evidence-cdn.sh` (idempotent; mirrors `setup-evidence-s3.sh`) builds CloudFront + Origin
+  Access Control over the fully-access-blocked bucket + a CloudFront **Function**
+  (`cloudfront-screenshot-only.js`, allow-list `^/<id>/screenshot.png$`, 403 otherwise; unit-verified
+  against bypass shapes) + an OAC-only bucket policy (`evidence-cdn-bucket-policy.json`, scoped to one
+  distribution via `aws:SourceArn`). The bucket itself stays fully public-access-blocked — CloudFront
+  is the only door, the function is the lock. Docs point at it: `deploy/fly/README.md` §2.4 (incl. the
+  scoping acceptance test), `ARCHITECTURE.md` "Public read surface", Status §3.
+- **Verified live (2026-06-23)**: provisioned the CDN (distribution `EWO9T0BEK3PYG`, domain
+  `d31ssbttp5kfu7.cloudfront.net`) over `dealroute-evidence-prod`, crawled a real bundle to S3, and ran
+  the acceptance test against a genuine `<id>/` bundle: `…/screenshot.png` → **200**; `…/terms.txt`,
+  `…/page.html`, `…/evidence.json` → **403**; a direct unsigned S3 fetch of `…/terms.txt` → **403**.
+  The gate holds. (Setting the `S3_CDN_BASE_URL` Fly secret to switch on public screenshot URLs is a
+  separate, deliberate go-live step; leaving it unset remains the safe default.)
 
 ### Postgres `Database` contract suite isn't isolated per-test and isn't run in CI — RESOLVED 2026-06-23 (P1)
 - **Was**: medium, ci / db / testing, `src/adapters/db/postgres/postgres-db.test.ts` +
