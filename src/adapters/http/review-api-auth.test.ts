@@ -26,6 +26,18 @@ import { tldtsSuffixOracle } from '../suffix/tldts-suffix-oracle.js';
 import { makeDealRecord } from '../../../test/factories/deal.js';
 import { FakePasswordHasher, FakeLogger } from '../../../test/fakes/fakes.js';
 import type { Clock } from '../../application/ports/index.js';
+import {
+  makeTestTokenIssuerFactory,
+  seedActiveUser,
+  TEST_AUTH_TTLS,
+  TEST_LOCKOUT,
+  TEST_REALM,
+  TEST_ISS,
+  TEST_AUD,
+} from '../../../test/fakes/auth-test-support.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /** A settable clock so token-expiry / TTL boundaries can be crossed in a test. */
 class MovableClock implements Clock {
@@ -40,18 +52,6 @@ class MovableClock implements Clock {
     return this.d.toISOString();
   }
 }
-import {
-  makeTestTokenIssuerFactory,
-  seedActiveUser,
-  TEST_AUTH_TTLS,
-  TEST_LOCKOUT,
-  TEST_REALM,
-  TEST_ISS,
-  TEST_AUD,
-} from '../../../test/fakes/auth-test-support.js';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 /**
  * The Phase-2 JWT guard + dual-accept on ReviewApi: identity is proven from the verified

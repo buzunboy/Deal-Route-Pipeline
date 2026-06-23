@@ -36,13 +36,19 @@ export async function serve(config: Config): Promise<void> {
       staticPageHtml: REVIEW_TEST_PAGE,
       authToken: config.reviewApi.authToken,
       corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin,
-      // Auth/IAM (Phase 2): wire the per-user JWT guard. The legacy `authToken` above stays
-      // accepted alongside it (dual-accept) until Phase 5.
-      auth: {
-        tokenIssuer: container.tokenIssuer,
-        db: container.db,
-        authorization: container.authorization,
-      },
+      // Auth/IAM (Phase 2): wire the per-user JWT guard ONLY when a signing key is
+      // configured. Without a key the issuer can't verify, so passing `auth` would make
+      // EVERY /api/* request 401 (a key-less verify throws) — silently locking the surface
+      // and contradicting the open-mode banner below. Omitting it when there's no key keeps
+      // the genuinely-open trusted-network mode reachable (and the legacy `authToken` above
+      // stays accepted alongside JWTs during the dual-accept window).
+      ...(config.auth.jwt.privateKey !== undefined && {
+        auth: {
+          tokenIssuer: container.tokenIssuer,
+          db: container.db,
+          authorization: container.authorization,
+        },
+      }),
     },
   );
   const authApi = new AuthApi(
@@ -51,7 +57,11 @@ export async function serve(config: Config): Promise<void> {
     container.logoutSession,
     container.tokenIssuer,
     container.logger,
-    { corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin },
+    {
+      corsAllowOrigin: config.reviewApi.adminCorsAllowOrigin,
+      // With no signing key the IdP can't mint/publish tokens — /auth/* 503s clearly.
+      authConfigured: config.auth.jwt.privateKey !== undefined,
+    },
   );
   const publicApi = new PublicApi(container.db.deals, container.clock, container.logger, {
     cdnBaseUrl: config.evidence.s3?.cdnBaseUrl,

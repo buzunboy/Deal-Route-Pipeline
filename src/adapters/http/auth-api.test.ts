@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { AddressInfo } from 'node:net';
 import { AuthApi } from './auth-api.js';
 import {
@@ -218,5 +218,62 @@ describe('AuthApi (HTTP integration)', () => {
   it('unknown path → 404', async () => {
     const res = await fetch(`${base}/auth/nope`, { method: 'POST' });
     expect(res.status).toBe(404);
+  });
+
+  describe('when no signing key is configured (authConfigured: false)', () => {
+    let unconfigured: AuthApi;
+    let ubase: string;
+
+    beforeEach(async () => {
+      const clock = new FixedClock(new Date('2026-06-19T00:00:00.000Z'));
+      const issuer = makeIssuer(clock);
+      const authorization = new AuthorizationUseCase(db);
+      const login = new AuthenticateUseCase(
+        db,
+        hasher,
+        issuer,
+        authorization,
+        clock,
+        new FakeLogger(),
+        TEST_AUTH_TTLS,
+        TEST_LOCKOUT,
+        TEST_REALM,
+      );
+      const refresh = new RefreshUseCase(
+        db,
+        issuer,
+        authorization,
+        clock,
+        new FakeLogger(),
+        TEST_AUTH_TTLS,
+        TEST_REALM,
+      );
+      unconfigured = new AuthApi(
+        login,
+        refresh,
+        new LogoutUseCase(db, clock, new FakeLogger()),
+        issuer,
+        new FakeLogger(),
+        { authConfigured: false },
+      );
+      await unconfigured.listen(0);
+      // @ts-expect-error reach into the underlying server for the assigned port
+      ubase = `http://127.0.0.1:${(unconfigured['server'].address() as AddressInfo).port}`;
+    });
+
+    afterEach(async () => {
+      await unconfigured.close();
+    });
+
+    it('every /auth/* + JWKS short-circuits to a CLEAR 503 (not a generic 500)', async () => {
+      const login = await fetch(`${ubase}/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'rita@dealroute.de', password: 'pw-correct' }),
+      });
+      expect(login.status).toBe(503);
+      expect(((await login.json()) as { error: string }).error).toMatch(/not configured/);
+      expect((await fetch(`${ubase}/.well-known/jwks.json`)).status).toBe(503);
+    });
   });
 });

@@ -1255,9 +1255,14 @@ components:
       type: http
       scheme: bearer
       description: |
-        `Authorization: Bearer <REVIEW_API_TOKEN>` on every state-changing (POST/PATCH)
-        endpoint. When no token is configured server-side the API is open and MUST be
-        bound to a trusted network. Read endpoints are never gated.
+        `Authorization: Bearer <token>` on EVERY `/api/*` endpoint — reads included (the
+        Auth/IAM Phase 2 change; `/api/health` is the one exception). The token is normally
+        a per-user ES256 access token from `POST /auth/login`; identity + permissions come
+        from the verified claims and the recorded actor is derived from the token (never the
+        request body). The legacy static `REVIEW_API_TOKEN` is also accepted during the
+        dual-accept window (retired in Phase 5). When NEITHER a signing key nor the legacy
+        token is configured server-side the API is open and MUST be bound to a trusted
+        network. Writes additionally require the route's permission.
 
   parameters:
     IdParam:

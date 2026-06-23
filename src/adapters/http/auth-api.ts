@@ -20,6 +20,13 @@ export interface AuthApiOptions {
    * cross-origin, so CORS is wired the same way `ReviewApi` does it.
    */
   corsAllowOrigin?: string;
+  /**
+   * Whether a JWT signing key is configured. When `false` (no `AUTH_JWT_PRIVATE_KEY`) the
+   * IdP can't mint or publish keys, so `/auth/*` + JWKS short-circuit to a clear 503
+   * ("auth is not configured") instead of letting the key-less `TokenIssuer` throw a
+   * generic 500. Defaults to `true` (the wired-up case). `serve.ts` passes the real flag.
+   */
+  authConfigured?: boolean;
 }
 
 /**
@@ -41,6 +48,7 @@ export interface AuthApiOptions {
 export class AuthApi {
   private server: Server | null = null;
   private readonly corsAllowOrigin?: string;
+  private readonly authConfigured: boolean;
 
   constructor(
     private readonly authenticate: AuthenticateUseCase,
@@ -51,6 +59,7 @@ export class AuthApi {
     options: AuthApiOptions = {},
   ) {
     this.corsAllowOrigin = options.corsAllowOrigin;
+    this.authConfigured = options.authConfigured ?? true;
   }
 
   listen(port: number): Promise<void> {
@@ -86,6 +95,12 @@ export class AuthApi {
       res.writeHead(this.corsAllowOrigin ? 204 : 405);
       res.end();
       return;
+    }
+
+    // No signing key ⇒ the IdP can't mint/publish tokens. Answer with a CLEAR 503 rather
+    // than letting the key-less TokenIssuer throw a generic 500 from deep in a use-case.
+    if (!this.authConfigured) {
+      return sendError(res, 503, 'auth is not configured (no signing key)');
     }
 
     if (method === 'GET' && path === '/.well-known/jwks.json') {

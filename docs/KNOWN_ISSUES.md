@@ -669,6 +669,15 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Fix-when**: when adding a pipeline-side per-IP/per-email attempt limiter — return an identical 429 shape for an unknown-but-attacked email, and add the `testing.md`-mandated timing/shape-parity boundary test for unknown-vs-known email on `/auth/login`.
 - **Logged**: 2026-06-23 (Auth/IAM Phase 2)
 
+### Granular `*:read` permissions are defined but not enforced on bare GETs — every authed user can read every gated GET (deliberate Phase-2 posture)
+- **Severity**: low (defense-in-depth / least-privilege; not an identity or leak hole)
+- **Area**: api / auth (Phase 2)
+- **Location**: `src/adapters/http/review-api.ts` (`requireRead` — authorizes any valid identity, no permission check); `src/domain/auth/permission.ts` (`candidate:read`/`sources:read`/`settings:read`/`team:read`).
+- **What**: the plan's route→permission registry maps "every bare `GET /api/*` read → valid token only, no named permission" — so `requireRead` grants any verified user every gated read, and the `*:read` enum keys (which exist so a FUTURE role can be *denied* a read) aren't consulted. Only `GET /api/evidence/:id/:artifact` keeps a named permission (`evidence:read`, the one sensitive GET). A reviewer with no `team:read`/`settings:read` can still read `/api/team` and `/api/settings`. Every reader is still a verified active user, and the public-DTO leak boundary is untouched — this is a least-privilege gap, not a forge/leak hole.
+- **Why deferred**: it's the intended Phase-2 design (the handoff §2.4 registry + the `permission.ts` comment both state bare GETs are "auth required" by default). Wiring per-read denial needs the Phase-3 Roles UI to even create a role that lacks a read perm — there's no way to exercise it until custom roles exist.
+- **Fix-when**: Phase 3 (Users & Roles) — add a route→read-permission lookup in `requireRead` and a "low-permission user is denied a read → 403" test, once a role without a given `*:read` can be created.
+- **Logged**: 2026-06-23 (Auth/IAM Phase 2 — code-reviewer follow-up)
+
 ---
 
 ## Resolved
