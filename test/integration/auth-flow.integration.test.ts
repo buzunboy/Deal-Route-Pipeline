@@ -70,6 +70,8 @@ suite('Auth/IAM Phase 2 flow (Container + Postgres + HTTP)', () => {
           tokenIssuer: container.tokenIssuer,
           db: container.db,
           authorization: container.authorization,
+          provisionUser: container.provisionUser,
+          manageRoles: container.manageRoles,
         },
       },
     );

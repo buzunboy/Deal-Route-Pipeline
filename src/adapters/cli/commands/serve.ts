@@ -47,6 +47,9 @@ export async function serve(config: Config): Promise<void> {
           tokenIssuer: container.tokenIssuer,
           db: container.db,
           authorization: container.authorization,
+          // Auth/IAM (Phase 3): the Users & Roles admin surface (`/api/users`, `/api/roles`).
+          provisionUser: container.provisionUser,
+          manageRoles: container.manageRoles,
         },
       }),
     },

@@ -368,6 +368,14 @@ export interface RoleRepository {
   getById(id: string): Promise<Role | null>;
   getByName(name: string): Promise<Role | null>;
   list(): Promise<Role[]>;
+  /**
+   * Update a role's `description` (and `name` for a NON-system role) by id — used by
+   * `ManageRolesUseCase` to edit descriptions/rename custom roles. `is_system` is immutable.
+   * Defense-in-depth (enforced by BOTH adapters): a SYSTEM role keeps its existing name —
+   * it can never be RENAMED here even if a caller passes a different name (the use-case is
+   * the primary gate; this is the net). A no-op when the id doesn't exist.
+   */
+  update(role: Role): Promise<void>;
   /** Count users still assigned this role — guards delete (RoleInUseError). */
   countUsers(roleId: string): Promise<number>;
   delete(id: string): Promise<void>; // guarded by is_system + countUsers in the use-case

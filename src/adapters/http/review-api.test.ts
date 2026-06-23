@@ -523,9 +523,12 @@ describe('ReviewApi (HTTP integration)', () => {
       body: JSON.stringify({ approver: 'alice@dealroute.de', name: 'Alice M.' }),
     });
     expect(patched.status).toBe(200);
-    expect((await patched.json()) as { updated: boolean; name: string }).toEqual({
+    expect(
+      (await patched.json()) as { updated: boolean; name: string; password_changed: boolean },
+    ).toEqual({
       updated: true,
       name: 'Alice M.',
+      password_changed: false,
     });
     expect((await db.team.getByEmail('alice@dealroute.de'))!.name).toBe('Alice M.');
 

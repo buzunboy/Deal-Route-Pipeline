@@ -60,6 +60,12 @@ tags:
     description: Admin published-deals screen — publication history. (admin)
   - name: Team
     description: Reviewer registry + profile (the pipeline is the identity system of record). (admin)
+  - name: Users
+    description: Runtime IAM — provision / list / manage login-capable users (gated team:manage). (admin)
+  - name: Roles
+    description: Runtime RBAC — create / list / edit / delete permission bundles (gated roles:manage). (admin)
+  - name: Permissions
+    description: The permission catalogue + the caller's own effective permissions. (admin)
   - name: Alerts
     description: Persisted alerts — list, acknowledge, resolve (source reliability / budget). (admin)
   - name: Metrics
@@ -992,11 +998,16 @@ paths:
   /api/profile:
     patch:
       tags: [Team]
-      summary: Update the signed-in reviewer's own display name (ACR-11)
+      summary: Update the signed-in reviewer's own profile — name and/or own password (ACR-11 + Phase 3)
       operationId: updateProfile
       description: |
-        Keyed by the approver's email identity (only the editable name is mutable —
-        email is the auth identity; role/status are admin actions). Bearer-gated.
+        SELF-service, keyed by the caller's TOKEN email (a body `approver` is ignored) — a
+        user can only ever edit their OWN row. `name` edits the display name. `currentPassword`
+        + `newPassword` (all-or-nothing) change the caller's OWN password: the current-password
+        proof IS the authorization (no `team:manage` needed, unlike the admin reset on
+        `/api/users/{id}`), a wrong current password is a 401, and a successful change bumps the
+        user's `token_version` — logging out every other live session (the panel should
+        re-login). At least one of `name` or the password pair must be present. Bearer-gated.
       security:
         - bearerAuth: []
       requestBody:
@@ -1005,10 +1016,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [approver, name]
+              minProperties: 1
               properties:
                 approver: { type: string, minLength: 1 }
                 name: { type: string, minLength: 1 }
+                currentPassword:
+                  type: string
+                  minLength: 1
+                  description: The caller's CURRENT password — required (with newPassword) to change it.
+                newPassword:
+                  type: string
+                  minLength: 1
+                  description: The new password; validated against the server password policy. Requires currentPassword.
               additionalProperties: false
       responses:
         '200':
@@ -1017,18 +1036,411 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [updated, name]
+                required: [updated, name, password_changed]
                 properties:
                   updated: { type: boolean }
-                  name: { type: string }
+                  name: { type: [string, 'null'] }
+                  password_changed:
+                    type: boolean
+                    description: True when this request changed the password (so the client should re-login).
                 additionalProperties: false
         '400':
-          description: Missing approver/name, or no member for this approver.
+          description: Empty patch, a password pair that isn't all-or-nothing, a new password failing the policy, or no member for this caller.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Missing/invalid token, or (on a password change) a wrong current password.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  # ── Users & Roles admin (Auth/IAM Phase 3) ──
+  /api/users:
+    get:
+      tags: [Users]
+      summary: List login-capable users (Phase 3)
+      operationId: listUsers
+      description: |
+        The runtime IAM Users screen — every user with its role NAME, status, and the
+        `review_count` derived from the reviews audit log. The password hash is NEVER
+        returned. Gated `team:manage`.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Users.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: '#/components/schemas/AdminUserView' }
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Users]
+      summary: Provision a login-capable user (Phase 3)
+      operationId: provisionUser
+      description: |
+        One admin action creates a login-capable account (name/email/role + admin-set
+        initial password): the user can `POST /auth/login` immediately and is restricted
+        on the pipeline by their role. The actor recorded for the audit is derived from
+        the TOKEN (the body `approver` is ignored when a JWT is present). Gated `team:manage`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, role, password]
+              properties:
+                approver:
+                  type: string
+                  minLength: 1
+                  description: 'Ignored for a JWT caller (actor is token-derived); used only by a legacy static-token caller.'
+                name: { type: string, minLength: 1 }
+                email: { type: string, format: email }
+                role:
+                  type: string
+                  minLength: 1
+                  description: 'An existing role NAME (e.g. reviewer, admin, or a custom role).'
+                password:
+                  type: string
+                  minLength: 1
+                  description: 'Admin-set initial password; validated against the server password policy (min length).'
+              additionalProperties: false
+      responses:
+        '201':
+          description: User created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, email, role]
+                properties:
+                  id: { type: string, format: uuid }
+                  email: { type: string, format: email }
+                  role: { type: string }
+                additionalProperties: false
+        '400':
+          description: Missing/invalid fields, or the password fails the policy.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: The named role does not exist.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: A user already exists with that email.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdParam'
+    patch:
+      tags: [Users]
+      summary: Update a user — role / status / password / name (Phase 3)
+      operationId: patchUser
+      description: |
+        Change a user's `role`, `status` (active|disabled), or `password` — each gated
+        `team:manage`. A user may edit their OWN `name` without `team:manage` (the self
+        path); any privileged sub-field, or editing another user, requires `team:manage`.
+        Changing role/status/password bumps the user's `token_version` (immediate revoke);
+        disabling also revokes their refresh tokens. The LAST-ADMIN GUARD refuses to disable
+        or demote the last active holder of `roles:manage`/`team:manage` (409).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                approver: { type: string, minLength: 1 }
+                name: { type: string, minLength: 1 }
+                role:
+                  type: string
+                  minLength: 1
+                  description: An existing role NAME to reassign to.
+                status: { type: string, enum: [active, disabled] }
+                password:
+                  type: string
+                  minLength: 1
+                  description: Admin password reset; validated against the policy.
+              additionalProperties: false
+      responses:
+        '200':
+          description: User updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updated]
+                properties:
+                  updated: { type: boolean }
+                additionalProperties: false
+        '400':
+          description: Empty / invalid patch, or a password failing the policy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: The user (or the named role) does not exist.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: The last-admin guard refused a disable/demote of the only admin.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/roles:
+    get:
+      tags: [Roles]
+      summary: List roles with their resolved permission sets (Phase 3)
+      operationId: listRoles
+      description: Every role + its permission keys (the panel role editor). Gated `roles:manage`.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Roles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roles]
+                properties:
+                  roles:
+                    type: array
+                    items: { $ref: '#/components/schemas/RoleView' }
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Roles]
+      summary: Create a custom role (Phase 3)
+      operationId: createRole
+      description: |
+        Create a named permission bundle. Every key is validated against the closed
+        permission enum (a bad key ⇒ 400). Bumps the global `perm_version`. Gated `roles:manage`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, permissions]
+              properties:
+                approver: { type: string, minLength: 1 }
+                name: { type: string, minLength: 1 }
+                description: { type: string }
+                permissions:
+                  type: array
+                  items: { $ref: '#/components/schemas/Permission' }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Role created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [role]
+                properties:
+                  role: { $ref: '#/components/schemas/RoleView' }
+                additionalProperties: false
+        '400':
+          description: Missing name/permissions, or an unknown permission key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: A role with that name already exists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+
+  /api/roles/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: The role NAME (a free-form string key, not a UUID).
+        schema: { type: string, minLength: 1 }
+    patch:
+      tags: [Roles]
+      summary: Update a role's description and/or permissions (Phase 3)
+      operationId: updateRole
+      description: |
+        Replace the role's permission set and/or edit its description. A built-in
+        `is_system` role's permission SET is immutable (409 on a permissions edit); its
+        description may still be edited. A permission-set change bumps `perm_version`.
+        Gated `roles:manage`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                approver: { type: string, minLength: 1 }
+                description: { type: string }
+                permissions:
+                  type: array
+                  items: { $ref: '#/components/schemas/Permission' }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Role updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [role]
+                properties:
+                  role: { $ref: '#/components/schemas/RoleView' }
+                additionalProperties: false
+        '400':
+          description: Empty patch or an unknown permission key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: The role does not exist.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: A built-in system role's permission set cannot be changed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+    delete:
+      tags: [Roles]
+      summary: Delete a custom role (Phase 3)
+      operationId: deleteRole
+      description: |
+        Delete a custom role. Refuses a built-in `is_system` role and a role still assigned
+        to any user (both 409). Bumps `perm_version`. Gated `roles:manage`.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Role deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted: { type: boolean }
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: The role does not exist.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: A system role, or a role still assigned to users, cannot be deleted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/permissions:
+    get:
+      tags: [Permissions]
+      summary: The permission catalogue (Phase 3)
+      operationId: listPermissions
+      description: |
+        Every permission key (so the panel role editor can render the catalogue without the
+        enum shipping to the client). Gated `roles:manage`.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The permission catalogue.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [permissions]
+                properties:
+                  permissions:
+                    type: array
+                    items:
+                      type: object
+                      required: [key]
+                      properties:
+                        key: { $ref: '#/components/schemas/Permission' }
+                      additionalProperties: false
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/permissions/me:
+    get:
+      tags: [Permissions]
+      summary: The caller's own effective permissions (Phase 3)
+      operationId: myPermissions
+      description: |
+        The authenticated caller's role + effective permission set (from the verified
+        token). Any valid token — no named permission required. The panel uses it to gate
+        page access (cosmetic; the pipeline is the real gate).
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The caller's identity + permissions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [email, role, permissions]
+                properties:
+                  email:
+                    type: [string, 'null']
+                    description: The token email; null for a legacy static-token caller.
+                  role: { type: string }
+                  permissions:
+                    type: array
+                    items: { $ref: '#/components/schemas/Permission' }
+                additionalProperties: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/alerts:
     get:
@@ -1298,6 +1710,11 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     Unauthorized:
       description: Missing or wrong Bearer token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated but lacking the permission this route requires.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -1881,6 +2298,59 @@ components:
           type: integer
           minimum: 0
           description: Decisions this member made (derived from the reviews audit log).
+      additionalProperties: false
+    Permission:
+      type: string
+      description: |
+        A fine-grained permission key (Auth/IAM). Roles are named bundles of these; pages
+        and APIs require a permission, never a role name. The closed universe of keys —
+        mirrors the `Permission` enum in src/domain/auth/permission.ts.
+      enum:
+        - candidate:read
+        - candidate:approve
+        - candidate:reject
+        - candidate:edit
+        - sources:read
+        - sources:write
+        - sources:review
+        - settings:read
+        - settings:write
+        - team:read
+        - team:manage
+        - roles:manage
+        - alerts:manage
+        - field-proposals:promote
+        - manual-capture:write
+        - evidence:read
+    AdminUserView:
+      type: object
+      description: A login-capable user for the admin Users screen (Auth/IAM Phase 3). No hash.
+      required: [id, name, email, role, status, review_count]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, description: The user's role NAME. }
+        status: { type: string, enum: [active, invited, disabled] }
+        review_count:
+          type: integer
+          minimum: 0
+          description: Decisions this user made (derived from the reviews audit log).
+      additionalProperties: false
+    RoleView:
+      type: object
+      description: A role + its resolved permission set (Auth/IAM Phase 3).
+      required: [id, name, description, is_system, permissions]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        is_system:
+          type: boolean
+          description: A built-in role (admin/reviewer) — its permission set is immutable and it can't be deleted.
+        permissions:
+          type: array
+          items: { $ref: '#/components/schemas/Permission' }
       additionalProperties: false
     AlertView:
       type: object

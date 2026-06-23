@@ -11,6 +11,8 @@ import {
   SettingsUseCase,
   AuthenticateUseCase,
   AuthorizationUseCase,
+  ProvisionUserUseCase,
+  ManageRolesUseCase,
 } from '../../application/index.js';
 import { loadConfig } from '../../config/index.js';
 import {
@@ -121,7 +123,25 @@ describe('ReviewApi — JWT guard + dual-accept (Phase 2)', () => {
       {
         staticPageHtml: '<html>page</html>',
         authToken: LEGACY_TOKEN, // dual-accept: legacy static token stays valid
-        auth: { tokenIssuer: issuer, db, authorization },
+        auth: {
+          tokenIssuer: issuer,
+          db,
+          authorization,
+          provisionUser: new ProvisionUserUseCase(
+            db,
+            hasher,
+            clock,
+            new FakeLogger(),
+            loadConfig({}).auth.passwordPolicy,
+          ),
+          manageRoles: new ManageRolesUseCase(
+            db,
+            hasher,
+            clock,
+            new FakeLogger(),
+            loadConfig({}).auth.passwordPolicy,
+          ),
+        },
       },
     );
     await api.listen(0);

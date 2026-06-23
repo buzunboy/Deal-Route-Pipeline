@@ -18,6 +18,8 @@ import {
   AuthenticateUseCase,
   RefreshUseCase,
   LogoutUseCase,
+  ProvisionUserUseCase,
+  ManageRolesUseCase,
   SystemClock,
   type Fetcher,
   type FeedReader,
@@ -119,6 +121,9 @@ export class Container {
   readonly authenticateUser: AuthenticateUseCase;
   readonly refreshSession: RefreshUseCase;
   readonly logoutSession: LogoutUseCase;
+  // Auth/IAM use-cases (Phase 3): the runtime Users & Roles admin surface.
+  readonly provisionUser: ProvisionUserUseCase;
+  readonly manageRoles: ManageRolesUseCase;
 
   readonly extract: ExtractUseCase;
   readonly crawlSource: CrawlSourceUseCase;
@@ -288,6 +293,24 @@ export class Container {
       realm,
     );
     this.logoutSession = new LogoutUseCase(this.db, this.clock, this.logger);
+
+    // Auth/IAM use-cases (Phase 3): the runtime Users & Roles admin surface. Both take
+    // the SAME password policy as the login path + the seed-user CLI, so a too-short
+    // admin-set/reset password is rejected identically everywhere.
+    this.provisionUser = new ProvisionUserUseCase(
+      this.db,
+      this.passwordHasher,
+      this.clock,
+      this.logger,
+      config.auth.passwordPolicy,
+    );
+    this.manageRoles = new ManageRolesUseCase(
+      this.db,
+      this.passwordHasher,
+      this.clock,
+      this.logger,
+      config.auth.passwordPolicy,
+    );
   }
 
   /**

@@ -915,6 +915,14 @@ class InMemoryRoleRepo implements RoleRepository {
       .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
       .map((r) => ({ ...r }));
   }
+  async update(role: Role): Promise<void> {
+    const existing = this.store.get(role.id);
+    if (existing === undefined) return; // no-op for an unknown id (mirrors a 0-row UPDATE)
+    // Defense-in-depth (matches the Postgres CASE): a system role keeps its existing name —
+    // it can never be RENAMED at the boundary; only its description (and is_system) ride.
+    const name = existing.is_system ? existing.name : role.name;
+    this.store.set(role.id, RoleSchema.parse({ ...role, name }));
+  }
   async countUsers(roleId: string): Promise<number> {
     return this.users.countByRole(roleId);
   }

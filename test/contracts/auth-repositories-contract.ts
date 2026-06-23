@@ -170,6 +170,23 @@ export function authRepositoriesContract(
       expect(await db.roles.getById(role.id)).toEqual(role);
       expect(await db.roles.getByName(role.name)).toEqual(role);
       expect(await db.roles.countUsers(role.id)).toBe(0);
+      // update() replaces the mutable fields (name + description) by id.
+      const renamed = { ...role, name: `${role.name}-v2`, description: 'updated' };
+      await db.roles.update(renamed);
+      expect(await db.roles.getById(role.id)).toEqual(renamed);
+      // update() on an unknown id is a silent no-op (a 0-row UPDATE), not an error.
+      await db.roles.update({ ...renamed, id: randomUUID() });
+      expect(await db.roles.getById(role.id)).toEqual(renamed);
+
+      // Defense-in-depth: a SYSTEM role keeps its name — update() can edit its description
+      // but never RENAME it (both adapters enforce this regardless of the use-case guard).
+      const admin = await db.roles.getByName('admin');
+      expect(admin).not.toBeNull();
+      await db.roles.update({ ...admin!, name: 'hijacked', description: 'desc edit' });
+      const adminAfter = await db.roles.getByName('admin');
+      expect(adminAfter?.name).toBe('admin'); // rename refused
+      expect(adminAfter?.description).toBe('desc edit'); // description edit applied
+      expect(await db.roles.getByName('hijacked')).toBeNull();
       // Assign a user to it → countUsers reflects the role-FK.
       const u = makeUser({ role_id: role.id });
       await db.users.insert(u, null);

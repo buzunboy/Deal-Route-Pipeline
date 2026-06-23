@@ -4,6 +4,7 @@ export * from './user.js';
 export * from './refresh-token.js';
 export * from './access-claims.js';
 export * from './rules.js';
+export * from './admin-guards.js';
 export * from './auth-errors.js';
 export * from './dummy-hash.js';
 export * from './seed.js';

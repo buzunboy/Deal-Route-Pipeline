@@ -19,6 +19,8 @@ import {
   type MetricsUseCase,
   type SettingsUseCase,
   type AuthorizationUseCase,
+  type ProvisionUserUseCase,
+  type ManageRolesUseCase,
   ALERTS_DEFAULT_LIMIT,
   ALERTS_MAX_LIMIT,
 } from '../../application/index.js';
@@ -31,7 +33,13 @@ import type {
 import { toAdminEvidence } from './admin-evidence-dto.js';
 import { UUID_PATTERN } from './http-ids.js';
 import { tryMapAuthError } from './auth-error-map.js';
-import { type EvidenceArtifactKind, type Permission, hasPermission } from '../../domain/index.js';
+import {
+  type EvidenceArtifactKind,
+  type Permission,
+  hasPermission,
+  ALL_PERMISSIONS,
+  UserNotFoundError,
+} from '../../domain/index.js';
 import {
   DealNotFoundError,
   NotReviewableError,
@@ -114,6 +122,9 @@ export interface ReviewApiOptions {
     tokenIssuer: TokenIssuer;
     db: Database;
     authorization: AuthorizationUseCase;
+    /** Auth/IAM (Phase 3): the Users & Roles admin use-cases backing `/api/users` + `/api/roles`. */
+    provisionUser: ProvisionUserUseCase;
+    manageRoles: ManageRolesUseCase;
   };
 }
 
@@ -531,22 +542,57 @@ export class ReviewApi {
     }
     if (method === 'PATCH' && path === '/api/profile') {
       // Self-service (any authed user editing their OWN row) — no named permission. The
-      // approver IS the actor: for a JWT it is the token's email, so a user can only ever
-      // edit their own profile (the use-case keys the update on the approver's email).
+      // actor IS the identity: for a JWT it is the token's email, so a user can only ever
+      // edit their own profile / change their own password (both keyed on the actor's email;
+      // a `newPassword` change additionally PROVES the current password — that proof, not a
+      // permission, is the authorization).
       const identity = await this.authenticate(req);
       if (identity === null) return sendError(res, 401, 'unauthorized');
       const body = await readBody(req);
       if (body === TOO_LARGE) return sendError(res, 413, 'request body too large');
       if (body === MALFORMED) return sendError(res, 400, 'malformed JSON body');
       const parsed = UpdateProfileBody.safeParse(body);
-      if (!parsed.success) return sendError(res, 400, 'approver and name are required');
+      if (!parsed.success) {
+        return sendError(res, 400, 'name, or currentPassword + newPassword, is required');
+      }
+      const wantsPasswordChange = parsed.data.newPassword !== undefined;
+      // The self-service password change needs the IdP wired (the use-cases + hasher); a
+      // legacy/open caller (no `auth` bag) has no per-user identity to re-credential.
+      if (wantsPasswordChange && this.auth === undefined) {
+        return sendError(res, 400, 'password change requires per-user auth (no IdP configured)');
+      }
       return this.mapErrors(res, async () => {
-        const member = await this.team.updateProfile(
-          this.approverFor(identity, parsed.data.approver),
-          parsed.data.name,
-        );
-        sendJson(res, 200, { updated: true, name: member.name });
+        const actor = this.approverFor(identity, parsed.data.approver);
+        // Apply the password change FIRST so a wrong current-password (401) aborts the whole
+        // patch BEFORE a name write lands — the verify is the authorization for the request.
+        if (wantsPasswordChange) {
+          await this.auth!.manageRoles.changeOwnPassword({
+            actor,
+            currentPassword: parsed.data.currentPassword!,
+            newPassword: parsed.data.newPassword!,
+          });
+        }
+        const member =
+          parsed.data.name !== undefined
+            ? await this.team.updateProfile(actor, parsed.data.name)
+            : await this.team.getProfile(actor);
+        // `name` stays in the response (the ACR-11 contract); `password_changed` flags the
+        // self-service change so the panel can prompt a re-login (the token is now stale).
+        sendJson(res, 200, {
+          updated: true,
+          name: member?.name ?? null,
+          password_changed: wantsPasswordChange,
+        });
       });
+    }
+
+    // ── Users & Roles admin (Auth/IAM Phase 3) ───────────────────────────────
+    // The runtime IAM surface. Gated `team:manage` (users) / `roles:manage` (roles);
+    // `GET /api/permissions/me` is any-authed. These only exist when the IdP is wired
+    // (the `auth` bag) — without it they fall through to 404 (no use-cases to serve them).
+    if (this.auth !== undefined) {
+      const handled = await this.handleAdminIam(req, res, method, path);
+      if (handled) return;
     }
 
     // Update one writable setting (ACR-10 Settings). A read-only / unknown key is a 409.
@@ -673,7 +719,8 @@ export class ReviewApi {
   private applyCors(res: ServerResponse): void {
     if (this.corsAllowOrigin === undefined) return;
     res.setHeader('access-control-allow-origin', this.corsAllowOrigin);
-    res.setHeader('access-control-allow-methods', 'GET, POST, PATCH, OPTIONS');
+    // DELETE is advertised for `DELETE /api/roles/:name` (Auth/IAM Phase 3).
+    res.setHeader('access-control-allow-methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     res.setHeader('access-control-allow-headers', 'Authorization, Content-Type');
     // The origin is pinned (not `*`), so the response varies by Origin — let caches
     // key on it rather than serving one origin's headers to another.
@@ -788,6 +835,211 @@ export class ReviewApi {
   }
 
   /**
+   * The Users & Roles admin endpoints (Auth/IAM Phase 3). Returns `true` once it has
+   * matched + answered a request, `false` if none matched (so `handle` continues to its
+   * other routes / catch-all 404). Only called when {@link auth} is wired, so
+   * `this.auth.provisionUser`/`manageRoles` are guaranteed present.
+   *
+   * Gating: user endpoints require `team:manage`, role endpoints `roles:manage`, the
+   * permission CATALOGUE `roles:manage`; `GET /api/permissions/me` is any valid token.
+   * `PATCH /api/users/:id` additionally allows the SELF path (a user editing their own
+   * name) without `team:manage` — role/status/password sub-fields stay `team:manage`-gated.
+   * The actor recorded for the audit line is always token-derived (never the body).
+   */
+  private async handleAdminIam(
+    req: IncomingMessage,
+    res: ServerResponse,
+    method: string,
+    path: string,
+  ): Promise<boolean> {
+    const auth = this.auth!;
+
+    // ── Permissions ──
+    if (method === 'GET' && path === '/api/permissions/me') {
+      const identity = await this.authenticate(req);
+      if (identity === null) {
+        sendError(res, 401, 'unauthorized');
+        return true;
+      }
+      // A legacy static-token caller has no per-user identity; report the all-or-nothing
+      // posture honestly (the full catalogue) rather than fabricating a user.
+      const permissions =
+        identity.kind === 'jwt' ? [...identity.perms].sort() : [...ALL_PERMISSIONS];
+      const body =
+        identity.kind === 'jwt'
+          ? { email: identity.email, role: identity.role, permissions }
+          : { email: null, role: 'legacy', permissions };
+      sendJson(res, 200, body);
+      return true;
+    }
+    if (method === 'GET' && path === '/api/permissions') {
+      const identity = await this.requireWrite(req, res, 'roles:manage');
+      if (identity === null) return true;
+      // The seeded catalogue, enumerated from the closed enum so the panel role editor can
+      // render every key without the enum shipping to the client.
+      sendJson(res, 200, { permissions: ALL_PERMISSIONS.map((key) => ({ key })) });
+      return true;
+    }
+
+    // ── Users ──
+    if (method === 'GET' && path === '/api/users') {
+      const identity = await this.requireWrite(req, res, 'team:manage');
+      if (identity === null) return true;
+      sendJson(res, 200, { users: await auth.manageRoles.listUsers() });
+      return true;
+    }
+    if (method === 'POST' && path === '/api/users') {
+      const identity = await this.requireWrite(req, res, 'team:manage');
+      if (identity === null) return true;
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return (sendError(res, 413, 'request body too large'), true);
+      if (body === MALFORMED) return (sendError(res, 400, 'malformed JSON body'), true);
+      const parsed = CreateUserBody.safeParse(body);
+      if (!parsed.success) {
+        return (sendError(res, 400, 'name, email, role and password are required'), true);
+      }
+      await this.mapErrors(res, async () => {
+        const user = await auth.provisionUser.provision({
+          actor: this.approverFor(identity, parsed.data.approver),
+          name: parsed.data.name,
+          email: parsed.data.email,
+          roleName: parsed.data.role,
+          initialPassword: parsed.data.password,
+        });
+        sendJson(res, 201, { id: user.id, email: user.email, role: parsed.data.role });
+      });
+      return true;
+    }
+    const userPatch = path.match(new RegExp(`^/api/users/(${UUID_SEG})$`));
+    if (method === 'PATCH' && userPatch) {
+      // Authenticate first; the SELF path (own name) is allowed without team:manage, but
+      // role/status/password require team:manage. Mirrors PATCH /api/profile's self-intent.
+      const identity = await this.authenticate(req);
+      if (identity === null) return (sendError(res, 401, 'unauthorized'), true);
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return (sendError(res, 413, 'request body too large'), true);
+      if (body === MALFORMED) return (sendError(res, 400, 'malformed JSON body'), true);
+      const parsed = PatchUserBody.safeParse(body);
+      if (!parsed.success) return (sendError(res, 400, 'invalid user patch'), true);
+      const targetId = userPatch[1]!;
+      const wantsAdminFields =
+        parsed.data.role !== undefined ||
+        parsed.data.status !== undefined ||
+        parsed.data.password !== undefined;
+      const isSelf = identity.kind === 'jwt' && identity.userId === targetId;
+      // Any privileged sub-field, OR editing another user at all, needs team:manage.
+      const needsManage = wantsAdminFields || !isSelf;
+      if (needsManage && !this.hasManage(identity, 'team:manage')) {
+        return (sendError(res, 403, 'forbidden'), true);
+      }
+      await this.mapErrors(res, async () => {
+        const actor = this.approverFor(identity, parsed.data.approver);
+        // The admin trio (role/status/password) is applied through ONE use-case that
+        // validates everything up front, so a later invalid sub-field can't half-apply an
+        // earlier one (it also single-bumps token_version + revokes refreshes on disable).
+        const target =
+          parsed.data.role !== undefined ||
+          parsed.data.status !== undefined ||
+          parsed.data.password !== undefined
+            ? await auth.manageRoles.updateUser({
+                actor,
+                userId: targetId,
+                role: parsed.data.role,
+                status: parsed.data.status,
+                password: parsed.data.password,
+              })
+            : await auth.db.users.getById(targetId);
+        if (target === null) throw new UserNotFoundError(targetId);
+        if (parsed.data.name !== undefined) {
+          // The display-name edit reuses the self-or-admin profile path keyed on the TARGET
+          // user's email (so an admin can rename another user too). Applied LAST; the only
+          // way it can fail is a vanished row, which it can't half-apply over the trio.
+          await this.team.updateProfile(target.email, parsed.data.name);
+        }
+        sendJson(res, 200, { updated: true });
+      });
+      return true;
+    }
+
+    // ── Roles ──
+    if (method === 'GET' && path === '/api/roles') {
+      const identity = await this.requireWrite(req, res, 'roles:manage');
+      if (identity === null) return true;
+      sendJson(res, 200, { roles: await auth.manageRoles.listRoles() });
+      return true;
+    }
+    if (method === 'POST' && path === '/api/roles') {
+      const identity = await this.requireWrite(req, res, 'roles:manage');
+      if (identity === null) return true;
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return (sendError(res, 413, 'request body too large'), true);
+      if (body === MALFORMED) return (sendError(res, 400, 'malformed JSON body'), true);
+      const parsed = CreateRoleBody.safeParse(body);
+      if (!parsed.success) return (sendError(res, 400, 'name and permissions are required'), true);
+      await this.mapErrors(res, async () => {
+        const role = await auth.manageRoles.createRole({
+          actor: this.approverFor(identity, parsed.data.approver),
+          name: parsed.data.name,
+          description: parsed.data.description,
+          permissions: parsed.data.permissions,
+        });
+        sendJson(res, 201, { role });
+      });
+      return true;
+    }
+    // `/api/roles/:name` — role names are free-form string keys (like settings/:key), so a
+    // `[^/]+` capture, NOT the UUID matcher.
+    const roleByName = path.match(/^\/api\/roles\/([^/]+)$/);
+    if (method === 'PATCH' && roleByName) {
+      const identity = await this.requireWrite(req, res, 'roles:manage');
+      if (identity === null) return true;
+      const body = await readBody(req);
+      if (body === TOO_LARGE) return (sendError(res, 413, 'request body too large'), true);
+      if (body === MALFORMED) return (sendError(res, 400, 'malformed JSON body'), true);
+      const parsed = PatchRoleBody.safeParse(body);
+      if (!parsed.success) return (sendError(res, 400, 'invalid role patch'), true);
+      await this.mapErrors(res, async () => {
+        const role = await auth.manageRoles.updateRole({
+          actor: this.approverFor(identity, parsed.data.approver),
+          roleName: decodeURIComponent(roleByName[1]!),
+          description: parsed.data.description,
+          permissions: parsed.data.permissions,
+        });
+        sendJson(res, 200, { role });
+      });
+      return true;
+    }
+    if (method === 'DELETE' && roleByName) {
+      const identity = await this.requireWrite(req, res, 'roles:manage');
+      if (identity === null) return true;
+      await this.mapErrors(res, async () => {
+        await auth.manageRoles.deleteRole({
+          actor: this.approverForActor(identity),
+          roleName: decodeURIComponent(roleByName[1]!),
+        });
+        sendJson(res, 200, { deleted: true });
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Does this identity hold a management permission? A `jwt` identity must hold the key;
+   * a `legacy` static-token identity is the all-or-nothing admin token (the dual-accept
+   * window), so it passes. The SELF-only paths call this to gate the privileged sub-fields.
+   */
+  private hasManage(identity: Identity, permission: Permission): boolean {
+    return identity.kind === 'legacy' || hasPermission(identity.perms, permission);
+  }
+
+  /** The token-derived actor for an audited action with no body (DELETE). Legacy ⇒ ''. */
+  private approverForActor(identity: Identity): string {
+    return identity.kind === 'jwt' ? identity.email : '';
+  }
+
+  /**
    * Run a review action, translating typed domain errors into the correct client
    * status (404/409/400) instead of letting them surface as a generic 500 with a
    * leaked internal message. Unexpected errors propagate to the top-level handler.
@@ -856,11 +1108,31 @@ const InviteMemberBody = z.object({
   email: z.string().email(),
   role: z.string().optional(),
 });
-/** Update the signed-in reviewer's own display name (ACR-11 Profile). */
-const UpdateProfileBody = z.object({
-  approver: z.string().min(1).optional(),
-  name: z.string().min(1),
-});
+/**
+ * Update the signed-in reviewer's OWN profile (ACR-11 Profile + Auth/IAM Phase 3 self-service
+ * password). `name` edits the display name (unchanged); `currentPassword`+`newPassword`
+ * together change the caller's own password (the current-password proof IS the authorization —
+ * no `team:manage`). All fields optional, but at least one mutation must be present, and the
+ * password fields are all-or-nothing (a `newPassword` without `currentPassword`, or vice-versa,
+ * is a 400 — never a silent partial). The actor is token-derived; any body `approver` is ignored.
+ */
+const UpdateProfileBody = z
+  .object({
+    approver: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    currentPassword: z.string().min(1).optional(),
+    newPassword: z.string().min(1).optional(),
+  })
+  .refine(
+    (b) => b.name !== undefined || b.currentPassword !== undefined || b.newPassword !== undefined,
+    {
+      message: 'name or a password change is required',
+    },
+  )
+  // Password change is all-or-nothing: both fields, or neither.
+  .refine((b) => (b.currentPassword === undefined) === (b.newPassword === undefined), {
+    message: 'currentPassword and newPassword must be supplied together',
+  });
 /**
  * Update one writable setting (ACR-10 Settings). `value` is loosely typed at the HTTP
  * boundary (a toggle sends a boolean, a value chip a string/number); the pure
@@ -879,6 +1151,55 @@ const CreateSourceBody = z.object({
   country: z.string().min(1).optional(),
   cadence_days: z.number().int().positive().optional(),
 });
+
+// ── Auth/IAM Phase 3 request bodies ──
+// `approver` is optional everywhere (the actor is token-derived; only a legacy static-token
+// caller supplies it — the same dual-accept convention as the rest of the API). The
+// `password` floor is enforced by the pure `validatePasswordPolicy` in the use-case, so the
+// HTTP boundary only checks presence (min(1)) — never echoes the value.
+/** Provision a login-capable user (POST /api/users) — gated `team:manage`. */
+const CreateUserBody = z.object({
+  approver: z.string().min(1).optional(),
+  name: z.string().min(1),
+  email: z.string().email(),
+  role: z.string().min(1),
+  password: z.string().min(1),
+});
+/** Patch a user (PATCH /api/users/:id): name self-or-admin; role/status/password admin-only. */
+const PatchUserBody = z
+  .object({
+    approver: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
+    role: z.string().min(1).optional(),
+    status: z.enum(['active', 'disabled']).optional(),
+    password: z.string().min(1).optional(),
+  })
+  // At least one mutable field must be present (an empty patch is a 400, not a silent no-op).
+  .refine(
+    (b) =>
+      b.name !== undefined ||
+      b.role !== undefined ||
+      b.status !== undefined ||
+      b.password !== undefined,
+    { message: 'at least one of name/role/status/password is required' },
+  );
+/** Create a custom role (POST /api/roles) — gated `roles:manage`. */
+const CreateRoleBody = z.object({
+  approver: z.string().min(1).optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  permissions: z.array(z.string()),
+});
+/** Patch a role (PATCH /api/roles/:name): description and/or the permission set. */
+const PatchRoleBody = z
+  .object({
+    approver: z.string().min(1).optional(),
+    description: z.string().optional(),
+    permissions: z.array(z.string()).optional(),
+  })
+  .refine((b) => b.description !== undefined || b.permissions !== undefined, {
+    message: 'at least one of description/permissions is required',
+  });
 
 /**
  * PATCH candidate edit. `patch` is an opaque object — the deeper allowlist +

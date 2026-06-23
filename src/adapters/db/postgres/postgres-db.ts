@@ -1446,6 +1446,22 @@ class PgRoleRepo extends PgRepo implements RoleRepository {
     );
     return rows.map(rowToRole);
   }
+  async update(role: Role): Promise<void> {
+    const r = RoleSchema.parse(role); // boundary-validate before write
+    // Update the role's `description` (and `name` for a NON-system role). Defense-in-depth:
+    // the `name` is only set when the row is non-system, so a system role can never be
+    // RENAMED at the boundary (a CASE keeps its existing name) even if a future caller skips
+    // the use-case guard; the `description` edit the use-case relies on still applies.
+    await this.run('roles.update', () =>
+      this.db
+        .update(schema.roles)
+        .set({
+          name: sql`CASE WHEN ${schema.roles.isSystem} THEN ${schema.roles.name} ELSE ${r.name} END`,
+          description: r.description,
+        })
+        .where(eq(schema.roles.id, r.id)),
+    );
+  }
   async countUsers(roleId: string): Promise<number> {
     const rows = await this.run('roles.countUsers', () =>
       this.db

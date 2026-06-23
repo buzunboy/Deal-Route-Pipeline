@@ -99,6 +99,11 @@ export class TeamUseCase {
     return updated;
   }
 
+  /** The caller's own member row by email, or null (read-only — for echoing the profile). */
+  async getProfile(approverEmail: string): Promise<TeamMember | null> {
+    return this.db.team.getByEmail(approverEmail.trim().toLowerCase());
+  }
+
   private assertApprover(approver: string, action: string): void {
     if (approver.trim() === '') throw new MissingApproverError(action);
   }

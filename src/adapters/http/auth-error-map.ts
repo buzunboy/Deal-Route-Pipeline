@@ -9,6 +9,8 @@ import {
   RoleNotFoundError,
   RoleInUseError,
   UserAlreadyExistsError,
+  UserNotFoundError,
+  LastAdminError,
 } from '../../domain/index.js';
 import { sendError } from './http-helpers.js';
 
@@ -59,12 +61,22 @@ export function tryMapAuthError(res: ServerResponse, err: unknown): boolean {
     sendError(res, 409, 'a user already exists with that email');
     return true;
   }
+  if (err instanceof LastAdminError) {
+    // 409: refusing to remove the last admin — surface the clear, safe message so the
+    // panel can tell the operator WHY the disable/demote was blocked.
+    sendError(res, 409, err.message);
+    return true;
+  }
   if (err instanceof RoleInUseError) {
     sendError(res, 409, err.message);
     return true;
   }
   if (err instanceof RoleNotFoundError) {
     sendError(res, 404, 'role not found');
+    return true;
+  }
+  if (err instanceof UserNotFoundError) {
+    sendError(res, 404, 'user not found');
     return true;
   }
   return false;

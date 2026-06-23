@@ -131,3 +131,29 @@ export class UserAlreadyExistsError extends DomainError {
     super(`A user already exists with email: ${email}`, { email });
   }
 }
+
+/** A referenced user does not exist (admin user-management). Maps to HTTP 404. */
+export class UserNotFoundError extends DomainError {
+  readonly code = 'USER_NOT_FOUND';
+
+  constructor(readonly userId: string) {
+    super(`User not found: ${userId}`, { userId });
+  }
+}
+
+/**
+ * The LAST-ADMIN LOCKOUT GUARD (Auth/IAM, Phase 3): refusing to disable or demote the LAST
+ * active user who can still manage users/roles. Maps to HTTP 409 — the alternative is an
+ * unrecoverable lockout where nobody can ever administer the org again. Carries the
+ * critical `Permission` that would lose its last holder.
+ */
+export class LastAdminError extends DomainError {
+  readonly code = 'LAST_ADMIN';
+
+  constructor(readonly permission: Permission) {
+    super(
+      `Refused: this is the last active user who can "${permission}"; disabling or demoting them would lock everyone out of administration.`,
+      { permission },
+    );
+  }
+}
