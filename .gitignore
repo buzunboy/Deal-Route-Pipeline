@@ -9,6 +9,11 @@ dist/
 .env
 .env.*
 !.env.example
+# Private keys (e.g. a locally-generated ES256 AUTH_JWT_PRIVATE_KEY for dev/test) —
+# never commit key material; the real keys live in the secret store / env only.
+*.pem
+*.key
+*.p8
 
 # Local evidence store (dev) — anchored to repo root so they never match the
 # source adapter at src/adapters/evidence-store/ (an unanchored `evidence-store/`
