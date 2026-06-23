@@ -82,6 +82,18 @@ landed with this step is **Prereq A**: monitor now tracks each source's resolved
 (post-redirect) URL so a redirecting source's published deals **do** auto-expire — see
 the source's `resolved_url` and `docs/DealRoute_PostP3_Handoff.md` §4.
 
+## Resource sizing (the lanes run headless Chromium — don't undersize)
+
+The crawl/monitor/ingest lanes drive Playwright/headless Chromium, which needs real
+RAM — **~2 GB**. Undersize it and the crawl OOM-stalls (a 256 MB box hangs at
+"Crawling N source(s)..."). The K8s CronJobs already set this (`crawl/monitor/ingest`
+`limits.memory: 1Gi`, `discover: 2Gi` — bump crawl to 2Gi if you run `FETCHER=browser`).
+
+> ⚠️ **On Fly, `fly machine run` does NOT read `fly.toml`'s `[[vm]]`** — a one-off
+> Machine defaults to **256 MB**. Always size lane Machines explicitly:
+> `--vm-size shared-cpu-2x --vm-memory 2048`. See `fly/README.md` §7. (And the lane
+> command needs the literal `--` separator: `... -- crawl --due`.)
+
 ## Quick reference (any scheduler)
 
 ```sh
@@ -93,4 +105,9 @@ docker run --rm -e DATABASE_URL -e ANTHROPIC_API_KEY \
 #   0 */6 * * *  docker run --rm --env-file /etc/dealroute.env ghcr.io/<owner>/<repo>:edge crawl --due
 #  30 */3 * * *  docker run --rm --env-file /etc/dealroute.env ghcr.io/<owner>/<repo>:edge monitor --due
 #  15 *   * * *  docker run --rm --env-file /etc/dealroute.env ghcr.io/<owner>/<repo>:edge ingest --community-due
+
+# On Fly, a one-off lane Machine (size it — fly.toml [[vm]] is NOT applied here):
+#   fly machine run ghcr.io/<owner>/<repo>:edge -a dealroute-api --region fra --rm \
+#     --vm-size shared-cpu-2x --vm-memory 2048 \
+#     -e LLM_PROVIDER=anthropic -e EVIDENCE_STORE=s3 -- crawl --due
 ```

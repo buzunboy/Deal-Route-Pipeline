@@ -319,11 +319,24 @@ that exit. They reuse the SAME image + the DB/S3 secrets, but set `LLM_PROVIDER=
 fly secrets set -a dealroute-api ANTHROPIC_API_KEY="sk-ant-..."   # lanes need it; serve doesn't
 fly machine run ghcr.io/buzunboy/deal-route-pipeline:edge \
   -a dealroute-api --region fra --rm \
+  --vm-size shared-cpu-2x --vm-memory 2048 \
   -e LLM_PROVIDER=anthropic -e EVIDENCE_STORE=s3 \
-  monitor --due
+  -- monitor --due
 ```
 Wire those to a scheduler (GitHub Actions `scheduled.yml`, a Fly scheduled Machine, or
 host cron). Keep Tier-4 (`discover`) dark unless you set `AGENT=search` + a search backend.
+
+> ⚠️ **Two footguns these examples bake in (both bit a real run):**
+> 1. **VM sizing — `fly machine run` does NOT read `fly.toml`'s `[[vm]]`.** A one-off
+>    Machine gets Fly's **256 MB default**, which is far too small for the lanes' headless
+>    Chromium (Playwright) — the crawl OOM-stalls. Always pass
+>    **`--vm-size shared-cpu-2x --vm-memory 2048`** (≈2 GB; matches the discover CronJob's
+>    `limits.memory: 2Gi` in `k8s/cronjobs.yaml`). The always-on `serve` machine is the
+>    exception — it's light and stays at the `fly.toml` 512 MB.
+> 2. **The `-- ` separator is MANDATORY** before the lane command (`-- monitor --due`,
+>    not `monitor --due`). Without it `fly` eats `--due` as its own flag and dies with
+>    `unknown flag: --due`. Don't bury the `--` inside a shell variable either — word-splitting
+>    a var that *ends* in `--` can drop it; put it literally on the command line.
 
 ---
 
