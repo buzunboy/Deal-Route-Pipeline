@@ -1,6 +1,6 @@
 # Admin-Panel (HQ) Handoff — Environment Separation
 
-**Status:** PLAN (awaiting approval) · **Date:** 2026-06-24
+**Status:** ✅ DELIVERED (Local/Dev/Prod) — Staging deferred · **Date:** 2026-06-24
 **Companion doc:** `docs/ENVIRONMENTS_PLAN_PIPELINE.md` (the pipeline-API + DB side).
 **Repo:** this work lands in the **Admin-Panel** repo (separate from the pipeline).
 
@@ -45,16 +45,13 @@ pins `fra1`, `docs/ENVIRONMENTS.md` runbook. Gate: lint + typecheck + 621 tests 
 
 Live verification (this side):
 - ✅ **Prod `hq.deal-route.com`** — serves a 200 login page (`/login?from=%2F`); fully usable.
+- ✅ **Dev `dev-hq.deal-route.com` — END-TO-END VERIFIED.** Vercel Deployment Protection
+  disabled; root now `307 → /login` (the PANEL, not Vercel SSO); the server proxy
+  `dev-hq /api/published` returns the **pipeline's** JSON `{"error":"unauthorized"}` (401) —
+  proving the full chain dev-hq (Vercel `fra1`) → server proxy → `dev-api.deal-route.com`
+  → dev DB works with CORS satisfied. Dev admin seeded; owner confirmed login works.
 - ✅ **Pipeline domains** — `api`/`dev-api.deal-route.com` `/v1/health` → 200.
-- ✅ **`fra1` region** confirmed (`x-vercel-id: fra1::…`); dev-hq DNS → Vercel.
-- ⚠️ **Dev `dev-hq.deal-route.com` is behind Vercel Deployment Protection (SSO)** — root +
-  the `/api/*` proxy return Vercel's 401 "Authentication Required" (cookie `_vercel_sso_nonce`),
-  NOT the panel. So dev-hq is deployed + correctly wired but **not reachable for testing
-  until Deployment Protection is disabled for the Preview/dev-hq domain** (Vercel project
-  setting → Deployment Protection). Not a code bug. **Action: owner toggles it in Vercel.**
-- ⏳ **Dev admin not seeded yet** — needed to actually log into dev-hq once it's reachable;
-  run `seed-user` with `LLM_PROVIDER=stub` (see the KNOWN_ISSUES "seed-user requires LLM
-  config" note + `deploy/fly/DEV_ENVIRONMENT_SETUP.md` Step 3).
+- ✅ **`fra1` region** confirmed (`x-vercel-id: fra1::…`).
 
 ---
 
