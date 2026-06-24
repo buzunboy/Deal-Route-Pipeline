@@ -208,10 +208,14 @@ No roadmap step remains. The concrete forward work, highest-value first:
    switch on public screenshot URLs when the landing page wants them — until then it stays UNSET (the
    safe default; the panel reads evidence via the authed path). _See the resolved
    `Public CDN must expose ONLY screenshot.png` finding in `docs/KNOWN_ISSUES.md`._
-3. **Other post-deploy hardening** [medium] — the API is live + working, but parked: make the GHCR
-   image private, **pin** `:edge` → `:sha-…`, set **`ADMIN_CORS_ORIGIN`** when the panel deploys.
-   _(Credential rotation — the chat-exposed AWS key + GitHub PAT — is tracked in `docs/KNOWN_ISSUES.md`
-   and is the OWNER's end-of-line task; not an open action item here.)_
+3. **Other post-deploy hardening** [medium] — **secrets + CORS now DONE (2026-06-24):** the chat-exposed
+   AWS key + GitHub PAT are rotated/deleted, `ADMIN_CORS_ORIGIN` is set, and the stale `REVIEW_API_TOKEN`
+   (retired by Auth/IAM Phase 5) + unused `FLY_REGISTRY_AUTH_TOKEN` Fly secrets are unset. **Still parked:**
+   make the GHCR image private, **pin** `:edge` → `:sha-…`. _(AWS key-rotation runbook:
+   `deploy/aws/ROTATE_CREDENTIALS.md`.)_ **Two NEW hardening findings** (`docs/KNOWN_ISSUES.md`,
+   2026-06-24): **move Postgres to a managed service** (Fly Postgres is self-managed and now holds the
+   auth system-of-record — identity, password hashes, refresh tokens — the highest-value remaining item),
+   and **stop operating AWS as account root** (use a dedicated admin IAM principal + MFA).
 4. **The rest of the deferred-findings register** — e.g. the **manual-capture upload channel**
    [medium], no `/v1/` rate-limiting [medium, CDN-fronted at deploy], the per-request active-source
    scan, the raw-IDN suffix normalisation, the pg-boss pool bound (if/when wired). Pick by the listed
@@ -224,6 +228,14 @@ No roadmap step remains. The concrete forward work, highest-value first:
    seeds/vocab/deny-list/Tier-4 queries), NO logic change.
 6. **Operate / curate** — real seed-list curation + live tests (per-source fetcher selection, the
    dead mydealz RSS feed, JS-heavy provider homepages yielding 0 deals).
+7. **Auth/IAM — Phases 1–5 DONE + merged + live (2026-06-24).** The pipeline is the IdP: per-user
+   ES256 JWT, permission-based RBAC, immediate revocation, Users & Roles admin API, self-service
+   password change + admin reset; the legacy static token + the panel's env allow-list are RETIRED
+   (per-user JWT only — a stale token now 401s; `approver` is always the verified token email). Plan:
+   `~/.claude/plans/replicated-sprouting-quail.md`; cold-start handoff: `docs/handoffs/AUTH_IAM_CROSS_PROJECT.md`.
+   **Deferred to "Phase 6"** (all gated on the pipeline gaining an **email sender**, see `docs/KNOWN_ISSUES.md`):
+   Google SSO enablement, email-invite onboarding, and a self-service "forgot password" flow. Until then
+   the recovery model is admin-resets-the-password.
 
 **Open owner decisions that gate the above (not defaultable):**
 - **CDN exposure scope** — ✅ DECIDED + IMPLEMENTED 2026-06-23: kept the SAME S3 prefix as the bundle

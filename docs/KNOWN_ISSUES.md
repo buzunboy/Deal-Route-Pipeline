@@ -44,14 +44,15 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Severity**: medium (operational/security hygiene; the API is live + working at `https://dealroute-api.fly.dev`)
 - **Area**: deploy / ops / security
 - **Location**: Fly app `dealroute-api` (region `fra`); `deploy/fly/fly.toml`; `.env` (local); GHCR package `ghcr.io/buzunboy/deal-route-pipeline`.
-- **What**: the always-on `serve` API was deployed to Fly.io on 2026-06-22 (Postgres `dealroute-db` attached → `DATABASE_URL`; `REVIEW_API_TOKEN` + `S3_*` set as Fly secrets; image pulled from GHCR). Health/CORS/auth all verified. Open items the owner deliberately deferred to the end of the implementation phase:
-  1. **Rotate exposed secrets.** During setup these were pasted into a chat and must be considered compromised: the **AWS access key** `AKIAYNW2LJGBMC65AXEH` (IAM user `dealroute-pipeline`) and a **GitHub PAT** `ghp_…` (classic, `read:packages`). Rotate the AWS key (new key → update the Fly secret + local `.env` → delete old) and delete the PAT (github.com/settings/tokens). The unused `FLY_REGISTRY_AUTH_TOKEN` Fly secret can also be unset (the image is public, so it isn't needed).
+- **Status (2026-06-24): cleanups DONE, hardening remains.** The exposed AWS key + GitHub PAT are rotated/deleted, `ADMIN_CORS_ORIGIN` is set (panel deployed), and the stale `REVIEW_API_TOKEN` / unused `FLY_REGISTRY_AUTH_TOKEN` Fly secrets are unset. **Still open from this entry:** the GHCR-image-private flip (item 2) and the image-tag pin (item 3). The DB-residency / managed-Postgres and AWS-root concerns are now their own entries below.
+- **What**: the always-on `serve` API was deployed to Fly.io on 2026-06-22 (Postgres `dealroute-db` attached → `DATABASE_URL`; `S3_*` set as Fly secrets; image pulled from GHCR). Health/CORS/auth all verified. Open items the owner deliberately deferred to the end of the implementation phase:
+  1. **Rotate exposed secrets — ✅ DONE 2026-06-24.** Both compromised secrets are handled: the **AWS access key** `AKIA…AXEH` was rotated to `AKIA…VAMI` (old key deactivated, then deleted) and the exposed **GitHub PAT** was deleted. The stale `REVIEW_API_TOKEN` (retired by Auth/IAM Phase 5) and the unused `FLY_REGISTRY_AUTH_TOKEN` Fly secrets were unset. Repeatable AWS procedure for next time: **`deploy/aws/ROTATE_CREDENTIALS.md`**.
   2. **GHCR image is currently PUBLIC.** Fine for now (image holds only compiled code, no secrets) and lets `fly deploy` pull with no auth. To make it private later: GitHub → Packages → `deal-route-pipeline` → Package settings → Change visibility → Private, THEN wire a pull credential for Fly — either keep a classic PAT with `read:packages` as the `FLY_REGISTRY_AUTH_TOKEN` secret, or use a GitHub org/Actions token; fine-grained PATs do NOT support GHCR. Re-test a deploy after flipping.
   3. **`fly.toml` pins the image to `:edge` (rolling).** Every master push moves `:edge`, so a redeploy isn't reproducible. For prod, pin to an immutable `:sha-xxxxxxx` tag (or a released `vX.Y.Z`) in `deploy/fly/fly.toml` `[build] image`.
-  4. **`ADMIN_CORS_ORIGIN` is unset.** The admin panel isn't deployed yet, so no browser origin is allowed on `/api/*`. When the panel has a URL: `fly secrets set -a dealroute-api ADMIN_CORS_ORIGIN="https://<panel-origin>"` (exact origin, never `*`; the app auto-restarts).
-- **Why deferred**: the API runs correctly without them; the owner chose to finish the implementation phase first and harden (rotate creds, lock the image, pin the tag, wire CORS) at the end.
-- **Fix-when**: rotate creds + pin the tag before going past dev/staging; set `ADMIN_CORS_ORIGIN` when the panel deploys; make the image private if/when the repo's exposure posture requires it.
-- **Logged**: 2026-06-22
+  4. **`ADMIN_CORS_ORIGIN` — ✅ DONE 2026-06-24** (set to the deployed panel origin once the panel went live).
+- **Why deferred**: the API runs correctly without them; the owner chose to finish the implementation phase first and harden at the end.
+- **Fix-when**: pin the image tag before going past dev/staging; make the image private if/when the repo's exposure posture requires it. (Secrets + CORS are now done.)
+- **Logged**: 2026-06-22 · **Updated**: 2026-06-24
 
 ### Manual-capture screenshot/artifact UPLOAD channel is not built (capture is by-reference only)
 - **Severity**: medium (a capability gap, not a defect; the trust invariant still holds)
@@ -857,3 +858,30 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   a crawl-source regression test (cross-domain redirect → dedupes to one record; proven to fail
   without the fix). NB: monitor's source-scoped lookups have a RELATED but distinct gap, still
   open above ("Monitor source-scoped lookups key off `source.url`…").
+
+### Production Postgres is self-managed (Fly) and now holds IDENTITY data — move to managed
+- **Severity**: medium → **high once the user base grows** (it's the auth system-of-record now)
+- **Area**: deploy / ops / security
+- **Location**: Fly app `dealroute-db` (the `DATABASE_URL` attached to `dealroute-api`); the `users` / `roles` / `role_permissions` / `refresh_tokens` / `auth_meta` tables (Auth/IAM migrations 0019–0023).
+- **What**: the production DB is **Fly Postgres**, which is **NOT a fully-managed service** — you own backups, version upgrades, and failover yourself (Fly's own docs say so: "This is not managed Postgres"). Before Auth/IAM this DB held only deal records (recoverable by re-crawling); **after Auth/IAM Phase 1–5 it is the system-of-record for user identity, Argon2id password hashes, and refresh tokens.** Losing/corrupting it is now a security + availability incident, not an inconvenience.
+- **Why deferred**: the API runs correctly on Fly Postgres today; the owner will do this later. It's the single highest-value remaining hardening item now that the DB holds credentials.
+- **Fix-when**: before scaling past the founding team / before any real user growth. Recommended: move **only Postgres** to a fully-managed provider — **AWS RDS** (`eu-central-1`, co-located with the S3 evidence bucket, IAM-role access) is the natural fit; **Neon**/**Supabase** are simpler managed Postgres options. The `deploy/fly/README.md` already documents "Option B — external managed Postgres" as a connection-string swap (`DATABASE_URL`), so compute stays on Fly. A full compute move to AWS (ECS Fargate + EventBridge) is a *separate, later* decision, only worth it on an explicit trigger (org-wide AWS consolidation, VPC-private networking, or compliance) — not required just to get managed Postgres.
+- **Logged**: 2026-06-24
+
+### AWS is operated as the account ROOT user — use a dedicated admin IAM principal
+- **Severity**: medium (security hygiene)
+- **Area**: security / ops
+- **Location**: the local `default` AWS profile (account `579204761986`) used for the `aws iam` rotation steps; `deploy/aws/ROTATE_CREDENTIALS.md`.
+- **What**: the admin AWS identity in use is the **account root** (`arn:aws:iam::579204761986:root`). Root has unrestricted power and (per AWS guidance) should be reserved for the handful of tasks that *require* it — day-to-day admin (creating/rotating the `dealroute-pipeline` access key, etc.) should run as a **dedicated admin IAM user or role with MFA**, not root. The scoped `dealroute-pipeline` runtime key is already least-privilege (PutObject/GetObject only) — this finding is only about the *admin* identity used for management.
+- **Why deferred**: rotation/management works as root; it's a hardening improvement, not a defect.
+- **Fix-when**: create an admin IAM user/role (+ MFA), use it for all `aws iam`/console admin, and lock the root user away (MFA + no access keys). Update `deploy/aws/ROTATE_CREDENTIALS.md`'s prerequisites to name that principal.
+- **Logged**: 2026-06-24
+
+### Auth/IAM Phase 6 (deferred) — Google SSO, email-invite onboarding, self-service password reset
+- **Severity**: low (deferred feature scope, not a defect; the system is complete + secure without it)
+- **Area**: auth / api / panel
+- **Location**: pipeline `src/domain/auth/user.ts` (`auth_provider`/`google_sub` columns already present, OIDC-ready), the panel login screen (Google button shipped hidden/disabled), `ProvisionUserUseCase` (admin-set initial password only).
+- **What**: Auth/IAM Phases 1–5 are DONE (per-user JWT, RBAC, immediate revoke, self-service password *change*, admin password *reset*). Three pieces were deliberately deferred to "Phase 6", all gated on the pipeline gaining an **email sender** (none exists yet): (1) **Google SSO** enablement — the `google_sub` account-linking path + un-hiding the panel's "Continue with Google" (the plumbing is OIDC-ready, just disabled); (2) **email-invite onboarding** — a created user gets a one-time setup link instead of an admin-set password; (3) **self-service "forgot password"** — an unauthenticated reset-by-email flow. Until then the recovery model is **admin-resets-the-password** (works; the login screen shows "contact an admin to reset", not a working reset form).
+- **Why deferred**: (1)+(3) need an email/SMTP sender the pipeline doesn't have; (2) likewise. For a ~5-person team the admin-reset model is sufficient. Owner decision recorded in the Auth/IAM plan + `docs/handoffs/AUTH_IAM_CROSS_PROJECT.md` (P6).
+- **Fix-when**: when the team grows beyond admin-managed onboarding, OR a user needs Google SSO, OR self-service reset becomes worth the account-takeover-surface trade-off. Start by adding an email-sender port + adapter (the OCP seam), then build invite-link → forgot-password → SSO on top. See `docs/handoffs/AUTH_IAM_CROSS_PROJECT.md` and the plan `~/.claude/plans/replicated-sprouting-quail.md`.
+- **Logged**: 2026-06-24
