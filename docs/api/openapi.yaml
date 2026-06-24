@@ -1378,8 +1378,8 @@ paths:
       summary: The permission catalogue (Phase 3)
       operationId: listPermissions
       description: |
-        Every permission key (so the panel role editor can render the catalogue without the
-        enum shipping to the client). Gated `roles:manage`.
+        Every permission key + its human label (so the panel role editor can render the
+        catalogue without the enum shipping to the client). Gated `roles:manage`.
       security:
         - bearerAuth: []
       responses:
@@ -1395,9 +1395,12 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [key]
+                      required: [key, label]
                       properties:
                         key: { $ref: '#/components/schemas/Permission' }
+                        label:
+                          type: string
+                          description: Human-readable label for the role-editor matrix.
                       additionalProperties: false
                 additionalProperties: false
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -2314,6 +2317,7 @@ components:
         - field-proposals:promote
         - manual-capture:write
         - evidence:read
+        - system:foundations
     AdminUserView:
       type: object
       description: A login-capable user for the admin Users screen (Auth/IAM Phase 3). No hash.

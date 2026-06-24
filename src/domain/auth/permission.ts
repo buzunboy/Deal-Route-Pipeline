@@ -27,6 +27,11 @@ export const Permission = z.enum([
   'field-proposals:promote', // POST /api/field-proposals/:key/promote
   'manual-capture:write', // POST /api/manual-capture-tasks(/:id/complete)
   'evidence:read', // GET /api/evidence/:id/:artifact (the one gated GET today)
+  // PANEL-ENFORCED ONLY — no pipeline /api route guards this key. It exists so the
+  // admin panel can gate its read-only Foundations / style-guide screen and so the
+  // key is grantable in the Roles editor; the pipeline never checks it on a request.
+  // admin auto-gets it via ALL_PERMISSIONS; reviewer deliberately does not.
+  'system:foundations', // (panel) GET /foundations — the living style guide
 ]);
 export type Permission = z.infer<typeof Permission>;
 
@@ -36,3 +41,31 @@ export type Permission = z.infer<typeof Permission>;
  * universe of keys at runtime.
  */
 export const ALL_PERMISSIONS: readonly Permission[] = Object.freeze([...Permission.options]);
+
+/**
+ * Canonical human label per permission — the co-located source of truth for the
+ * catalogue the panel role editor renders. `satisfies Record<Permission, string>`
+ * makes this EXHAUSTIVE at compile time: adding a `Permission` enum member without a
+ * label here (or a label for a removed key) is a TYPE error. So a new permission is
+ * a two-line edit in THIS file — the enum member + its label — both compiler-forced.
+ * `GET /api/permissions` derives `{key,label}` from this; the SQL seed mirrors it.
+ */
+export const PERMISSION_LABELS = {
+  'candidate:read': 'View the review queue',
+  'candidate:approve': 'Approve candidates',
+  'candidate:reject': 'Reject candidates',
+  'candidate:edit': 'Edit candidate fields',
+  'sources:read': 'View sources',
+  'sources:write': 'Add sources',
+  'sources:review': 'Approve / reject proposed sources',
+  'settings:read': 'View settings',
+  'settings:write': 'Change settings',
+  'team:read': 'View users / team',
+  'team:manage': 'Manage users (create / edit / disable)',
+  'roles:manage': 'Manage roles & permissions',
+  'alerts:manage': 'Acknowledge / resolve alerts',
+  'field-proposals:promote': 'Promote field proposals into the vocabulary',
+  'manual-capture:write': 'Complete / create manual-capture tasks',
+  'evidence:read': 'Fetch evidence artifacts',
+  'system:foundations': 'Access the panel Foundations / style-guide screen',
+} as const satisfies Record<Permission, string>;

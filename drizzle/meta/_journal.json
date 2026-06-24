@@ -169,6 +169,13 @@
       "when": 1782221693908,
       "tag": "0023_refresh_tokens_and_auth_meta",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1782221694500,
+      "tag": "0024_foundations_permission",
+      "breakpoints": true
     }
   ]
 }

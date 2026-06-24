@@ -37,6 +37,7 @@ import {
   type Permission,
   hasPermission,
   ALL_PERMISSIONS,
+  PERMISSION_LABELS,
   UserNotFoundError,
 } from '../../domain/index.js';
 import {
@@ -840,9 +841,12 @@ export class ReviewApi {
     if (method === 'GET' && path === '/api/permissions') {
       const identity = await this.requireWrite(req, res, 'roles:manage');
       if (identity === null) return true;
-      // The seeded catalogue, enumerated from the closed enum so the panel role editor can
-      // render every key without the enum shipping to the client.
-      sendJson(res, 200, { permissions: ALL_PERMISSIONS.map((key) => ({ key })) });
+      // The seeded catalogue, enumerated from the closed enum (key+label co-located in
+      // permission.ts) so the panel role editor can render every key + its label without
+      // the enum shipping to the client.
+      sendJson(res, 200, {
+        permissions: ALL_PERMISSIONS.map((key) => ({ key, label: PERMISSION_LABELS[key] })),
+      });
       return true;
     }
 

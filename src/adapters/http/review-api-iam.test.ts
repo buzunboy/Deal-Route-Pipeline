@@ -412,6 +412,24 @@ describe('ReviewApi — Users & Roles admin (Phase 3)', () => {
       expect(res.status).toBe(400);
     });
 
+    it('a role granting ONLY system:foundations is accepted (the Designer use-case)', async () => {
+      const token = await adminToken();
+      const res = await fetch(`${base}/api/roles`, {
+        method: 'POST',
+        headers: bearer(token),
+        body: JSON.stringify({
+          name: 'designer',
+          description: 'Style-guide access only',
+          permissions: ['system:foundations'],
+        }),
+      });
+      expect(res.status).toBe(201);
+      const perms = await db.rolePermissions.permissionsForRole(
+        (await db.roles.getByName('designer'))!.id,
+      );
+      expect([...perms]).toEqual(['system:foundations']);
+    });
+
     it('deleting a system role → 409', async () => {
       const token = await adminToken();
       const res = await fetch(`${base}/api/roles/admin`, {
@@ -453,8 +471,12 @@ describe('ReviewApi — Users & Roles admin (Phase 3)', () => {
       const adminTok = await adminToken();
       const cat = await fetch(`${base}/api/permissions`, { headers: bearer(adminTok) });
       expect(cat.status).toBe(200);
-      const body = (await cat.json()) as { permissions: { key: string }[] };
+      const body = (await cat.json()) as { permissions: { key: string; label: string }[] };
       expect(body.permissions.some((p) => p.key === 'roles:manage')).toBe(true);
+      // The panel-enforced system:foundations key is catalogued (so the Roles editor can
+      // grant it) and carries its co-located label.
+      const foundations = body.permissions.find((p) => p.key === 'system:foundations');
+      expect(foundations?.label).toBe('Access the panel Foundations / style-guide screen');
 
       const revTok = await reviewerToken();
       expect((await fetch(`${base}/api/permissions`, { headers: bearer(revTok) })).status).toBe(
