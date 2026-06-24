@@ -885,3 +885,12 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Why deferred**: (1)+(3) need an email/SMTP sender the pipeline doesn't have; (2) likewise. For a ~5-person team the admin-reset model is sufficient. Owner decision recorded in the Auth/IAM plan + `docs/handoffs/AUTH_IAM_CROSS_PROJECT.md` (P6).
 - **Fix-when**: when the team grows beyond admin-managed onboarding, OR a user needs Google SSO, OR self-service reset becomes worth the account-takeover-surface trade-off. Start by adding an email-sender port + adapter (the OCP seam), then build invite-link → forgot-password → SSO on top. See `docs/handoffs/AUTH_IAM_CROSS_PROJECT.md` and the plan `~/.claude/plans/replicated-sprouting-quail.md`.
 - **Logged**: 2026-06-24
+
+### Dev DB shares the prod Postgres cluster (no dev/prod DB-server isolation)
+- **Severity**: medium
+- **Area**: db / infra
+- **Location**: Fly `dealroute-db` cluster (`shared-cpu-1x:256MB`) — the `dealroute_dev` database lives alongside the prod `dealroute_api` database on the same machine. See `deploy/fly/DEV_ENVIRONMENT_SETUP.md`.
+- **What**: the Dev environment's database is a separate database (`dealroute_dev`, scoped non-superuser user) but on the **same 256MB Postgres server** as prod. A heavy dev query, a runaway migration test, or connection-pool exhaustion in dev can degrade the prod DB because it shares the machine. Chosen deliberately (2026-06-24) to avoid a second ~$3.50/mo cluster for a new, lightly-used project.
+- **Why deferred**: cost/simplicity for a low-traffic stage; data is fully separate (different DB + scoped user, so dev creds can't open the prod DB); the only shared-fate risk is server resources, low while traffic is light.
+- **Fix-when**: dev traffic/load grows, a dev incident affects prod, or you provision a managed Postgres anyway — then `fly postgres create --name dealroute-db-dev` and change ONLY the dev app's `DATABASE_URL` (no app code change). Related to the standing "move Postgres to managed" infra item.
+- **Logged**: 2026-06-24

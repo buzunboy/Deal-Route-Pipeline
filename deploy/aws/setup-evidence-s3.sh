@@ -26,7 +26,10 @@ POLICY_NAME="${POLICY_NAME:-dealroute-evidence-rw}"
 CREATE_ACCESS_KEY="${CREATE_ACCESS_KEY:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-POLICY_FILE="$SCRIPT_DIR/evidence-bucket-policy.json"
+# Defaults to the prod policy doc; override (e.g. POLICY_FILE=.../evidence-bucket-policy-dev.json)
+# to provision a per-environment user scoped to a different bucket. The guard below still
+# enforces that whatever file is used references $BUCKET, so a mismatch fails loudly.
+POLICY_FILE="${POLICY_FILE:-$SCRIPT_DIR/evidence-bucket-policy.json}"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
