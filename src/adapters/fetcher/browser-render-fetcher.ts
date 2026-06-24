@@ -15,7 +15,7 @@ import { capturePage } from './playwright-capture.js';
  * composition root still wraps it in `PoliteFetcher`, so the per-domain rate-limit
  * (always) + robots (opt-in) + evidence size caps all keep applying — this is C-2
  * WITHOUT bypassing any access guardrail. A future hosted-browser vendor (Browserbase/Steel)
- * slots in as another Fetcher behind the same port (see HostedBrowserFetcher).
+ * slots in as another Fetcher behind the same port.
  *
  * Browser launched lazily + reused; `close()` at shutdown. Never throws on a
  * reachable failure — returns an `error`/`blocked` outcome the caller routes.

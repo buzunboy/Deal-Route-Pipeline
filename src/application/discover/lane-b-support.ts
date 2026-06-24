@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   ManualCaptureReason,
   type Evidence,
@@ -6,7 +6,6 @@ import {
   type SuffixOracle,
 } from '../../domain/index.js';
 import type { Database, Clock, Logger, EvidenceStore, FetchResult } from '../ports/index.js';
-import { newId } from '../shared/id.js';
 
 /** Days between re-crawls assigned to a discovered (tier-4) source once approved. */
 const DISCOVERED_SOURCE_CADENCE_DAYS = 3;
@@ -73,7 +72,7 @@ export class LaneBSupport {
     this.logger.info('lane-b: routing blocked page to manual capture', { url, reason });
     if (dryRun) return;
     await this.db.manualCapture.insert({
-      id: newId(),
+      id: randomUUID(),
       source_id: null,
       source_url: url,
       reason,
@@ -110,7 +109,7 @@ export class LaneBSupport {
       if (domain === null || known.has(domain)) continue;
       known.add(domain);
       const source: Source = {
-        id: newId(),
+        id: randomUUID(),
         url: p.url,
         type: 'discovered',
         tier: 4,

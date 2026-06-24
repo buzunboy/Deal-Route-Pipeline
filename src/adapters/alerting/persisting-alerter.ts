@@ -1,6 +1,6 @@
 import type { Alerting, AlertRepository, Clock, Logger } from '../../application/ports/index.js';
 import { AlertStatus, type AlertEvent, type AlertRecord } from '../../domain/index.js';
-import { newId } from '../../application/shared/id.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * An {@link Alerting} decorator that PERSISTS each alert (ACR-8) before delegating to
@@ -28,7 +28,7 @@ export class PersistingAlerter implements Alerting {
     try {
       const at = this.clock.nowIso();
       const record: AlertRecord = {
-        id: newId(),
+        id: randomUUID(),
         dedupe_key: event.dedupe_key,
         kind: event.kind,
         severity: event.severity,

@@ -1,9 +1,9 @@
 # DealRoute — unattended scheduling (Kubernetes CronJob template, Step 4)
 #
 # ⚠️ TEMPLATE — copy + fill the TODOs before applying. This is the v1 scheduler:
-# the pipeline is a CLI, not a self-running daemon (the pg-boss Queue port exists
-# but is intentionally unwired — see ARCHITECTURE.md / docs handoff). External cron
-# (here, K8s CronJobs) invokes the published GHCR image on a schedule, one CronJob
+# the pipeline is a CLI, not a self-running daemon (see ARCHITECTURE.md / docs
+# handoff). External cron (here, K8s CronJobs) invokes the published GHCR image on
+# a schedule, one CronJob
 # per lane. Each runs the container's entrypoint, which applies pending migrations
 # then runs the given CLI command (`crawl --due`, etc.). Nothing auto-publishes;
 # every lane is bounded (per-run caps + the daily €-budget guard).

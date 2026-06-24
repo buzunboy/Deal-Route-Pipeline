@@ -29,8 +29,8 @@ humans approve — nothing auto-publishes in v1.**
   `ExtractUseCase` (the LLM core), `CrawlSourceUseCase` (Lane A), `ReviewUseCase`,
   `MonitorSourceUseCase`. Ports live in `application/ports/`.
 - **`src/adapters/`** — concrete implementations of the ports (Playwright, Firecrawl,
-  Anthropic, OpenAI, Stub, local-FS, S3 [stub], Postgres/drizzle, in-memory DB, pg-boss,
-  in-memory queue, HTTP review API, CLI, seed parser).
+  Anthropic, OpenAI, Stub, local-FS, S3 [stub], Postgres/drizzle, in-memory DB,
+  HTTP review API, CLI, seed parser).
 - **`src/composition/container.ts`** — the **single composition root**. The only place that
   reads config and does `new SomeAdapter()`. Everything else receives dependencies (DI).
 
@@ -38,11 +38,10 @@ humans approve — nothing auto-publishes in v1.**
 
 | Port (`application/ports`) | Default adapter | Alternatives |
 |---|---|---|
-| `Fetcher` | `PlaywrightFetcher` | `BrowserRenderFetcher` (`FETCHER=browser`, C-2 JS-render), `FirecrawlFetcher` (`FETCHER=firecrawl`), `HostedBrowserFetcher` (`FETCHER=hosted-browser`, C-2 scaffold) |
+| `Fetcher` | `PlaywrightFetcher` | `BrowserRenderFetcher` (`FETCHER=browser`, C-2 JS-render), `FirecrawlFetcher` (`FETCHER=firecrawl`) |
 | `Llm` | `AnthropicLlm` | `OpenAiLlm`, `StubLlm` (`LLM_PROVIDER=…`) |
 | `EvidenceStore` | `LocalFsEvidenceStore` | S3/R2 (extension point) |
 | `Database` | `PostgresDb` | `InMemoryDb` (no Postgres; dry-run/tests) |
-| `Queue` | `PgBossQueue` | `InMemoryQueue` |
 | `BrowserAgent` | `NoopBrowserAgent` (off-switch) | `SearchBrowserAgent` (`AGENT=search`, C-1; also drives the C-2 render Fetcher); a future interactive multi-step agent (Option B) |
 | `SearchProvider` | `StubSearchProvider` (off-switch) | `BraveSearchProvider` (`SEARCH_PROVIDER=api`), `FirecrawlSearchProvider` (`SEARCH_PROVIDER=firecrawl`) |
 | `Clock`, `Logger` | `SystemClock`, `ConsoleLogger` | fakes in tests |
@@ -81,9 +80,10 @@ each have one. The Postgres contract runs only when `DATABASE_URL_TEST` is set.
   discovered domain is auto-crawled. The default `AGENT=noop`/`SEARCH_PROVIDER=stub` keep the
   lane dark until explicitly enabled. **C-2 (JS-heavy pages)** is delivered as a render-capable
   `Fetcher` behind the existing port — `BrowserRenderFetcher` (`FETCHER=browser`, local
-  Playwright: networkidle + scroll) and a `HostedBrowserFetcher` scaffold — so the same
-  `SearchBrowserAgent` drives it and `PoliteFetcher` keeps wrapping it (robots/rate-limit/size
-  caps preserved); no agent change. A future interactive multi-step `BrowserAgent` (form-fill /
+  Playwright: networkidle + scroll) — so the same `SearchBrowserAgent` drives it and
+  `PoliteFetcher` keeps wrapping it (robots/rate-limit/size caps preserved); no agent change.
+  A hosted-browser vendor (Browserbase/Steel) would slot in as another `Fetcher` behind the
+  same port if local Playwright is bot-blocked at scale. A future interactive multi-step `BrowserAgent` (form-fill /
   click-through in one session) is recorded as a follow-up (see `docs/KNOWN_ISSUES.md`).
 - **Lane B — community ingestion (Tier 3):** `IngestCommunityUseCase` (`ingest --source <id>`)
   reads a community source's **RSS/Atom feed** (the `FeedReader` port) as a stream of *leads*,
@@ -309,8 +309,7 @@ Native Datadog/CloudWatch metrics-push adapters are deferred (recipe: `docs/Deal
 
 ## Scheduling / unattended running (Step 4 — external cron)
 
-The pipeline is a **CLI, not a self-running daemon**. The `Queue` (pg-boss) port exists but is
-**intentionally unwired** from the composition root; v1 runs each lane as a scheduled invocation
+The pipeline is a **CLI, not a self-running daemon**. v1 runs each lane as a scheduled invocation
 of the published container image (the entrypoint applies idempotent migrations, then runs the
 given CLI command). `deploy/` holds the templates: `deploy/k8s/cronjobs.yaml` (one CronJob per
 lane — `crawl --due` / `monitor --due` / `ingest --community-due` / `discover --broad`, with
@@ -318,6 +317,6 @@ Tier-4 discover `suspend: true` by default) and a guarded opt-in `.github/workfl
 `deploy/README.md` documents the cadence, env/secrets, and trust posture. Scheduling changes
 **no** invariant: nothing auto-publishes, every lane is bounded, defaults keep the agentic lanes
 dark, and `concurrencyPolicy: Forbid` keeps a lane from overlapping itself (a source-level
-advisory lock + a bounded pg-boss pool are the prerequisites recorded in `docs/KNOWN_ISSUES.md`
-for the day pg-boss is wired). Under any scheduler `EVIDENCE_STORE=s3` is required (a CronJob
+advisory lock is the prerequisite recorded in `docs/KNOWN_ISSUES.md` for the day an in-process
+worker replaces external cron). Under any scheduler `EVIDENCE_STORE=s3` is required (a CronJob
 pod's filesystem is ephemeral; `local` would discard evidence).

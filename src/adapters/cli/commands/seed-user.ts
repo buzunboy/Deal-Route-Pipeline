@@ -1,7 +1,7 @@
 import { Container } from '../../../composition/container.js';
 import type { Config } from '../../../config/index.js';
 import { UserSchema, type User } from '../../../domain/index.js';
-import { newId } from '../../../application/index.js';
+import { randomUUID } from 'node:crypto';
 
 /** Args for `seed-user` — everything the command needs to mint one login-capable account. */
 export interface SeedUserOptions {
@@ -48,7 +48,7 @@ export async function seedUser(config: Config, opts: SeedUserOptions): Promise<v
 
     // Boundary-validate the assembled user through the domain schema before persisting.
     const user: User = UserSchema.parse({
-      id: newId(),
+      id: randomUUID(),
       name,
       email,
       role_id: role.id,

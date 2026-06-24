@@ -33,19 +33,6 @@ describe('Container — fetcher selection', () => {
     expect(container.fetcher).toBeInstanceOf(PoliteFetcher);
   });
 
-  it('wraps FETCHER=hosted-browser (C-2 scaffold) in PoliteFetcher too', () => {
-    container = new Container(cfg({ FETCHER: 'hosted-browser', BROWSER_API_KEY: 'k' }), {
-      usePersistence: false,
-    });
-    expect(container.fetcher).toBeInstanceOf(PoliteFetcher);
-  });
-
-  it('fails loudly when FETCHER=hosted-browser has no BROWSER_API_KEY', () => {
-    expect(
-      () => new Container(cfg({ FETCHER: 'hosted-browser' }), { usePersistence: false }),
-    ).toThrow(/BROWSER_API_KEY/);
-  });
-
   it('fails loudly when FETCHER=firecrawl has no FIRECRAWL_API_KEY', () => {
     expect(() => new Container(cfg({ FETCHER: 'firecrawl' }), { usePersistence: false })).toThrow(
       /FIRECRAWL_API_KEY/,

@@ -15,18 +15,12 @@ describe('loadConfig — fetcher backend selection', () => {
     expect(loadConfig(env()).fetcher.kind).toBe('playwright');
   });
 
-  it('accepts the C-2 browser + hosted-browser kinds', () => {
+  it('accepts the C-2 browser kind', () => {
     expect(loadConfig(env({ FETCHER: 'browser' })).fetcher.kind).toBe('browser');
-    expect(loadConfig(env({ FETCHER: 'hosted-browser' })).fetcher.kind).toBe('hosted-browser');
   });
 
   it('rejects an unknown FETCHER value', () => {
     expect(() => loadConfig(env({ FETCHER: 'selenium' }))).toThrow();
-  });
-
-  it('reads BROWSER_API_KEY (empty → undefined)', () => {
-    expect(loadConfig(env({ BROWSER_API_KEY: 'k' })).fetcher.browserApiKey).toBe('k');
-    expect(loadConfig(env({ BROWSER_API_KEY: '  ' })).fetcher.browserApiKey).toBeUndefined();
   });
 });
 

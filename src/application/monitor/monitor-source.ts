@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   DealStatus,
   ManualCaptureReason,
@@ -10,7 +10,6 @@ import {
 import type { Fetcher, Database, Clock, Logger, Alerting, FetchResult } from '../ports/index.js';
 import { CrawlSourceUseCase } from '../crawl/crawl-source.js';
 import { nextDueWithBackoffIso, applyCrawlOutcome } from '../crawl/source-policy.js';
-import { newId } from '../shared/id.js';
 
 export interface MonitorSourceInput {
   sourceId: string;
@@ -239,7 +238,7 @@ export class MonitorSourceUseCase {
       outcome: fetched.outcome,
     });
     await this.db.manualCapture.insert({
-      id: newId(),
+      id: randomUUID(),
       source_id: source.id,
       source_url: source.url,
       reason: manualCaptureReason(fetched),
@@ -323,7 +322,7 @@ export class MonitorSourceUseCase {
     currentHash: string | null,
   ): Change {
     return {
-      id: newId(),
+      id: randomUUID(),
       deal_id: null,
       source_id: source.id,
       kind,

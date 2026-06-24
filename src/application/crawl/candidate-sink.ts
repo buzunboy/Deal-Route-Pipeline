@@ -1,7 +1,7 @@
 import { DealStatus, type DealRecord, type Evidence } from '../../domain/index.js';
 import type { Database, Clock, Logger } from '../ports/index.js';
 import type { ExtractedCandidate } from '../extract/extract.js';
-import { newId } from '../shared/id.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * The single place extracted candidates become persisted deal records — shared by
@@ -100,7 +100,7 @@ export class CandidateSink {
       // The reviewer must verify against the page the evidence came from, and
       // monitoring finds/expires deals by source_url, so it must match the source.
       source_url: evidence.source_url,
-      id: newId(),
+      id: randomUUID(),
       schema_version: candidate.schemaVersion,
       true_cost_monthly: candidate.trueCostMonthly,
       evidence_id: evidence.id,

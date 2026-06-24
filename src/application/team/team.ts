@@ -8,7 +8,7 @@ import {
   type TeamMemberView,
 } from '../../domain/index.js';
 import type { Database, Clock, Logger } from '../ports/index.js';
-import { newId } from '../shared/id.js';
+import { randomUUID } from 'node:crypto';
 
 /** Inputs to invite/register a team member (ACR-10 Team). */
 export interface InviteMemberInput {
@@ -58,7 +58,7 @@ export class TeamUseCase {
     }
     const existing = await this.db.team.getByEmail(email);
     const member: TeamMember = {
-      id: existing?.id ?? newId(),
+      id: existing?.id ?? randomUUID(),
       name: input.name.trim(),
       email,
       role: role.data,

@@ -28,13 +28,11 @@ const ConfigSchema = z.object({
   fetcher: z.object({
     // playwright = local headless Chromium (domcontentloaded; default). browser =
     // local Playwright JS-RENDER (networkidle + scroll) for JS-heavy SPAs (C-2).
-    // firecrawl / hosted-browser = vendor APIs (hosted-browser is a C-2 scaffold).
-    kind: z.enum(['playwright', 'browser', 'firecrawl', 'hosted-browser']),
+    // firecrawl = vendor API.
+    kind: z.enum(['playwright', 'browser', 'firecrawl']),
     timeoutMs: z.coerce.number().int().positive(),
     userAgent: z.string().min(1),
     firecrawlApiKey: z.string().optional(),
-    /** Hosted-browser vendor API key (only when FETCHER=hosted-browser). */
-    browserApiKey: z.string().optional(),
   }),
   // Tier-4 broad-discovery search backend (Phase C, C-1). `stub` is the offline
   // off-switch (no network, like the noop browser agent); `api` is the real
@@ -245,7 +243,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       timeoutMs: env.FETCH_TIMEOUT_MS ?? '30000',
       userAgent: env.FETCH_USER_AGENT ?? 'DealRouteBot/0.1',
       firecrawlApiKey: emptyToUndefined(env.FIRECRAWL_API_KEY),
-      browserApiKey: emptyToUndefined(env.BROWSER_API_KEY),
     },
     search: {
       // Default to the real API when a key is configured, else the offline stub —

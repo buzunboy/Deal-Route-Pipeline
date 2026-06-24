@@ -16,7 +16,7 @@ import {
   type SuffixOracle,
 } from '../../domain/index.js';
 import type { Database, Clock, Logger } from '../ports/index.js';
-import { newId } from '../shared/id.js';
+import { randomUUID } from 'node:crypto';
 
 /** Inputs to register a new operational source from the admin panel (ACR-10). */
 export interface CreateSourceInput {
@@ -125,7 +125,7 @@ export class SourceReviewUseCase {
     const source: Source = {
       // Keep an existing row's id (the upsert does too) so the returned id is the
       // real persisted id, not a stale freshly-minted one.
-      id: existing?.id ?? newId(),
+      id: existing?.id ?? randomUUID(),
       url,
       type,
       tier: tier.data,
@@ -210,7 +210,7 @@ export class SourceReviewUseCase {
     at: string,
   ): Promise<void> {
     await this.db.sourceReviews.insert({
-      id: newId(),
+      id: randomUUID(),
       source_id: sourceId,
       action,
       approver,

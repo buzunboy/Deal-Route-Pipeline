@@ -457,18 +457,6 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   then tighten (consider a repair-retry or a stricter parser). Don't build a full JSON parser.
 - **Logged**: 2026-06-20
 
-### pg-boss queue pool not bounded
-- **Severity**: low
-- **Area**: db / queue
-- **Location**: `src/adapters/queue/` (pg-boss adapter)
-- **What**: The pg-boss adapter opens its own pool against the same DB and is NOT
-  pool-bounded like `PostgresDb` (`max`/`statement_timeout`).
-- **Why deferred**: The queue is intentionally unwired in v1 (external-cron model); it's a
-  no-op at runtime today, so the unbounded pool is never created.
-- **Fix-when**: the in-process pg-boss worker lands — bound it so the two pools' connection
-  caps sum to a known ceiling.
-- **Logged**: 2026-06-20
-
 ### robots.txt cross-origin redirect is treated as no-robots (allowed)
 - **Severity**: low
 - **Area**: fetcher
@@ -682,6 +670,18 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 ---
 
 ## Resolved
+
+### pg-boss queue pool not bounded — RESOLVED 2026-06-25 (dead code removed)
+- **Was**: low, db / queue. The pg-boss adapter opened its own unbounded pool against the same
+  DB. Deferred because the queue was intentionally unwired (external-cron model) — a no-op at
+  runtime, so the pool was never created.
+- **Resolution**: the entire `Queue` stack was deleted as over-engineering — the port
+  (`application/ports/queue.ts`), both adapters (`src/adapters/queue/{in-memory,pg-boss}-queue.ts`),
+  and the `pg-boss` dependency. It had **zero consumers**: no use-case, the composition root, or
+  any caller ever instantiated or referenced it. Scheduling is external cron invoking the CLI (see
+  ARCHITECTURE.md → Scheduling). The day an in-process worker is justified, it is added fresh (with
+  a bounded pool + the source-level advisory lock still tracked here) — not resurrected from this
+  unused scaffold.
 
 ### Auth dual-accept window + "reads now require auth" — RESOLVED 2026-06-23 (Auth/IAM Phase 5)
 - **Was**: medium (a deliberately-temporary widening of the trust boundary), api / auth (Phase 2). To

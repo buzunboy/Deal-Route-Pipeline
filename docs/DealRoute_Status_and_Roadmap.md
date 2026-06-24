@@ -106,7 +106,7 @@ monitor, review, public API). **All hold.**
   No schema change.
 - **Step 4 — Scheduler / unattended-run harness.** External-cron model: `deploy/k8s/cronjobs.yaml`
   (4 CronJobs — crawl 6h / monitor 3h / ingest hourly / discover daily-but-suspended) + a guarded
-  scheduled Action + `deploy/README.md`. pg-boss stays unwired. Shipped with **Prereq A**: a Source
+  scheduled Action + `deploy/README.md`. No in-process job queue. Shipped with **Prereq A**: a Source
   `resolved_url` set on first successful crawl/monitor pass so monitor matches expiry/baseline on
   `resolved_url ?? url` → a redirecting source's published deals now auto-expire. Migration **0011**.
 - **Step 5 — Observability / alerting.** A new `Alerting` port + `NoopAlerter` (default off) +
@@ -218,7 +218,8 @@ No roadmap step remains. The concrete forward work, highest-value first:
    and **stop operating AWS as account root** (use a dedicated admin IAM principal + MFA).
 4. **The rest of the deferred-findings register** — e.g. the **manual-capture upload channel**
    [medium], no `/v1/` rate-limiting [medium, CDN-fronted at deploy], the per-request active-source
-   scan, the raw-IDN suffix normalisation, the pg-boss pool bound (if/when wired). Pick by the listed
+   scan, the raw-IDN suffix normalisation, a source-level advisory lock (if/when an in-process worker
+   replaces external cron). Pick by the listed
    fix-when triggers. _(P1 done 2026-06-23: the Postgres contract suite now runs in CI as the LSP gate
    — per-test TRUNCATE reset + moved to the integration tier; `npm run api:check` (OpenAPI lint +
    structural Postman-drift gate) added to CI; the non-UUID `:id` → 500 fixed via a UUID boundary

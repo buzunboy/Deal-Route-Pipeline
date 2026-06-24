@@ -8,7 +8,7 @@ import {
   type PasswordPolicy,
 } from '../../domain/index.js';
 import type { Database, PasswordHasher, Clock, Logger } from '../ports/index.js';
-import { newId } from '../shared/id.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Inputs to provision a login-capable user (Auth/IAM, Phase 3). `actor` is the
@@ -67,7 +67,7 @@ export class ProvisionUserUseCase {
     // Boundary-validate the assembled user through the domain schema (rejects a non-email
     // / blank name) before persisting — never trust assembled input at the store boundary.
     const user: User = UserSchema.parse({
-      id: newId(),
+      id: randomUUID(),
       name,
       email,
       role_id: role.id,

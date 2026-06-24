@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   DealStatus,
   DealNotFoundError,
@@ -42,7 +42,6 @@ import {
   type SuffixOracle,
 } from '../../domain/index.js';
 import type { Database, Clock, Logger } from '../ports/index.js';
-import { newId } from '../shared/id.js';
 
 /** A candidate joined with its evidence, for the review API/console. */
 export interface CandidateView {
@@ -344,7 +343,7 @@ export class ReviewUseCase {
     this.assertApprover(approver, 'create-manual-capture');
     // Mint the backing task FIRST (status done, reason ad_hoc) so the candidate's
     // audit line can reference it and the capture has a durable provenance row.
-    const taskId = newId();
+    const taskId = randomUUID();
     await this.db.manualCapture.insert({
       id: taskId,
       source_id: null,
@@ -416,7 +415,7 @@ export class ReviewUseCase {
     // EvidenceStore.save (that needs bytes); directly via the evidence repository.
     const at = this.clock.nowIso();
     const evidenceRecord: Evidence = {
-      id: newId(),
+      id: randomUUID(),
       source_url: evidence.sourceUrl,
       screenshot_ref: evidence.screenshotRef,
       html_ref: evidence.htmlRef,
@@ -435,7 +434,7 @@ export class ReviewUseCase {
     const sourceRegistrableDomain = this.suffixOracle(evidence.sourceUrl);
     const candidate: DealRecord = {
       ...filled,
-      id: newId(),
+      id: randomUUID(),
       schema_version: CURRENT_SCHEMA_VERSION,
       true_cost_monthly: trueCostMonthly(filled.price),
       confidence: adjusted,
@@ -550,7 +549,7 @@ export class ReviewUseCase {
     at: string,
   ): Promise<void> {
     await this.db.reviews.insert({
-      id: newId(),
+      id: randomUUID(),
       deal_id: dealId,
       action,
       approver,

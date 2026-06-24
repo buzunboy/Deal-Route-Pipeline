@@ -22,7 +22,7 @@ import {
   type RolePermissionGrant,
 } from '../../domain/index.js';
 import type { Database, PasswordHasher, Clock, Logger } from '../ports/index.js';
-import { newId } from '../shared/id.js';
+import { randomUUID } from 'node:crypto';
 
 /** A role with its resolved permission keys — the shape the `/api/roles` screen renders. */
 export interface RoleView {
@@ -108,7 +108,7 @@ export class ManageRolesUseCase {
       throw new RoleInUseError(name, 'a role with that name already exists');
     }
     const role: Role = RoleSchema.parse({
-      id: newId(),
+      id: randomUUID(),
       name,
       description: input.description?.trim() ?? '',
       is_system: false,

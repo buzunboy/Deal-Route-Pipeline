@@ -1,4 +1,4 @@
-import { newId } from '../../application/shared/id.js';
+import { randomUUID } from 'node:crypto';
 import type { Source, SourceType, SourceTier } from '../../domain/index.js';
 
 /** A parsed catalog entry (Tier-1 target subscription + its provider page). */
@@ -119,7 +119,7 @@ function makeSource(
   cadenceDays: number,
 ): Source {
   return {
-    id: newId(),
+    id: randomUUID(),
     url,
     type,
     tier,

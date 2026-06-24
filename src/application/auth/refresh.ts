@@ -7,7 +7,7 @@ import {
   type StoredRefresh,
 } from '../../domain/index.js';
 import type { Database, TokenIssuer, Clock, Logger } from '../ports/index.js';
-import { newId } from '../shared/id.js';
+import { randomUUID } from 'node:crypto';
 import { newRefreshToken, hashRefreshToken } from '../shared/refresh-token-crypto.js';
 import { AuthorizationUseCase } from './authorization.js';
 import type { AuthSession, AuthTtls, AuthClaimRealm } from './authenticate.js';
@@ -92,7 +92,7 @@ export class RefreshUseCase {
       permVersion,
       now,
       ttlSeconds: this.ttls.accessSeconds,
-      jti: newId(),
+      jti: randomUUID(),
       iss: this.realm.iss,
       aud: this.realm.aud,
     });
@@ -101,7 +101,7 @@ export class RefreshUseCase {
     const rawRefresh = newRefreshToken();
     const refreshExpiresAt = new Date(now.getTime() + this.ttls.refreshSeconds * 1000);
     const successor: StoredRefresh = {
-      id: newId(),
+      id: randomUUID(),
       user_id: user.id,
       token_hash: hashRefreshToken(rawRefresh),
       family_id: current.family_id, // SAME lineage

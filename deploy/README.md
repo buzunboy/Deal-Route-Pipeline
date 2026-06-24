@@ -10,18 +10,17 @@
 >
 > Both run the same image; the lanes set `LLM_PROVIDER=anthropic`, the API doesn't need it.
 
-DealRoute is a **CLI, not a self-running daemon**. The `Queue` (pg-boss) port exists
-in the tree but is **intentionally unwired** from the composition root — v1 runs each
-lane as a **scheduled invocation of the published container image**. This directory
-holds the scheduler templates (Step 4). The image build + the SSH-deploy hook live in
+DealRoute is a **CLI, not a self-running daemon** — v1 runs each lane as a **scheduled
+invocation of the published container image**. This directory holds the scheduler
+templates (Step 4). The image build + the SSH-deploy hook live in
 `.github/workflows/release.yml` and `.github/workflows/deploy.yml`.
 
-> **Why external cron (not pg-boss) for v1:** the lanes are independent, idempotent,
-> and `--due`-selected, so a plain scheduler is enough and adds no moving parts. Wire
-> the in-process pg-boss worker only when concurrency/autonomy justify it — and when
-> you do, **bound its pool** and add a **source-level advisory lock** first (both in
-> `docs/KNOWN_ISSUES.md`), because concurrency then becomes real (two workers must
-> never crawl one source at once). Until then `concurrencyPolicy: Forbid` /
+> **Why external cron for v1:** the lanes are independent, idempotent, and
+> `--due`-selected, so a plain scheduler is enough and adds no moving parts. Replace it
+> with an in-process worker only when concurrency/autonomy justify it — and when you do,
+> add a **source-level advisory lock** first (in `docs/KNOWN_ISSUES.md`), because
+> concurrency then becomes real (two workers must never crawl one source at once).
+> Until then `concurrencyPolicy: Forbid` /
 > `concurrency:` guards keep each lane from overlapping itself.
 
 ## Pick one scheduler

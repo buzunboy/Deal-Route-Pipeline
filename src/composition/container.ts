@@ -51,7 +51,6 @@ import { StubLlm } from '../adapters/llm/stub-llm.js';
 import { PlaywrightFetcher } from '../adapters/fetcher/playwright-fetcher.js';
 import { BrowserRenderFetcher } from '../adapters/fetcher/browser-render-fetcher.js';
 import { FirecrawlFetcher } from '../adapters/fetcher/firecrawl-fetcher.js';
-import { HostedBrowserFetcher } from '../adapters/fetcher/hosted-browser-fetcher.js';
 import { PoliteFetcher } from '../adapters/fetcher/polite-fetcher.js';
 import { StubSearchProvider } from '../adapters/search/stub-search-provider.js';
 import { BraveSearchProvider } from '../adapters/search/brave-search-provider.js';
@@ -71,11 +70,11 @@ import { JoseTokenIssuer } from '../adapters/security/jose-token-issuer.js';
  * adapters behind the ports, then assembles the use-cases. Nothing else in the
  * codebase does `new SomeAdapter()`; everything receives its dependencies.
  *
- * `usePersistence: false` swaps Postgres/pg-boss for in-memory equivalents so the
- * pipeline runs with no external services (dry-run, demos, tests).
+ * `usePersistence: false` swaps Postgres for an in-memory DB so the pipeline runs
+ * with no external services (dry-run, demos, tests).
  */
 export interface ContainerOptions {
-  /** When false, use in-memory DB + queue (no Postgres needed). Default true. */
+  /** When false, use the in-memory DB (no Postgres needed). Default true. */
   usePersistence?: boolean;
   vocabulary?: Vocabulary;
   /**
@@ -181,11 +180,9 @@ export class Container {
     this.passwordHasher = overrides.passwordHasher ?? new Argon2idHasher(config.auth.argon2);
     this.tokenIssuer = overrides.tokenIssuer ?? new JoseTokenIssuer(config.auth.jwt, this.clock);
 
-    // NB: there is intentionally no job queue wired here. v1 runs as external
-    // cron invoking the CLI (`crawl --due`, `monitor --due`, `ingest
-    // --community-due`) — see README "Deployment". The `Queue` port + pg-boss/
-    // in-memory adapters remain in the tree for the future in-process worker
-    // (Phase C scheduler), but are not a runtime dependency of the container.
+    // NB: there is intentionally no job queue. v1 runs as external cron invoking
+    // the CLI (`crawl --due`, `monitor --due`, `ingest --community-due`) — see
+    // README "Deployment". An in-process worker is future work; wire it then.
 
     this.extract = new ExtractUseCase(this.llm, this.logger, this.suffixOracle);
     this.crawlSource = new CrawlSourceUseCase(
@@ -344,9 +341,9 @@ export class Container {
     // Wrap with the politeness decorator so the per-domain rate-limit (always) and
     // robots.txt (opt-in via RESPECT_ROBOTS_TXT, default off under best-effort-read)
     // are actually enforced. Behind the Fetcher port, so the crawl use-case and
-    // concrete fetchers are unchanged. EVERY inner fetcher — incl. the C-2 browser/
-    // hosted-browser ones — is wrapped, so the access policy applies uniformly (no
-    // lane bypasses the rate-limit).
+    // concrete fetchers are unchanged. EVERY inner fetcher — incl. the C-2 browser
+    // one — is wrapped, so the access policy applies uniformly (no lane bypasses
+    // the rate-limit).
     return new PoliteFetcher(inner, {
       respectRobotsTxt: config.crawl.respectRobotsTxt,
       minIntervalMs: config.crawl.perDomainRateLimitMs,
@@ -370,15 +367,6 @@ export class Container {
         const browser = new BrowserRenderFetcher(timeoutMs);
         this.closables.push(browser);
         return browser;
-      }
-      case 'hosted-browser': {
-        // C-2 hosted scaffold — fail loud without a key, throws until implemented.
-        if (!config.fetcher.browserApiKey) {
-          throw new Error('FETCHER=hosted-browser requires BROWSER_API_KEY.');
-        }
-        const hosted = new HostedBrowserFetcher(config.fetcher.browserApiKey, timeoutMs);
-        this.closables.push(hosted);
-        return hosted;
       }
       case 'playwright':
       default: {

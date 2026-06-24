@@ -80,7 +80,7 @@ import type {
 import type { Logger } from '../../../application/ports/index.js';
 import * as schema from './schema.js';
 import { dealToRow, rowToDeal, isoTimestamp, isoTimestampOrNull } from './mappers.js';
-import { newId } from '../../../application/shared/id.js';
+import { randomUUID } from 'node:crypto';
 import { DbRetrier, type DbRetryConfig } from './db-resilience.js';
 
 type Db = NodePgDatabase<typeof schema>;
@@ -745,7 +745,7 @@ class PgFieldProposalRepo extends PgRepo implements FieldProposalRepository {
       this.db
         .insert(schema.fieldProposals)
         .values({
-          id: newId(),
+          id: randomUUID(),
           suggestedKey: p.suggested_key,
           label: p.label,
           rationale: p.rationale,

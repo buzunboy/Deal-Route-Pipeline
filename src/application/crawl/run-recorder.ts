@@ -1,6 +1,6 @@
 import type { CrawlRun, CrawlRunKind, CrawlRunStoppedReason } from '../../domain/index.js';
 import type { Database, Clock, Logger } from '../ports/index.js';
-import { newId } from '../shared/id.js';
+import { randomUUID } from 'node:crypto';
 
 /** The metrics a bounded lane reports when its run finishes. */
 export interface RunOutcome {
@@ -34,7 +34,7 @@ export class RunRecorder {
   /** Begin a run (status `running`); persists it unless dry-run. */
   async start(sourceId: string | null, dryRun: boolean): Promise<CrawlRun> {
     const run: CrawlRun = {
-      id: newId(),
+      id: randomUUID(),
       source_id: sourceId,
       run_kind: this.kind,
       status: 'running',

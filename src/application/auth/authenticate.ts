@@ -8,7 +8,7 @@ import {
   type User,
 } from '../../domain/index.js';
 import type { Database, PasswordHasher, TokenIssuer, Clock, Logger } from '../ports/index.js';
-import { newId } from '../shared/id.js';
+import { randomUUID } from 'node:crypto';
 import { newRefreshToken, hashRefreshToken } from '../shared/refresh-token-crypto.js';
 import { AuthorizationUseCase } from './authorization.js';
 
@@ -145,7 +145,7 @@ export class AuthenticateUseCase {
   async mintSession(
     user: User,
     meta: { userAgent?: string; ip?: string },
-    familyId: string = newId(),
+    familyId: string = randomUUID(),
   ): Promise<AuthSession> {
     const perms = await this.authorization.permissionsForUser(user.id);
     const permVersion = await this.db.authMeta.getPermVersion();
@@ -158,7 +158,7 @@ export class AuthenticateUseCase {
       permVersion,
       now,
       ttlSeconds: this.ttls.accessSeconds,
-      jti: newId(),
+      jti: randomUUID(),
       iss: this.realm.iss,
       aud: this.realm.aud,
     });
@@ -168,7 +168,7 @@ export class AuthenticateUseCase {
     const refreshIssuedAt = now;
     const refreshExpiresAt = new Date(now.getTime() + this.ttls.refreshSeconds * 1000);
     await this.db.refreshTokens.issue({
-      id: newId(),
+      id: randomUUID(),
       user_id: user.id,
       token_hash: hashRefreshToken(rawRefresh),
       family_id: familyId,

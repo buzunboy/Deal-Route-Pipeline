@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   SourceStatus,
   type Source,
@@ -17,7 +17,6 @@ import type {
 } from '../ports/index.js';
 import { sourceReliabilityLowAlert } from '../../domain/index.js';
 import { ExtractUseCase, type ExtractedCandidate } from '../extract/extract.js';
-import { newId } from '../shared/id.js';
 import { applyCrawlOutcome } from './source-policy.js';
 import { CandidateSink } from './candidate-sink.js';
 
@@ -43,9 +42,8 @@ export interface CrawlSourceResult {
  * A single source failure is logged and contained — it never throws past here
  * and never crashes a batch (`architecture.md`: resilience). Nothing is ever
  * published; candidates are persisted in a pre-approval state (`candidate`, or
- * `in_review` when flagged) for human review. (The `Queue` port exists for the
- * job scheduler that invokes this use-case; this method writes candidates
- * directly — see the deferred follow-up to route crawl jobs through the queue.)
+ * `in_review` when flagged) for human review. The use-case is invoked directly by
+ * the CLI lanes (external cron); there is no in-process job queue in v1.
  */
 export class CrawlSourceUseCase {
   private readonly sink: CandidateSink;
@@ -166,7 +164,7 @@ export class CrawlSourceUseCase {
 
   private startRun(source: Source): CrawlRun {
     return {
-      id: newId(),
+      id: randomUUID(),
       source_id: source.id,
       run_kind: 'crawl',
       status: 'running',
@@ -205,7 +203,7 @@ export class CrawlSourceUseCase {
     this.logger.info('routing to manual capture', { url: source.url, reason });
     if (!dryRun) {
       await this.db.manualCapture.insert({
-        id: newId(),
+        id: randomUUID(),
         source_id: source.id,
         source_url: source.url,
         reason,
