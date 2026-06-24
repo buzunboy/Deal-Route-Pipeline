@@ -263,6 +263,20 @@ fly secrets set -a dealroute-api \
   Must NOT be `*` (the surface is credentialed).
 
 ### 4.3 Deploy
+
+**Automated (the normal path).** On every merge to `master`, `.github/workflows/release.yml`
+builds + pushes the image to GHCR, and on its success `.github/workflows/deploy.yml`
+auto-deploys that exact image to Fly by its immutable `sha-<short>` tag (also setting
+`DEPLOYMENT_ID` to the same sha for the queued-budget self-clear). It runs through the
+`production` GitHub Environment, so if you set required reviewers there, the deploy waits
+for an approval click. Two one-time prerequisites: the `FLY_API_TOKEN` repo secret must
+exist (this workflow's header has the command), and `deploy.yml` must be **on `master`** —
+GitHub only honours a `workflow_run` trigger from the file as it exists on the default
+branch, so the very first auto-deploy starts only after this change is merged.
+
+**Manual (ad-hoc / rollback).** Use the "Deploy API to Fly" workflow's *Run workflow*
+button (pick any tag — an older `sha-…` to roll back, a `vX.Y.Z`, or `edge`), or deploy
+straight from a terminal:
 ```sh
 fly deploy -c deploy/fly/fly.toml
 ```

@@ -5,14 +5,22 @@ name: Deploy API to Fly
 # prebuilt GHCR image tag. This is the deploy counterpart to run-lane-fly.yml
 # (which runs the short-lived cron lanes) — same app, same FLY_API_TOKEN secret.
 #
-# It does NOT build: release.yml already built + pushed the image to GHCR
-# (ghcr.io/buzunboy/deal-route-pipeline:edge + :sha-<short>). This workflow only
-# points the live app at the chosen tag and triggers a rolling deploy. The image
-# entrypoint applies DB migrations before `serve` starts, so a deploy also runs
-# any pending migrations.
+# It does NOT build: release.yml ("Release image") already built + pushed the image
+# to GHCR (ghcr.io/buzunboy/deal-route-pipeline:edge + :sha-<short>). This workflow
+# only points the live app at the chosen tag and triggers a rolling deploy. The
+# image entrypoint applies DB migrations before `serve` starts, so a deploy also
+# runs any pending migrations.
 #
-# MANUAL ONLY — pick the image tag and click "Run workflow". Nothing auto-deploys
-# on merge; you ship when you want to.
+# Two ways in:
+#   1. AUTO (release flow) — on every successful "Release image" run on master, this
+#      auto-deploys the EXACT image that run just built, by its immutable
+#      sha-<short> tag (NOT the floating :edge — so two near-simultaneous merges can't
+#      race over a moving tag). DEPLOYMENT_ID is set to that same sha so the settings
+#      store's queued-budget override self-clears on the next deploy (see fly.toml).
+#   2. MANUAL — pick any image tag and click "Run workflow" to ship an ad-hoc build
+#      (rollback to an older sha, deploy a vX.Y.Z tag, re-deploy :edge, …).
+# Both paths run through the `production` Environment, so if you configure required
+# reviewers there, even an auto-deploy waits for a human click.
 #
 # SETUP (one-time):
 #   1. Create a Fly deploy token scoped to the app (same token run-lane-fly uses):
@@ -25,6 +33,14 @@ name: Deploy API to Fly
 #   secret on the app (deploy/fly/README.md §3).
 
 on:
+  # AUTO: fire when the image build finishes. `workflow_run` triggers on COMPLETION
+  # (success OR failure) — the job's `if` below gates on success so we never deploy a
+  # failed/partial build. `branches` filters on the release run's HEAD branch.
+  workflow_run:
+    workflows: ['Release image']
+    types: [completed]
+    branches: [master]
+  # MANUAL: pick the image tag and click "Run workflow".
   workflow_dispatch:
     inputs:
       image_tag:
@@ -36,13 +52,20 @@ permissions:
   contents: read
 
 concurrency:
-  # Never overlap two deploys of the same app — a second click waits for the first.
+  # Never overlap two deploys of the same app — a second trigger waits for the first
+  # (an auto-deploy from a fresh merge queues behind an in-flight one rather than
+  # racing it).
   group: deploy-fly
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Skip entirely when the trigger is a FAILED release run. On manual dispatch
+    # there's no workflow_run context, so the conclusion check is bypassed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     # Gate behind the `production` Environment so a human can be required to approve
     # (configure required reviewers on the Environment in repo Settings → Environments).
     environment: production
@@ -50,7 +73,6 @@ jobs:
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       APP: dealroute-api
-      IMAGE: ghcr.io/buzunboy/deal-route-pipeline:${{ inputs.image_tag }}
     steps:
       - name: Guard — require the Fly token
         run: |
@@ -61,6 +83,36 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve image tag
+        id: tag
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TAG: ${{ inputs.image_tag }}
+          # Full 40-char commit SHA of the release run; empty on manual dispatch.
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # Manual: ship exactly what the operator typed.
+            TAG="$DISPATCH_TAG"
+          else
+            # Auto: reconstruct the immutable tag release.yml pushed for this commit.
+            # docker/metadata-action's `type=sha,prefix=sha-` uses the 7-char short SHA,
+            # so truncate the full head_sha to match (sha-d1263a0, NOT sha-d1263a0dc4…).
+            if [ -z "$RELEASE_SHA" ]; then
+              echo "::error::workflow_run.head_sha is empty — cannot derive the image tag."
+              exit 1
+            fi
+            TAG="sha-${RELEASE_SHA:0:7}"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::resolved an empty image tag."
+            exit 1
+          fi
+          echo "Resolved image tag: $TAG (trigger: $EVENT_NAME)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v5
 
       - name: Set up flyctl
@@ -68,17 +120,25 @@ jobs:
 
       - name: Deploy to Fly
         shell: bash
+        env:
+          IMAGE: ghcr.io/buzunboy/deal-route-pipeline:${{ steps.tag.outputs.tag }}
+          # DEPLOYMENT_ID must change every release so a queued daily_budget override is
+          # adopted then self-cleared on the next boot (see fly.toml [env] + KNOWN_ISSUES).
+          # The image tag is per-release and immutable on the auto path, so reuse it.
+          DEPLOYMENT_ID: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          echo "Deploying $IMAGE to app '$APP' via deploy/fly/fly.toml"
+          echo "Deploying $IMAGE to app '$APP' via deploy/fly/fly.toml (DEPLOYMENT_ID=$DEPLOYMENT_ID)"
           # --image overrides the tag in fly.toml so we ship exactly the chosen,
-          # already-built artifact (no rebuild). The entrypoint migrates the DB,
-          # then starts `serve`. fly.toml keeps min_machines_running=1 so the
-          # rolling deploy hands over without a cold start for the panel.
+          # already-built artifact (no rebuild). --env sets the per-deploy DEPLOYMENT_ID
+          # on the app config. The entrypoint migrates the DB, then starts `serve`.
+          # fly.toml keeps min_machines_running=1 so the rolling deploy hands over
+          # without a cold start for the panel.
           flyctl deploy \
             -c deploy/fly/fly.toml \
             -a "$APP" \
-            --image "$IMAGE"
+            --image "$IMAGE" \
+            --env "DEPLOYMENT_ID=$DEPLOYMENT_ID"
 
       - name: Show status
         if: always()
