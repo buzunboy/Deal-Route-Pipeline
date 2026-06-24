@@ -126,11 +126,70 @@ first. The unit test asserts this precedence (write with no bearer → 403 read_
 
 ## Piece 2 — Deploy instances + subdomains (infra/config, NO code)
 
-Deployment target is **undecided**. Delivered as a target-agnostic env matrix +
-`docs/ENVIRONMENTS.md`, not wired infra. When you pick Fly (likely — matches the existing
-API), this becomes: per-env apps/configs + DNS for the subdomains.
+**Deploy target: Fly.io** (matches the existing API). **DNS registrar: GoDaddy** (the
+`deal-route.com` zone). This is per-env Fly apps/configs + GoDaddy DNS for the subdomains.
 
 **Phase 1 builds Local + Dev + Prod only.** `test-api` is deferred.
+
+### One app per environment (NOT one app, many hostnames)
+A custom domain only **renames** an app — it does not create the Dev/Prod split. Because
+Dev → dev DB and Prod → prod DB (different `DATABASE_URL`, secrets, `READ_ONLY`), each
+environment is a **separate Fly app**:
+
+| Env  | Fly app             | `.fly.dev` host             | DB        | `READ_ONLY` |
+| ---- | ------------------- | --------------------------- | --------- | ----------- |
+| Prod | `dealroute-api` (existing) | `dealroute-api.fly.dev`     | prod DB   | `false`     |
+| Dev  | `dealroute-api-dev` (NEW)  | `dealroute-api-dev.fly.dev` | **dev DB** | `false`    |
+| Test | `dealroute-api-test` (deferred) | `dealroute-api-test.fly.dev` | prod DB | `true` |
+
+The existing `dealroute-api` app **becomes Prod**. Dev is a brand-new app running the same
+image against a **new dev database** (owner decision, 2026-06-24: separate Fly app +
+separate dev DB — true isolation):
+```sh
+fly apps create dealroute-api-dev
+# create/point a NEW dev Postgres (a 2nd Fly Postgres app, or a 2nd DB on the cluster):
+#   fly postgres create --name dealroute-db-dev   (or reuse dealroute-db with a new database)
+fly secrets set -a dealroute-api-dev DATABASE_URL=... READ_ONLY=false AUTH_JWT_PRIVATE_KEY=... ANTHROPIC_API_KEY=...
+fly deploy -a dealroute-api-dev -c deploy/fly/fly.toml   # same image, dev config
+```
+> Note: the highest-value deferred infra item (per the project memory) is moving Postgres
+> to a managed provider — now doubly relevant since you're about to run two DBs. Not a
+> blocker for this, but the natural moment to revisit it.
+
+### Custom domains (GoDaddy + Fly) — the `*.fly.dev` → `deal-route.com` connection
+Fly's `*.fly.dev` URL is the default; custom hostnames attach via `fly certs`. The
+handshake: **Fly issues a TLS cert for the hostname → GoDaddy DNS points the hostname at
+Fly.** No redeploy, no app code change. All our hostnames are **subdomains** (`api.`,
+`dev-api.`, …) so each is a simple **CNAME** — we never touch the awkward apex
+(`deal-route.com` itself), which GoDaddy can't CNAME.
+
+Per hostname (example: `api.deal-route.com` → the Prod app):
+```sh
+fly certs add api.deal-route.com -a dealroute-api     # prints the exact DNS records
+fly ips list -a dealroute-api                         # only if Fly asks for A/AAAA instead of CNAME
+fly certs show api.deal-route.com -a dealroute-api    # watch until cert is "Ready"/"Configured"
+```
+Then in **GoDaddy → Manage DNS for `deal-route.com`** add what Fly printed. CNAME path
+(GoDaddy's **Name** is just the label — it appends `.deal-route.com`):
+
+| Type  | Name                    | Value (from Fly)            | TTL  |
+| ----- | ----------------------- | --------------------------- | ---- |
+| CNAME | `api`                   | `dealroute-api.fly.dev`     | 600  |
+| CNAME | `_acme-challenge.api`   | (the ACME value Fly prints) | 600  |
+
+If Fly returns A/AAAA instead of a CNAME, use the `fly ips list` IPv4 (A) + IPv6 (AAAA)
+plus the `_acme-challenge` CNAME. Propagation is usually minutes (GoDaddy default TTL
+~1h). Verify: `curl https://api.deal-route.com/api/health`.
+
+### Phase 1 hostnames to provision (one `fly certs add` + one GoDaddy CNAME each)
+| Hostname                  | `fly certs add` app   | GoDaddy CNAME →               |
+| ------------------------- | --------------------- | ----------------------------- |
+| `api.deal-route.com`      | `dealroute-api`       | `dealroute-api.fly.dev`       |
+| `dev-api.deal-route.com`  | `dealroute-api-dev`   | `dealroute-api-dev.fly.dev`   |
+| (`test-api...` deferred)  | `dealroute-api-test`  | `dealroute-api-test.fly.dev`  |
+
+> The **HQ** subdomains (`hq.`, `dev-hq.`, `test-hq.`) attach to wherever the panel deploys
+> (separate repo) — same GoDaddy-CNAME pattern, target host TBD. See the companion handoff.
 
 ### Env matrix (per API instance)
 
@@ -154,20 +213,23 @@ it needs the **prod** JWT/JWKS signing context. (It still can't write.) Confirm 
 ### Notes / guards
 - `concurrencyPolicy`, evidence `S3` requirement under any non-local instance, etc. follow
   the existing `deploy/README.md` posture.
-- No infra is applied until a deploy target is chosen.
+- This is infra/config only — **no pipeline code change** beyond Piece 1's `READ_ONLY` flag.
 
 ---
 
 ## When Staging is un-deferred (later)
 Because Piece 1 ships the `READ_ONLY` flag fully tested in Phase 1, standing up Staging
 later is **pure infra/config — no new pipeline code**:
-1. Deploy a `test-api.deal-route.com` instance with `READ_ONLY=true`, `DATABASE_URL`=prod
-   DB, prod JWT context, `ADMIN_CORS_ORIGIN=https://test-hq.deal-route.com`.
-2. Provision the `test-api` + `test-hq` DNS.
+1. Create a `dealroute-api-test` Fly app with `READ_ONLY=true`, `DATABASE_URL`=**prod** DB,
+   prod JWT context, `ADMIN_CORS_ORIGIN=https://test-hq.deal-route.com`.
+2. Attach the domain: `fly certs add test-api.deal-route.com -a dealroute-api-test` + the
+   GoDaddy CNAME `test-api → dealroute-api-test.fly.dev` (+ `_acme-challenge`). Same for
+   `test-hq` on the panel host.
 3. Wire `test-hq` in the admin panel (companion doc).
 
 ## Sequencing (Phase 1)
 1. Piece 1 — code + tests + spec, one reviewable commit. Run `code-reviewer`.
 2. `docs/ENVIRONMENTS.md` (Local/Dev/Prod matrix; Staging marked deferred).
 3. Companion: `docs/handoffs/ADMIN_PANEL_environments.md` for the HQ side.
-4. Piece 2 infra wiring (Local/Dev/Prod) once a deploy target is chosen.
+4. Piece 2 infra wiring (Fly): create `dealroute-api-dev` + dev DB; attach the
+   `api.` + `dev-api.` custom domains via `fly certs` + GoDaddy CNAMEs.
