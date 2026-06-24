@@ -35,6 +35,29 @@ runtime, NOT a static host. Owner chose **Vercel** (vs Fly / AWS):
 
 ---
 
+## Status — IMPLEMENTED + DEPLOYED (verified 2026-06-24)
+
+Panel work merged to its master (`f31442f feat(env): multi-environment Vercel hosting …`):
+per-scope `PIPELINE_API_URL`, deployed-build ignores the `x-pipeline-base` override
+(`VERCEL_ENV`), local-only Settings API switcher (Local/Dev/Prod/Test/custom presets),
+read-only `403 {error:'read_only'}` → banner + `useReadOnly()` write-disable, `vercel.json`
+pins `fra1`, `docs/ENVIRONMENTS.md` runbook. Gate: lint + typecheck + 621 tests green.
+
+Live verification (this side):
+- ✅ **Prod `hq.deal-route.com`** — serves a 200 login page (`/login?from=%2F`); fully usable.
+- ✅ **Pipeline domains** — `api`/`dev-api.deal-route.com` `/v1/health` → 200.
+- ✅ **`fra1` region** confirmed (`x-vercel-id: fra1::…`); dev-hq DNS → Vercel.
+- ⚠️ **Dev `dev-hq.deal-route.com` is behind Vercel Deployment Protection (SSO)** — root +
+  the `/api/*` proxy return Vercel's 401 "Authentication Required" (cookie `_vercel_sso_nonce`),
+  NOT the panel. So dev-hq is deployed + correctly wired but **not reachable for testing
+  until Deployment Protection is disabled for the Preview/dev-hq domain** (Vercel project
+  setting → Deployment Protection). Not a code bug. **Action: owner toggles it in Vercel.**
+- ⏳ **Dev admin not seeded yet** — needed to actually log into dev-hq once it's reachable;
+  run `seed-user` with `LLM_PROVIDER=stub` (see the KNOWN_ISSUES "seed-user requires LLM
+  config" note + `deploy/fly/DEV_ENVIRONMENT_SETUP.md` Step 3).
+
+---
+
 ## Phasing — Staging is DEFERRED
 
 > **Build now: Local + Dev + Prod HQ.** **Skip Staging (`test-hq`) for now** — it comes later.

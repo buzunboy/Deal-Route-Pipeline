@@ -894,3 +894,12 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 - **Why deferred**: cost/simplicity for a low-traffic stage; data is fully separate (different DB + scoped user, so dev creds can't open the prod DB); the only shared-fate risk is server resources, low while traffic is light.
 - **Fix-when**: dev traffic/load grows, a dev incident affects prod, or you provision a managed Postgres anyway — then `fly postgres create --name dealroute-db-dev` and change ONLY the dev app's `DATABASE_URL` (no app code change). Related to the standing "move Postgres to managed" infra item.
 - **Logged**: 2026-06-24
+
+### `seed-user` (a maintenance command) requires a full valid LLM config to run
+- **Severity**: low
+- **Area**: cli / config
+- **Location**: `src/adapters/cli/main.ts:75` (`loadConfig()` runs before command dispatch) + `src/adapters/cli/commands/seed-user.ts:36` (`new Container(...)`); `LLM_PROVIDER` defaults to `anthropic` (`src/config/config.ts:233`) and the composition root fails loudly when a real provider has no key.
+- **What**: `seed-user` builds the whole `Container` and loads full config, so on a host with no `ANTHROPIC_API_KEY` (e.g. a one-off Fly machine on the dev app, which intentionally has no LLM key) the command dies at startup with `Fatal:` + exit 1 — even though creating a login user never touches the LLM. Surfaced during the 2026-06-24 Dev-env setup; documented panel-side as ACR-20 (`Admin-Panel/docs/ENVIRONMENTS.md` troubleshooting + `DEV_GOTCHAS.md`).
+- **Why deferred**: a clean one-line workaround exists — run the seed machine with `LLM_PROVIDER=stub` (no key needed). Not trust-critical; only bites first-time env bootstrap.
+- **Fix-when**: when polishing the ops/bootstrap experience — make maintenance commands (`seed-user`, and likely `db:migrate`) lazy-load only the config slice they need, or default them to `LLM_PROVIDER=stub`, so a missing extraction key can't crash a user-seed.
+- **Logged**: 2026-06-24
