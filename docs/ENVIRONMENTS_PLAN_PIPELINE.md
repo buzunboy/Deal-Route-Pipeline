@@ -188,8 +188,9 @@ plus the `_acme-challenge` CNAME. Propagation is usually minutes (GoDaddy defaul
 | `dev-api.deal-route.com`  | `dealroute-api-dev`   | `dealroute-api-dev.fly.dev`   |
 | (`test-api...` deferred)  | `dealroute-api-test`  | `dealroute-api-test.fly.dev`  |
 
-> The **HQ** subdomains (`hq.`, `dev-hq.`, `test-hq.`) attach to wherever the panel deploys
-> (separate repo) — same GoDaddy-CNAME pattern, target host TBD. See the companion handoff.
+> The **HQ** subdomains (`hq.`, `dev-hq.`, `test-hq.`) deploy to **Vercel** (one project:
+> `hq`=Production, `dev-hq`=Preview; Hobby→Pro at launch) — separate repo, GoDaddy CNAME to
+> Vercel's printed target. Decided 2026-06-24; see the companion handoff for the full setup.
 
 ### Env matrix (per API instance)
 

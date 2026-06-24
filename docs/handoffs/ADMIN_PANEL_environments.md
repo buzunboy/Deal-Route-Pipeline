@@ -10,6 +10,31 @@ its own Settings screen without a restart.
 
 ---
 
+## Hosting decision (2026-06-24) — Vercel, ONE project, two environments
+
+HQ is a **Next.js 15 / React 19** app with server-side `app/api/*` proxy routes (the
+`wire-endpoint` pattern) + `lib/auth` server-side refresh — so it needs a Node/serverless
+runtime, NOT a static host. Owner chose **Vercel** (vs Fly / AWS):
+- **One Vercel project, two environments:** **Production** → `hq.deal-route.com`;
+  **Preview** → `dev-hq.deal-route.com`.
+- **`API_BASE_URL` per Vercel env scope:** Production → `https://api.deal-route.com`;
+  Preview → `https://dev-api.deal-route.com`. (This is the native mechanism for #2 below.)
+- **Region:** pin functions to **`fra1`** — the pipeline API + DB (`fra`) and S3/CDN
+  (`eu-central-1`) are all in Frankfurt; keeps panel→API latency low and data in-region
+  for the German service.
+- **Billing plan:** start on **Hobby (free)** while pre-launch/dev-only; **upgrade to Pro
+  (~$20/mo) before `hq` carries real commercial traffic** (Vercel Hobby is non-commercial
+  per ToS). Same project — the upgrade is a plan flip, no re-architecture or domain re-setup.
+- **Not locked in:** if Pro isn't worth it at launch, the fallback is Fly (a Dockerfile +
+  `fly certs add` + GoDaddy A/AAAA — the exact flow already used for `dev-api`/`api`).
+- **Custom domains:** added in the Vercel dashboard (Vercel auto-issues TLS); the GoDaddy
+  DNS records are whatever the Vercel dashboard prints (typically `CNAME → cname.vercel-dns.com`,
+  but read the dashboard — don't hardcode). Registrar is GoDaddy.
+- **Switcher gate (#3 below):** use `process.env.VERCEL_ENV` — `development` shows the
+  Local API switcher; `preview`/`production` hide it so a deployed HQ can't be repointed.
+
+---
+
 ## Phasing — Staging is DEFERRED
 
 > **Build now: Local + Dev + Prod HQ.** **Skip Staging (`test-hq`) for now** — it comes later.
