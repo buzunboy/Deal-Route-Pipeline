@@ -1,4 +1,4 @@
-import type { Config } from '../config/index.js';
+import { RECOMMENDED_MIN_OUTPUT_TOKENS, type Config } from '../config/index.js';
 import {
   ExtractUseCase,
   CrawlSourceUseCase,
@@ -147,6 +147,7 @@ export class Container {
     this.config = config;
     this.vocabulary = options.vocabulary ?? SEED_VOCABULARY;
     this.logger = new ConsoleLogger(config.logLevel);
+    this.warnIfLowOutputTokens(config);
     this.clock = overrides.clock ?? new SystemClock();
 
     this.fetcher = overrides.fetcher ?? this.buildFetcher(config);
@@ -431,6 +432,26 @@ export class Container {
         inlineScrape: config.agent.inlineScrape,
       },
     );
+  }
+
+  /**
+   * Warn (don't fail) when the LLM output-token ceiling is below the recommended
+   * floor: dense DE pages overflow the extraction JSON and truncate past recovery,
+   * failing the whole page. The schema floor stays at 4096 (a hard backstop), so a
+   * deliberately-low value is allowed — but it's almost always a stale env override,
+   * so surface it loudly at startup. Skipped for `stub` (offline, no real call).
+   */
+  private warnIfLowOutputTokens(config: Config): void {
+    if (config.llm.provider === 'stub') return;
+    if (config.llm.maxOutputTokens < RECOMMENDED_MIN_OUTPUT_TOKENS) {
+      this.logger.warn('LLM_MAX_OUTPUT_TOKENS is below the recommended floor', {
+        configured: config.llm.maxOutputTokens,
+        recommended: RECOMMENDED_MIN_OUTPUT_TOKENS,
+        impact:
+          'dense pages can truncate the extraction JSON past recovery and fail the page; ' +
+          'unset LLM_MAX_OUTPUT_TOKENS to use the default.',
+      });
+    }
   }
 
   private buildLlm(config: Config): Llm {

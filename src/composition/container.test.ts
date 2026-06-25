@@ -1,7 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { Container } from './container.js';
-import { loadConfig } from '../config/index.js';
+import { loadConfig, RECOMMENDED_MIN_OUTPUT_TOKENS } from '../config/index.js';
 import { PoliteFetcher } from '../adapters/fetcher/polite-fetcher.js';
+import { RoleAwareFakeLlm } from '../../test/fakes/fakes.js';
 
 /**
  * Container wiring tests for the fetcher backend selection (incl. the C-2 browser
@@ -37,6 +38,58 @@ describe('Container — fetcher selection', () => {
     expect(() => new Container(cfg({ FETCHER: 'firecrawl' }), { usePersistence: false })).toThrow(
       /FIRECRAWL_API_KEY/,
     );
+  });
+});
+
+describe('Container — LLM output-token warning', () => {
+  let container: Container | undefined;
+  afterEach(async () => {
+    await container?.shutdown();
+    container = undefined;
+    vi.restoreAllMocks();
+  });
+
+  // warn() → console.log (JSON line); inject a fake LLM so a real provider name is
+  // used (the warning skips `stub`) without needing an API key.
+  const opts = { usePersistence: false, overrides: { llm: new RoleAwareFakeLlm({}) } };
+
+  it('warns when LLM_MAX_OUTPUT_TOKENS is below the recommended floor', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    container = new Container(
+      loadConfig({ LLM_PROVIDER: 'anthropic', LLM_MAX_OUTPUT_TOKENS: '4096' }),
+      opts,
+    );
+    const warned = log.mock.calls
+      .map((c) => String(c[0]))
+      .some(
+        (line) =>
+          line.includes('below the recommended floor') && line.includes('"configured":4096'),
+      );
+    expect(warned).toBe(true);
+  });
+
+  it('does NOT warn at the recommended floor', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    container = new Container(
+      loadConfig({
+        LLM_PROVIDER: 'anthropic',
+        LLM_MAX_OUTPUT_TOKENS: String(RECOMMENDED_MIN_OUTPUT_TOKENS),
+      }),
+      opts,
+    );
+    const warned = log.mock.calls
+      .map((c) => String(c[0]))
+      .some((line) => line.includes('below the recommended floor'));
+    expect(warned).toBe(false);
+  });
+
+  it('does NOT warn for the stub provider (offline, no real call)', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    container = new Container(cfg({ LLM_MAX_OUTPUT_TOKENS: '4096' }), { usePersistence: false });
+    const warned = log.mock.calls
+      .map((c) => String(c[0]))
+      .some((line) => line.includes('below the recommended floor'));
+    expect(warned).toBe(false);
   });
 });
 

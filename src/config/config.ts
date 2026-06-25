@@ -9,6 +9,15 @@ import { z } from 'zod';
 
 const boolish = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1');
 
+/**
+ * Below this, dense DE pages (Spotify/MagentaTV: many tariffs + verbose German terms)
+ * overflow the extraction JSON and truncate past json-recovery — both the call and the
+ * re-ask fail the page. The hard schema floor is kept at 4096 (a backstop), but anything
+ * under this is risky in practice, so the composition root WARNS at startup (see
+ * `Container`). Mirrors the default the loader uses when `LLM_MAX_OUTPUT_TOKENS` is unset.
+ */
+export const RECOMMENDED_MIN_OUTPUT_TOKENS = 8192;
+
 const ConfigSchema = z.object({
   llm: z.object({
     // `stub` is an offline, no-key provider for demos / e2e dry-run / CI.
@@ -233,7 +242,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       discoveryModel: env.LLM_DISCOVERY_MODEL ?? 'claude-opus-4-8',
       // Headroom for multi-deal pages: a page with several plans + verbose
       // German terms can exceed 4k output tokens and truncate mid-JSON.
-      maxOutputTokens: env.LLM_MAX_OUTPUT_TOKENS ?? '8192',
+      maxOutputTokens: env.LLM_MAX_OUTPUT_TOKENS ?? String(RECOMMENDED_MIN_OUTPUT_TOKENS),
       timeoutMs: env.LLM_TIMEOUT_MS ?? '60000',
       anthropicApiKey: emptyToUndefined(env.ANTHROPIC_API_KEY),
       openaiApiKey: emptyToUndefined(env.OPENAI_API_KEY),
