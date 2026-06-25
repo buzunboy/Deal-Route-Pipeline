@@ -141,6 +141,29 @@ jobs:
           echo "args=$ARGS"        >> "$GITHUB_OUTPUT"
           echo "needs_llm=$NEEDS_LLM" >> "$GITHUB_OUTPUT"
 
+      - name: Verify the token can reach $APP
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Cheap auth probe BEFORE the lane run. If the token is scoped to the OTHER
+          # app (or is otherwise invalid for $APP), flyctl can't authenticate and falls
+          # back to interactive login, which dies as "prompt: non interactive" — a
+          # cryptic error that looks like a lane bug. Catch it here with a clear message.
+          # `< /dev/null` ensures any prompt fails fast instead of hanging.
+          # Per-app secret name for $APP: uppercase, dashes→underscores (matches the
+          # FLY_API_TOKEN_* env names the resolve step reads).
+          PERAPP_SECRET="FLY_API_TOKEN_$(echo "$APP" | tr 'a-z-' 'A-Z_')"
+          if ! flyctl status -a "$APP" --org personal < /dev/null > /dev/null 2>&1; then
+            echo "::error::flyctl can't authenticate against '$APP' with the provided token."
+            echo "::error::The token is almost certainly scoped to a DIFFERENT app. A deploy"
+            echo "::error::token (fly tokens create deploy -a X) only works for app X."
+            echo "::error::Fix: use an org token (fly tokens create org -o personal) as the"
+            echo "::error::FLY_API_TOKEN secret, OR add a per-app secret ${PERAPP_SECRET}"
+            echo "::error::scoped to '$APP' (fly tokens create deploy -a $APP)."
+            exit 1
+          fi
+          echo "Token OK for $APP."
+
       - name: Run the lane (fly machine run, ephemeral, in the Fly org)
         shell: bash
         run: |
