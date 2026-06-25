@@ -10,13 +10,20 @@ name: Run lane on Fly
 # (docker-run-against-a-public-DB) .github/workflows/scheduled.yml. Use THIS one when
 # the DB is Fly-internal.
 #
+# Pick the API Environment (Development → dealroute-api-dev, default; Production →
+# dealroute-api) and a lane from the dropdowns.
+#
 # SETUP (one-time):
-#   1. Create a Fly deploy token scoped to the app:
-#        fly tokens create deploy -a dealroute-api
-#   2. Add it as a repo secret named FLY_API_TOKEN
+#   1. Create a Fly token. Easiest is an org-wide token that covers BOTH apps:
+#        fly tokens create org
+#      (or two app-scoped deploy tokens: fly tokens create deploy -a <app>).
+#   2. Add it as the repo secret FLY_API_TOKEN
 #        (Settings → Secrets and variables → Actions → New repository secret).
-#   The app already holds DATABASE_URL / ANTHROPIC_API_KEY / S3_* as Fly secrets,
-#   which the launched machine inherits — nothing else to configure here.
+#      If — and only if — your token is app-scoped and can't reach the other app, add
+#      per-app secrets FLY_API_TOKEN_DEALROUTE_API_DEV / FLY_API_TOKEN_DEALROUTE_API;
+#      each environment prefers its own, falling back to FLY_API_TOKEN.
+#   Each app already holds its own DATABASE_URL / ANTHROPIC_API_KEY / S3_* as Fly
+#   secrets, which the launched machine inherits — nothing else to configure here.
 #
 # Nothing auto-publishes; lanes are bounded. Discover (Tier-4) is included for
 # completeness but stays off unless you pick it.
@@ -24,6 +31,14 @@ name: Run lane on Fly
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'API Environment'
+        required: true
+        default: Development
+        type: choice
+        # GitHub renders the raw value as the label, so the options ARE the display
+        # names; the job maps Development → dealroute-api-dev, Production → dealroute-api.
+        options: [Development, Production]
       lane:
         description: 'Lane to run'
         required: true
@@ -46,7 +61,8 @@ on:
 concurrency:
   # Never overlap a lane run with itself (no source-level advisory lock yet — see
   # docs/KNOWN_ISSUES.md). A second click waits rather than racing the first.
-  group: run-lane-fly
+  # Per-environment so a dev run and a prod run don't block each other.
+  group: run-lane-fly-${{ inputs.environment }}
   cancel-in-progress: false
 
 jobs:
@@ -57,22 +73,52 @@ jobs:
     # too if you set a lane_timeout above ~45m.
     timeout-minutes: 50
     env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      APP: dealroute-api
+      # APP + FLY_API_TOKEN are resolved per-environment in the first step below
+      # (a job-level `env:` can't branch on the choice input). The rest are static.
       REGION: fra
       IMAGE: ghcr.io/buzunboy/deal-route-pipeline:${{ inputs.image_tag }}
       LANE: ${{ inputs.lane }}
       LANE_TIMEOUT: ${{ inputs.lane_timeout }}
       VM_MEMORY: ${{ inputs.vm_memory }}
+      # Pass every candidate token in as env so the resolve step can pick one without
+      # referencing a maybe-undefined secret inline. Per-app tokens are OPTIONAL — set
+      # one only if your FLY_API_TOKEN is app-scoped and can't reach the other app.
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_TOKEN_DEALROUTE_API_DEV: ${{ secrets.FLY_API_TOKEN_DEALROUTE_API_DEV }}
+      FLY_API_TOKEN_DEALROUTE_API: ${{ secrets.FLY_API_TOKEN_DEALROUTE_API }}
     steps:
-      - name: Guard — require the Fly token
+      - name: Resolve environment → app + token
+        shell: bash
         run: |
-          if [ -z "$FLY_API_TOKEN" ]; then
-            echo "::error::FLY_API_TOKEN secret is not set. Create one with"
-            echo "::error::  fly tokens create deploy -a dealroute-api"
-            echo "::error::and add it as the repo secret FLY_API_TOKEN (see this workflow's header)."
+          set -euo pipefail
+          # Map the API Environment choice → the Fly app name.
+          case "${{ inputs.environment }}" in
+            Development) APP=dealroute-api-dev ;;
+            Production)  APP=dealroute-api ;;
+            *) echo "::error::unknown environment '${{ inputs.environment }}'"; exit 1 ;;
+          esac
+
+          # Pick the token: a per-app FLY_API_TOKEN_<APP> (set only when your token is
+          # app-scoped) wins; otherwise fall back to the shared FLY_API_TOKEN. So an
+          # org-wide token Just Works, and a dev-scoped token can be added later with
+          # no edit here.
+          case "$APP" in
+            dealroute-api-dev) TOKEN="${FLY_API_TOKEN_DEALROUTE_API_DEV:-$FLY_API_TOKEN}" ;;
+            dealroute-api)     TOKEN="${FLY_API_TOKEN_DEALROUTE_API:-$FLY_API_TOKEN}" ;;
+          esac
+
+          if [ -z "$TOKEN" ]; then
+            echo "::error::No Fly token available for '$APP'. Add a repo secret FLY_API_TOKEN"
+            echo "::error::(org-wide, covers both apps) — or a per-app FLY_API_TOKEN_${APP^^} with"
+            echo "::error::dashes as underscores. Create one with: fly tokens create deploy -a $APP"
             exit 1
           fi
+
+          echo "Targeting Fly app: $APP"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          # Mask before exporting so it never lands in a log.
+          echo "::add-mask::$TOKEN"
+          echo "FLY_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
@@ -137,7 +183,7 @@ jobs:
             # exit) but flyctl stayed attached past the wait. Don't fail the run on this;
             # verify via the API / `flyctl logs`. A genuinely stuck lane shows up there.
             echo "::warning::flyctl stayed attached past ${LANE_TIMEOUT} and was stopped (exit 124)."
-            echo "::warning::The lane usually completed — confirm with: curl https://dealroute-api.fly.dev/api/candidates"
+            echo "::warning::The lane usually completed — confirm with: curl https://${APP}.fly.dev/api/candidates"
             exit 0
           fi
           # Any other non-zero is a real lane/launch failure — propagate it.
