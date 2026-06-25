@@ -171,11 +171,15 @@ jobs:
           # caps), so LANE_TIMEOUT is a generous backstop, not the expected duration.
           LANE_TIMEOUT="${LANE_TIMEOUT:-20m}"
           set +e
+          # --org is REQUIRED in CI: with an org-spanning token flyctl prompts to pick
+          # an org, which dies with "prompt: non interactive" under no TTY. Both apps
+          # live in the `personal` org. `< /dev/null` is a belt-and-braces guard so any
+          # other stray prompt fails fast instead of hanging.
           timeout "$LANE_TIMEOUT" flyctl machine run "$IMAGE" \
-            -a "$APP" --region "$REGION" --rm \
+            -a "$APP" --org personal --region "$REGION" --rm \
             --vm-memory "$VM_MEMORY" \
             "${EXTRA_ENV[@]}" \
-            -- ${{ steps.cmd.outputs.args }}
+            -- ${{ steps.cmd.outputs.args }} < /dev/null
           rc=$?
           set -e
           if [ "$rc" -eq 124 ]; then
