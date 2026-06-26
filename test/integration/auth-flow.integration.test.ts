@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { AddressInfo } from 'node:net';
 import { generateKeyPair, exportPKCS8 } from 'jose';
-import { hasDb, applyMigrations, resetDb, makeContainer } from './harness.js';
+import { hasDb, applyMigrations, resetDb, makeContainer, ageRefreshRevocation } from './harness.js';
 import { ScriptedFetcher, RoleAwareFakeLlm } from '../fakes/fakes.js';
 import { ReviewApi } from '../../src/adapters/http/review-api.js';
 import { AuthApi } from '../../src/adapters/http/auth-api.js';
@@ -179,9 +179,16 @@ suite('Auth/IAM flow — per-user JWT only (Container + Postgres + HTTP)', () =>
     expect(refreshRes.status).toBe(403); // AccountDisabledError
   });
 
-  it('refresh rotates, and replaying a rotated-out token revokes the family (401)', async () => {
+  it('refresh rotates; an immediate concurrent replay re-issues (200), a LATE replay revokes the family (401)', async () => {
     await boot();
     await seedReviewer('rita@dealroute.de', 'a-strong-password');
+    const refresh = (token: string): Promise<Response> =>
+      fetch(`${authBase}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ refreshToken: token }),
+      });
+
     const login = await (
       await fetch(`${authBase}/auth/login`, {
         method: 'POST',
@@ -191,20 +198,20 @@ suite('Auth/IAM flow — per-user JWT only (Container + Postgres + HTTP)', () =>
     ).json();
     const first = (login as { refreshToken: string }).refreshToken;
 
-    const rotated = await fetch(`${authBase}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ refreshToken: first }),
-    });
+    const rotated = await refresh(first);
     expect(rotated.status).toBe(200);
+    const second = ((await rotated.json()) as { refreshToken: string }).refreshToken;
 
-    // Replay the rotated-out token → reuse-detection 401.
-    const reuse = await fetch(`${authBase}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ refreshToken: first }),
-    });
-    expect(reuse.status).toBe(401);
+    // Immediate replay of the just-rotated token → benign concurrent race → 200, family kept.
+    const concurrent = await refresh(first);
+    expect(concurrent.status).toBe(200);
+    // The legitimate successor is still usable: the family was NOT revoked.
+    expect((await refresh(second)).status).toBe(200);
+
+    // Now age every revocation past the 10s grace window and replay `first` → theft → 401,
+    // and the whole family dies (`second`'s successor also fails).
+    await ageRefreshRevocation(60);
+    expect((await refresh(first)).status).toBe(401);
   });
 
   it('Phase 5: the OLD static token no longer authorises a write (401, nothing recorded)', async () => {

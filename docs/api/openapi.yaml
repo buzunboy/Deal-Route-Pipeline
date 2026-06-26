@@ -138,8 +138,10 @@ paths:
       description: |
         The presented refresh token is REVOKED and a successor is issued in the same family
         (rotation). Replaying a rotated-out token is reuse-detection → the whole family is
-        revoked and the call 401s. A disabled user cannot refresh. Permissions are
-        re-resolved, so a `perm_version`-driven change reaches the new access token.
+        revoked and the call 401s — EXCEPT a benign racing replay within a short grace window
+        (two tabs / a retry presenting the same just-rotated token), which re-issues a fresh
+        in-family pair (200) rather than revoking. A disabled user cannot refresh. Permissions
+        are re-resolved, so a `perm_version`-driven change reaches the new access token.
       security: []
       requestBody:
         required: true

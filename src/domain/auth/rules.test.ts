@@ -230,13 +230,34 @@ describe('validateRefreshRotation', () => {
     expect(validateRefreshRotation(stored(), now)).toBe('ok');
   });
 
-  it('a revoked row ⇒ reuse', () => {
-    expect(validateRefreshRotation(stored({ revoked_at: '2026-06-18T01:00:00.000Z' }), now)).toBe(
-      'reuse',
-    );
+  it('a revoked row (no successor) ⇒ reuse even within the grace window', () => {
+    // A revoke WITHOUT a successor is a logout / theft response, never a benign rotation —
+    // so it's reuse regardless of how recent.
+    const justRevoked = new Date(now.getTime() - 1000).toISOString();
+    expect(validateRefreshRotation(stored({ revoked_at: justRevoked }), now)).toBe('reuse');
   });
 
-  it('a replaced (rotated-out) row ⇒ reuse', () => {
+  it('a rotated-out row replayed LATE (past the grace window) ⇒ reuse', () => {
+    const longAgo = new Date(now.getTime() - 60_000).toISOString(); // 60s > 10s grace
+    expect(
+      validateRefreshRotation(
+        stored({ replaced_by: '66666666-6666-6666-6666-666666666666', revoked_at: longAgo }),
+        now,
+      ),
+    ).toBe('reuse');
+  });
+
+  it('a rotated-out row replayed WITHIN the grace window ⇒ concurrent (benign race)', () => {
+    const justRotated = new Date(now.getTime() - 2000).toISOString(); // 2s < 10s grace
+    expect(
+      validateRefreshRotation(
+        stored({ replaced_by: '66666666-6666-6666-6666-666666666666', revoked_at: justRotated }),
+        now,
+      ),
+    ).toBe('concurrent');
+  });
+
+  it('a rotated-out row with no revoked_at timestamp ⇒ reuse (cannot prove recency)', () => {
     expect(
       validateRefreshRotation(stored({ replaced_by: '66666666-6666-6666-6666-666666666666' }), now),
     ).toBe('reuse');

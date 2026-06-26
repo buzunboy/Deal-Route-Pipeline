@@ -14,23 +14,41 @@ import {
   TEST_KID,
 } from '../../../test/fakes/auth-test-support.js';
 import { FixedClock } from '../../../test/fakes/fakes.js';
+import type { Clock } from '../../application/ports/index.js';
+
+/** A clock the test can advance, to exercise the refresh-reuse grace window. */
+class MutableClock implements Clock {
+  constructor(private d: Date) {}
+  set(d: Date): void {
+    this.d = d;
+  }
+  now(): Date {
+    return this.d;
+  }
+  nowIso(): string {
+    return this.d.toISOString();
+  }
+}
+
+const T0 = new Date('2026-06-19T00:00:00.000Z');
 
 /** Drives the real AuthApi over a real socket end-to-end. */
 describe('AuthApi (HTTP integration)', () => {
-  let makeIssuer: (clock: FixedClock) => JoseTokenIssuer;
+  let makeIssuer: (clock: Clock) => JoseTokenIssuer;
   let db: InMemoryDb;
   let hasher: FakePasswordHasher;
   let api: AuthApi;
   let base: string;
+  let clock: MutableClock;
 
   beforeAll(async () => {
-    makeIssuer = (await makeTestTokenIssuerFactory()) as (c: FixedClock) => JoseTokenIssuer;
+    makeIssuer = (await makeTestTokenIssuerFactory()) as (c: Clock) => JoseTokenIssuer;
   });
 
   beforeEach(async () => {
     db = new InMemoryDb();
     hasher = new FakePasswordHasher();
-    const clock = new FixedClock(new Date('2026-06-19T00:00:00.000Z'));
+    clock = new MutableClock(T0);
     const issuer = makeIssuer(clock);
     const login = new AuthenticateUseCase(
       db,
@@ -157,9 +175,18 @@ describe('AuthApi (HTTP integration)', () => {
       expect(res.status).toBe(401);
     });
 
-    it('REUSE of a rotated-out token → 401 (family revoked)', async () => {
+    it('a concurrent replay within the grace window → 200 (benign race, family kept)', async () => {
       const first = await loginRefreshToken();
-      await post('/auth/refresh', { refreshToken: first }); // rotates `first` out
+      await post('/auth/refresh', { refreshToken: first }); // rotates `first` out at T0
+      clock.set(new Date(T0.getTime() + 1000)); // 1s later — within the grace window
+      const racing = await post('/auth/refresh', { refreshToken: first });
+      expect(racing.status).toBe(200);
+    });
+
+    it('a LATE replay of a rotated-out token → 401 (family revoked)', async () => {
+      const first = await loginRefreshToken();
+      await post('/auth/refresh', { refreshToken: first }); // rotates `first` out at T0
+      clock.set(new Date(T0.getTime() + 60_000)); // 60s later — past the grace window
       const reuse = await post('/auth/refresh', { refreshToken: first });
       expect(reuse.status).toBe(401);
     });
