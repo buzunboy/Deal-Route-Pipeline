@@ -60,11 +60,25 @@ describe('audit-feed projection', () => {
       );
     });
 
-    it('the deal label wins over a present reason (reject rows show the deal, per the fixture)', () => {
+    it('a REJECT with a reason appends it to the deal label after an em-dash', () => {
+      // Reviewers must still see WHY a deal was rejected: "<deal label> — <reason>".
       const entry = toAuditEntry(
         row({
           action: 'reject',
-          reason: 'evidence missing',
+          reason: "Evidence doesn't support deal",
+          deal_service: 'Audible',
+          deal_provider: 'Amazon Prime',
+        }),
+      );
+      expect(entry.detail).toBe("Audible · Amazon Prime — Evidence doesn't support deal");
+    });
+
+    it('an APPROVE keeps just the deal label even when a reason is present', () => {
+      // Only reject rows append the reason; approve/edit stay the bare label.
+      const entry = toAuditEntry(
+        row({
+          action: 'approve',
+          reason: 'should be ignored',
           deal_service: 'Max',
           deal_provider: 'AT&T',
         }),
@@ -72,10 +86,11 @@ describe('audit-feed projection', () => {
       expect(entry.detail).toBe('Max · AT&T');
     });
 
-    it('falls back to service alone, then to the reason, then null', () => {
+    it('falls back to service alone, then (reject) to the bare reason, then null', () => {
       expect(toAuditEntry(row({ deal_service: 'Spotify', deal_provider: null })).detail).toBe(
         'Spotify',
       );
+      // Reject with a reason but no resolvable deal (hard-deleted) → just the reason.
       expect(toAuditEntry(row({ action: 'reject', reason: 'dupe' })).detail).toBe('dupe');
       expect(toAuditEntry(row({})).detail).toBeNull();
     });

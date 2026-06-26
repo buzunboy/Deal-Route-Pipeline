@@ -2101,8 +2101,11 @@ components:
           description: >-
             The decided deal's human-readable label "<service> · <provider>" (service
             alone if the provider is absent) — shown for EVERY action, approvals
-            included. Falls back to the review's free-text reason only when the deal
-            can't be resolved (hard-deleted), else null.
+            included. A `reject` row additionally appends its reason after an em-dash —
+            "<label> — <reason>" — so reviewers see why a deal was rejected (with no
+            resolvable deal, the reject falls back to the bare reason). Falls back to the
+            review's free-text reason when the deal can't be resolved (hard-deleted),
+            else null.
         entity_id: { type: string, format: uuid }
         at: { type: string, format: date-time }
       additionalProperties: false

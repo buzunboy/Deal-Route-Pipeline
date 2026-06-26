@@ -529,11 +529,12 @@ describe('ReviewUseCase', () => {
         '2026-06-19T05:00:00.000Z',
         '2026-06-19T01:00:00.000Z',
       ]);
-      // Projected shape: initials + entity_id + detail (the deal label, even on the
-      // approve row that has no reason — the regression this guards).
+      // Projected shape: initials + entity_id + detail. The deal label shows even on the
+      // approve row that has no reason (the regression this guards); a reject appends its
+      // reason after an em-dash so reviewers still see WHY it was rejected.
       expect(all[0]!.initials).toBe('BO');
-      expect(all[1]!.detail).toBe('Audible · Amazon Prime');
-      expect(all[2]!.detail).toBe('Audible · Amazon Prime');
+      expect(all[1]!.detail).toBe('Audible · Amazon Prime — no good'); // reject (reason 'no good')
+      expect(all[2]!.detail).toBe('Audible · Amazon Prime'); // approve (no reason)
       expect(all[1]!.entity_id).toBe(dealId);
 
       // Filtered by actor.

@@ -271,6 +271,15 @@ suite('review edit / promote / manual-capture (Container + Postgres)', () => {
     // — proves the join selects service/provider (the approve row has no reason).
     expect(feed.find((e) => e.action === 'approve')!.detail).toBe('Audible · Amazon Prime');
 
+    // A REAL reject (with a reason) over the same JOIN appends the reason to the label,
+    // so reviewers see WHY the deal was rejected: "<label> — <reason>".
+    const rejected = await seedCandidate({ service: 'YouTube Premium', provider: 'Revolut' });
+    await container.review.reject(rejected.id, 'carol@dealroute', "Evidence doesn't support deal");
+    const rejFeed = await container.review.auditFeed({ entityId: rejected.id });
+    expect(rejFeed.find((e) => e.action === 'reject')!.detail).toBe(
+      "YouTube Premium · Revolut — Evidence doesn't support deal",
+    );
+
     // actor filter narrows to one reviewer.
     const byAlice = await container.review.auditFeed({ actor: 'alice@dealroute' });
     expect(byAlice.every((e) => e.actor === 'alice@dealroute')).toBe(true);

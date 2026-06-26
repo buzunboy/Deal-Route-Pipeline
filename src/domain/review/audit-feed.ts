@@ -38,7 +38,11 @@ export interface AuditEntry {
   /** The reviewer identity that took the action. */
   actor: string;
   action: ReviewAction;
-  /** Human-readable detail (the review reason / edit summary), or null. */
+  /**
+   * Human-readable detail: the deal label `"<service> · <provider>"` for every action;
+   * a `reject` appends its reason (`"<label> — <reason>"`). Null when no deal resolves
+   * and the row has no reason. See {@link detailFor}.
+   */
   detail: string | null;
   /** The entity the action was on — the deal id. */
   entity_id: string;
@@ -53,13 +57,26 @@ export function toAuditEntry(review: AuditReviewRow): AuditEntry {
     initials: initialsOf(review.approver),
     actor: review.approver,
     action: review.action,
-    // ACR-7: `detail` is the human-readable deal label ("<service> · <provider>")
-    // for EVERY action — approvals (which carry no reason) included. The reason is
-    // only the fallback when the deal can't be resolved (hard-deleted).
-    detail: dealLabel(review.deal_service, review.deal_provider) ?? review.reason,
+    detail: detailFor(review),
     entity_id: review.deal_id,
     at: review.decided_at,
   };
+}
+
+/**
+ * Project a row's `detail` (ACR-7). For EVERY action it is the deal's human-readable
+ * label `"<service> · <provider>"` (service alone if the provider is absent). A
+ * `reject` additionally appends its reason after an em-dash — `"<label> — <reason>"` —
+ * so reviewers see WHY a deal was rejected; with no resolvable deal the reject falls
+ * back to the bare reason. When the deal can't be resolved (hard-deleted), any action
+ * falls back to the row's `reason`, else null.
+ */
+function detailFor(review: AuditReviewRow): string | null {
+  const label = dealLabel(review.deal_service, review.deal_provider);
+  if (review.action === 'reject' && review.reason) {
+    return label ? `${label} — ${review.reason}` : review.reason;
+  }
+  return label ?? review.reason;
 }
 
 /**
