@@ -45,6 +45,13 @@ import {
   RoleSchema,
   TeamMemberSchema,
   SYSTEM_ROLES,
+  dealToSearchItem,
+  sourceToSearchItem,
+  captureToSearchItem,
+  userToSearchItem,
+  type SearchResource,
+  type SearchResults,
+  type SearchResultItem,
 } from '../../../domain/index.js';
 import type {
   Database,
@@ -77,7 +84,7 @@ import type {
  * the Postgres adapter against. Not durable — data is lost on process exit.
  */
 export class InMemoryDb implements Database {
-  sources: SourceRepository = new InMemorySourceRepo();
+  sources: InMemorySourceRepo = new InMemorySourceRepo();
   // Evidence repo built first so the deal repo can resolve a deal's evidence hash
   // (the content-hash join behind findActiveByDedupeKeyAndHash).
   evidence: InMemoryEvidenceRepo = new InMemoryEvidenceRepo();
@@ -86,7 +93,7 @@ export class InMemoryDb implements Database {
   // join by registrable domain. Same read both adapters do; LSP-identical.
   deals: DealRepository = new InMemoryDealRepo(this.evidence, this.sources);
   crawlRuns: CrawlRunRepository = new InMemoryCrawlRunRepo();
-  manualCapture: ManualCaptureRepository = new InMemoryManualCaptureRepo();
+  manualCapture: InMemoryManualCaptureRepo = new InMemoryManualCaptureRepo();
   fieldProposals: FieldProposalRepository = new InMemoryFieldProposalRepo();
   conditionVocabulary: ConditionVocabularyRepository = new InMemoryConditionVocabularyRepo();
   changes: ChangeRepository = new InMemoryChangeRepo();
@@ -141,6 +148,53 @@ export class InMemoryDb implements Database {
     ]);
     return { permissions, roleName: role?.name ?? '', permVersion };
   }
+
+  /**
+   * Unified-search scan (LSP twin of the Postgres ILIKE queries). Case-insensitive
+   * substring over each requested resource's text columns, projected via the SHARED
+   * `*ToSearchItem` helpers so both adapters return identical shapes, capped at `limit`.
+   * `q` is assumed already-trimmed + length-validated by the caller (ReviewUseCase.search).
+   */
+  async search(opts: {
+    q: string;
+    resources: Set<SearchResource>;
+    limit: number;
+  }): Promise<SearchResults> {
+    const { resources, limit } = opts;
+    const q = opts.q.toLowerCase();
+    const has = (...vals: (string | null | undefined)[]) =>
+      vals.some((v) => v != null && v.toLowerCase().includes(q));
+    const take = <T>(rows: T[], project: (r: T) => SearchResultItem): SearchResultItem[] =>
+      rows.slice(0, limit).map(project);
+
+    const out: SearchResults = {};
+    if (resources.has('candidates')) {
+      const rows = [
+        ...(await this.deals.listByStatus('candidate', limit)),
+        ...(await this.deals.listByStatus('in_review', limit)),
+      ].filter((d) => has(d.service, d.provider, d.headline));
+      out.candidates = take(rows, dealToSearchItem);
+    }
+    if (resources.has('published')) {
+      const rows = (await this.deals.listByStatus('published', limit)).filter((d) =>
+        has(d.service, d.provider, d.headline),
+      );
+      out.published = take(rows, dealToSearchItem);
+    }
+    if (resources.has('sources')) {
+      const rows = this.sources.listAll().filter((s) => has(s.registrable_domain, s.url));
+      out.sources = take(rows, sourceToSearchItem);
+    }
+    if (resources.has('captures')) {
+      const rows = this.manualCapture.listAll().filter((t) => has(t.source_url));
+      out.captures = take(rows, captureToSearchItem);
+    }
+    if (resources.has('users')) {
+      const rows = (await this.users.list()).filter((u) => has(u.name, u.email));
+      out.users = take(rows, userToSearchItem);
+    }
+    return out;
+  }
 }
 
 class InMemorySourceRepo implements SourceRepository {
@@ -173,6 +227,10 @@ class InMemorySourceRepo implements SourceRepository {
   }
   async listByStatus(status: Source['status']): Promise<Source[]> {
     return [...this.store.values()].filter((s) => s.status === status).map((s) => ({ ...s }));
+  }
+  /** All sources regardless of status — used by the in-memory unified-search scan only. */
+  listAll(): Source[] {
+    return [...this.store.values()].map((s) => ({ ...s }));
   }
   async update(s: Source): Promise<void> {
     // Keyed by url to match the upsert above (the store is url-keyed). The Postgres
@@ -499,6 +557,10 @@ class InMemoryManualCaptureRepo implements ManualCaptureRepository {
   async getById(id: string): Promise<ManualCaptureTask | null> {
     const t = this.tasks.find((x) => x.id === id);
     return t ? { ...t } : null;
+  }
+  /** All capture tasks regardless of status — used by the in-memory unified-search scan only. */
+  listAll(): ManualCaptureTask[] {
+    return this.tasks.map((t) => ({ ...t }));
   }
   async markDone(id: string, note: string | null): Promise<void> {
     const i = this.tasks.findIndex((x) => x.id === id);

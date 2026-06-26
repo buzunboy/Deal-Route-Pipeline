@@ -47,6 +47,8 @@ tags:
     description: Liveness probes.
   - name: Candidates
     description: Review queue — list, edit, approve, reject, audit. (admin)
+  - name: Search
+    description: Unified substring search across panel resources. (admin)
   - name: Evidence
     description: Bearer-gated reviewer fetch of evidence artifact bytes (screenshot/html/terms). (admin)
   - name: Field proposals
@@ -322,6 +324,53 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Health' }
+
+  /api/search:
+    get:
+      tags: [Search]
+      summary: Unified substring search across the panel's resources
+      operationId: search
+      description: |
+        Case-insensitive substring (ILIKE) search over candidates, sources, captures,
+        published deals, and (only with `team:manage`) users. Requires a valid token.
+        `q` shorter than 2 chars (after trim) returns an empty `results` with no DB hit.
+        With `resource` omitted, every resource the caller may see is searched; with it
+        present, only that one. The `users` category is included ONLY for a caller holding
+        `team:manage` — an under-permissioned caller gets NO `users` key (never an empty
+        array). Each hit is `{ id, title, subtitle }`; `id` is the resource's primary key
+        used for navigation/highlight. Per-category `limit` defaults to 5, hard-capped at 20.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: The search term (trimmed server-side; < 2 chars → empty results).
+          schema: { type: string }
+        - name: resource
+          in: query
+          description: Restrict to one resource. Omit to search all permitted resources.
+          schema: { $ref: '#/components/schemas/SearchResource' }
+        - name: limit
+          in: query
+          description: Per-category result cap.
+          schema: { type: integer, minimum: 1, maximum: 20, default: 5 }
+      responses:
+        '200':
+          description: Per-resource hit lists (a category absent ⇒ not searched / not permitted).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                additionalProperties: false
+                properties:
+                  results: { $ref: '#/components/schemas/SearchResults' }
+        '400':
+          description: Unknown `resource` or out-of-range `limit`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/candidates:
     get:
@@ -1758,6 +1807,31 @@ components:
       required: [error]
       properties:
         error: { type: string }
+
+    # ── Unified search (mirror src/domain/search + ReviewUseCase.search) ──
+    SearchResource:
+      type: string
+      enum: [candidates, sources, captures, published, users]
+    SearchResultItem:
+      type: object
+      required: [id, title, subtitle]
+      additionalProperties: false
+      properties:
+        id: { type: string, description: The resource's primary key (for navigation/highlight). }
+        title: { type: string }
+        subtitle: { type: string }
+    SearchResults:
+      type: object
+      description: |
+        Per-resource hit lists. A category present with an empty array means "searched, no
+        match"; an absent `users` key means the caller lacks `team:manage`.
+      additionalProperties: false
+      properties:
+        candidates: { type: array, items: { $ref: '#/components/schemas/SearchResultItem' } }
+        sources: { type: array, items: { $ref: '#/components/schemas/SearchResultItem' } }
+        captures: { type: array, items: { $ref: '#/components/schemas/SearchResultItem' } }
+        published: { type: array, items: { $ref: '#/components/schemas/SearchResultItem' } }
+        users: { type: array, items: { $ref: '#/components/schemas/SearchResultItem' } }
 
     # ── Auth / IdP (mirror src/adapters/http/auth-api.ts + AuthSession) ──
     LoginRequest:

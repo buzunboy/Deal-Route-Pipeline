@@ -62,7 +62,11 @@ import {
   AUDIT_MAX_LIMIT,
   ADMIN_PUBLISHED_MAX_LIMIT,
   ADMIN_PUBLISHED_MAX_OFFSET,
+  SEARCH_DEFAULT_LIMIT,
+  SEARCH_MAX_LIMIT,
+  isSearchResource,
   type CandidateFilters,
+  type SearchResource,
 } from '../../domain/index.js';
 
 /**
@@ -256,6 +260,25 @@ export class ReviewApi {
     // `/api/candidates/:id...` matchers + the `/api/candidates` list below.
     if (method === 'GET' && path === '/api/candidates/freshness') {
       return sendJson(res, 200, await this.metrics.queueFreshness());
+    }
+
+    // Unified search across candidates/sources/captures/published/users (frozen contract).
+    // Behind the requireRead gate above (any signed-in user); the `users` category is
+    // additionally scoped to `team:manage` INSIDE the use-case off the verified perms, so
+    // an under-permissioned caller never gets a `users` key. q<2 → `{ results: {} }`, no DB hit.
+    if (method === 'GET' && path === '/api/search') {
+      const parsed = parseSearchQuery(url.searchParams);
+      if (!parsed.ok) return sendError(res, 400, parsed.error);
+      // The gate already authenticated; re-resolve the identity for its verified perms.
+      const identity = await this.authenticate(req);
+      if (identity === null) return sendError(res, 401, 'unauthorized');
+      const results = await this.review.search({
+        q: parsed.value.q,
+        resource: parsed.value.resource,
+        limit: parsed.value.limit,
+        permissions: identity.perms,
+      });
+      return sendJson(res, 200, { results });
     }
 
     if (method === 'GET' && path === '/api/candidates') {
@@ -1253,5 +1276,37 @@ function parseAuditQuery(
     if (Number.isNaN(ms)) return { ok: false, error: 'since must be an ISO-8601 timestamp' };
     value.since = new Date(ms);
   }
+  return { ok: true, value };
+}
+
+/**
+ * Parse the GET /api/search query (the frozen unified-search contract). `q` is required
+ * (trim + the <2-char short-circuit happen in the use-case — this just carries it through);
+ * `resource` is optional and an UNKNOWN value is a 400; `limit` defaults to
+ * {@link SEARCH_DEFAULT_LIMIT} and is hard-capped at {@link SEARCH_MAX_LIMIT}.
+ */
+function parseSearchQuery(
+  params: URLSearchParams,
+): ParseResult<{ q: string; resource?: SearchResource; limit: number }> {
+  const q = params.get('q');
+  if (q === null) return { ok: false, error: 'q is required' };
+
+  const value: { q: string; resource?: SearchResource; limit: number } = {
+    q,
+    limit: SEARCH_DEFAULT_LIMIT,
+  };
+
+  const resource = params.get('resource');
+  if (resource !== null && resource !== '') {
+    if (!isSearchResource(resource)) return { ok: false, error: 'unknown resource' };
+    value.resource = resource;
+  }
+
+  const limit = parseIntParam(params.get('limit'), SEARCH_DEFAULT_LIMIT);
+  if (limit === null || limit < 1 || limit > SEARCH_MAX_LIMIT) {
+    return { ok: false, error: `limit must be 1..${SEARCH_MAX_LIMIT}` };
+  }
+  value.limit = limit;
+
   return { ok: true, value };
 }

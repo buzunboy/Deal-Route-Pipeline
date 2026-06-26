@@ -40,6 +40,14 @@ import {
   type LlmExtractedDeal,
   type VocabularyEntry,
   type SuffixOracle,
+  type Permission,
+  type SearchResource,
+  type SearchResults,
+  SEARCH_RESOURCES,
+  SEARCH_DEFAULT_LIMIT,
+  SEARCH_MAX_LIMIT,
+  SEARCH_MIN_QUERY_LENGTH,
+  SEARCH_USERS_PERMISSION,
 } from '../../domain/index.js';
 import type { Database, Clock, Logger } from '../ports/index.js';
 
@@ -184,6 +192,38 @@ export class ReviewUseCase {
       this.db.deals.countAdminPublished(),
     ]);
     return { deals: deals.map(toAdminPublishedDeal), total };
+  }
+
+  /**
+   * Unified search across the panel's resources (the frozen /api/search contract).
+   * Owns the trust + contract rules; the DB layer is the dumb ILIKE executor:
+   *   - q shorter than {@link SEARCH_MIN_QUERY_LENGTH} (after trim) ⇒ `{}` with NO DB hit.
+   *   - `resource` absent ⇒ every resource the caller may see; present ⇒ only that one.
+   *   - the `users` category is included ONLY when the caller holds `team:manage`; an
+   *     under-permissioned caller gets NO `users` key (never an empty array — absent).
+   *   - `limit` is clamped to [1, {@link SEARCH_MAX_LIMIT}], default {@link SEARCH_DEFAULT_LIMIT}.
+   * Caller (the route handler) has already rejected an unknown `resource` with a 400.
+   */
+  async search(opts: {
+    q: string;
+    resource?: SearchResource;
+    limit?: number;
+    permissions: Set<Permission>;
+  }): Promise<SearchResults> {
+    const q = opts.q.trim();
+    if (q.length < SEARCH_MIN_QUERY_LENGTH) return {};
+
+    const limit = clamp(opts.limit ?? SEARCH_DEFAULT_LIMIT, 1, SEARCH_MAX_LIMIT);
+
+    // Build the permitted resource set: the requested one (or all), minus `users` unless
+    // the caller can manage the team. `users` is the only permission-scoped category today.
+    const requested = opts.resource ? [opts.resource] : [...SEARCH_RESOURCES];
+    const resources = new Set<SearchResource>(
+      requested.filter((r) => r !== 'users' || opts.permissions.has(SEARCH_USERS_PERMISSION)),
+    );
+    if (resources.size === 0) return {};
+
+    return this.db.search({ q, resources, limit });
   }
 
   /**

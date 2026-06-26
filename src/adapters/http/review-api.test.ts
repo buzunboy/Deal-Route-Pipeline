@@ -212,6 +212,22 @@ describe('ReviewApi (HTTP integration)', () => {
     expect(items[0]!.evidence).not.toBeNull();
   });
 
+  it('GET /api/search returns a { results } envelope with per-resource hits', async () => {
+    await seedCandidate({ service: 'Apple TV+', provider: 'Apple', country: 'DE' });
+    const res = await fetch(`${base}/api/search?q=apple`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      results: { candidates?: { id: string; title: string; subtitle: string }[] };
+    };
+    expect(body.results.candidates).toEqual([
+      { id: expect.any(String), title: 'Apple TV+', subtitle: 'Apple · DE' },
+    ]);
+  });
+
+  it('GET /api/search with an unknown resource is a 400', async () => {
+    expect((await fetch(`${base}/api/search?q=apple&resource=widgets`)).status).toBe(400);
+  });
+
   it('a malformed (non-UUID) :id 404s instead of 500 (uuid-shaped route guard)', async () => {
     // The id maps to a Postgres `uuid` column; a non-UUID would 500 without the guard.
     expect((await fetch(`${base}/api/candidates/not-a-uuid/reviews`)).status).toBe(404);

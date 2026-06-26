@@ -27,6 +27,8 @@ import type {
   Role,
   Permission,
   StoredRefresh,
+  SearchResource,
+  SearchResults,
 } from '../../domain/index.js';
 
 /**
@@ -476,4 +478,17 @@ export interface Database {
    * `{ permissions: [], roleName: '', permVersion }`. Both adapters identical (LSP).
    */
   claimInputsForRole(roleId: string): Promise<ClaimInputs>;
+
+  /**
+   * Case-insensitive substring search over the normalized text columns of the given
+   * `resources`, projecting each hit to `{ id, title, subtitle }` (the frozen contract).
+   * Only the resources in the set are queried (one ILIKE per resource, capped at `limit`).
+   * The caller (ReviewUseCase.search) does the permission scoping + the q<2 short-circuit;
+   * this is the dumb query layer. `q` is assumed already-trimmed and length-validated.
+   */
+  search(opts: {
+    q: string;
+    resources: Set<SearchResource>;
+    limit: number;
+  }): Promise<SearchResults>;
 }

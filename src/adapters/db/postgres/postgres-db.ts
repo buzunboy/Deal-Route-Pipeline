@@ -1,5 +1,5 @@
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { and, eq, ne, lte, lt, gte, or, isNull, desc, asc, inArray, sql } from 'drizzle-orm';
+import { and, eq, ne, lte, lt, gte, or, isNull, desc, asc, inArray, ilike, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import pg from 'pg';
 import type {
@@ -50,6 +50,8 @@ import {
   zeroByRoute,
   isRouteType,
   ADMIN_PUBLISHED_STATUSES,
+  type SearchResource,
+  type SearchResults,
 } from '../../../domain/index.js';
 import type {
   Source,
@@ -245,6 +247,104 @@ export class PostgresDb implements Database {
         };
       }),
     );
+  }
+
+  /**
+   * Unified-search ILIKE queries (the frozen /api/search contract). One case-insensitive
+   * substring query per requested resource, projecting straight to `{ id, title, subtitle }`
+   * (subtitle composed in SQL so the row already carries the contract shape). Each is capped
+   * at `limit`. `q` is assumed already-trimmed + length-validated by the caller
+   * (ReviewUseCase.search), which also does the permission scoping.
+   *
+   * ponytail: plain ILIKE '%q%' substring match — no index, a sequential scan per resource.
+   * Fine at the current corpus (a handful of reviewers, low-thousands of rows). Upgrade path
+   * when it bites: a generated tsvector column + GIN index (or pg_trgm GIN for substring),
+   * matched with `@@`/`%` instead of ILIKE — same projection, swap the WHERE.
+   */
+  async search(opts: {
+    q: string;
+    resources: Set<SearchResource>;
+    limit: number;
+  }): Promise<SearchResults> {
+    const { resources, limit } = opts;
+    // Escape ILIKE wildcards so a literal % or _ in the query isn't treated as a pattern.
+    const pattern = `%${opts.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+    const out: SearchResults = {};
+
+    if (resources.has('candidates') || resources.has('published')) {
+      const dealMatch = or(
+        ilike(schema.deals.service, pattern),
+        ilike(schema.deals.provider, pattern),
+        ilike(schema.deals.headline, pattern),
+      );
+      const dealSelect = (statuses: string[]) =>
+        this.db
+          .select({
+            id: schema.deals.id,
+            title: schema.deals.service,
+            subtitle: sql<string>`${schema.deals.provider} || ' · ' || ${schema.deals.country}`,
+          })
+          .from(schema.deals)
+          .where(and(inArray(schema.deals.status, statuses), dealMatch))
+          .limit(limit);
+      if (resources.has('candidates')) {
+        out.candidates = await this.retrier.run('search.candidates', () =>
+          dealSelect(['candidate', 'in_review']),
+        );
+      }
+      if (resources.has('published')) {
+        out.published = await this.retrier.run('search.published', () => dealSelect(['published']));
+      }
+    }
+
+    if (resources.has('sources')) {
+      out.sources = await this.retrier.run('search.sources', () =>
+        this.db
+          .select({
+            id: schema.sources.id,
+            title: sql<string>`coalesce(${schema.sources.registrableDomain}, ${schema.sources.url})`,
+            subtitle: sql<string>`'Tier ' || ${schema.sources.tier} || ' · ' || ${schema.sources.status}`,
+          })
+          .from(schema.sources)
+          .where(
+            or(
+              ilike(schema.sources.registrableDomain, pattern),
+              ilike(schema.sources.url, pattern),
+            ),
+          )
+          .limit(limit),
+      );
+    }
+
+    if (resources.has('captures')) {
+      out.captures = await this.retrier.run('search.captures', () =>
+        this.db
+          .select({
+            id: schema.manualCaptureTasks.id,
+            title: schema.manualCaptureTasks.sourceUrl,
+            subtitle: sql<string>`${schema.manualCaptureTasks.reason} || ' · ' || ${schema.manualCaptureTasks.status}`,
+          })
+          .from(schema.manualCaptureTasks)
+          .where(ilike(schema.manualCaptureTasks.sourceUrl, pattern))
+          .limit(limit),
+      );
+    }
+
+    if (resources.has('users')) {
+      out.users = await this.retrier.run('search.users', () =>
+        this.db
+          .select({
+            id: schema.users.id,
+            title: schema.users.name,
+            subtitle: schema.users.email,
+          })
+          .from(schema.users)
+          .where(or(ilike(schema.users.name, pattern), ilike(schema.users.email, pattern)))
+          .limit(limit),
+      );
+    }
+
+    return out;
   }
 }
 
