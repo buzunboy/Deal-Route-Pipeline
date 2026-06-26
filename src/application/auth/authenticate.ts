@@ -10,7 +10,6 @@ import {
 import type { Database, PasswordHasher, TokenIssuer, Clock, Logger } from '../ports/index.js';
 import { randomUUID } from 'node:crypto';
 import { newRefreshToken, hashRefreshToken } from '../shared/refresh-token-crypto.js';
-import { AuthorizationUseCase } from './authorization.js';
 
 /** TTLs for the minted tokens (config `auth.ttls`). */
 export interface AuthTtls {
@@ -68,7 +67,6 @@ export class AuthenticateUseCase {
     private readonly db: Database,
     private readonly hasher: PasswordHasher,
     private readonly tokenIssuer: TokenIssuer,
-    private readonly authorization: AuthorizationUseCase,
     private readonly clock: Clock,
     private readonly logger: Logger,
     private readonly ttls: AuthTtls,
@@ -147,14 +145,17 @@ export class AuthenticateUseCase {
     meta: { userAgent?: string; ip?: string },
     familyId: string = randomUUID(),
   ): Promise<AuthSession> {
-    const perms = await this.authorization.permissionsForUser(user.id);
-    const permVersion = await this.db.authMeta.getPermVersion();
-    const role = await this.db.roles.getById(user.role_id);
+    // Coalesce the three claim-minting reads (perms + role name + perm_version) into ONE
+    // connection checkout — the auth path is the pool's heaviest consumer. `user` is already
+    // in hand, so we key off `user.role_id` (no redundant users.getById that the old
+    // `permissionsForUser(user.id)` did). Deny-by-default semantics are preserved by the port.
+    const { permissions, roleName, permVersion } = await this.db.claimInputsForRole(user.role_id);
+    const perms = new Set(permissions);
     const now = this.clock.now();
     const claims = buildAccessClaims({
       user,
       perms,
-      roleName: role?.name ?? '',
+      roleName,
       permVersion,
       now,
       ttlSeconds: this.ttls.accessSeconds,
@@ -186,7 +187,7 @@ export class AuthenticateUseCase {
       refreshToken: rawRefresh,
       refreshTokenExpires: refreshExpiresAt.getTime(),
       permissions: [...perms].sort(),
-      user: { id: user.id, email: user.email, name: user.name, role: role?.name ?? '' },
+      user: { id: user.id, email: user.email, name: user.name, role: roleName },
     };
   }
 

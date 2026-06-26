@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { AuthenticateUseCase } from './authenticate.js';
 import { RefreshUseCase } from './refresh.js';
-import { AuthorizationUseCase } from './authorization.js';
 import { InMemoryDb } from '../../adapters/db/in-memory/in-memory-db.js';
 import { JoseTokenIssuer } from '../../adapters/security/jose-token-issuer.js';
 import {
@@ -52,27 +51,17 @@ describe('RefreshUseCase', () => {
     hasher = new FakePasswordHasher();
     clock = new MovableClock(T0);
     const issuer = makeIssuer(clock);
-    const authorization = new AuthorizationUseCase(db);
     login = new AuthenticateUseCase(
       db,
       hasher,
       issuer,
-      authorization,
       clock,
       new FakeLogger(),
       TEST_AUTH_TTLS,
       TEST_LOCKOUT,
       TEST_REALM,
     );
-    refresh = new RefreshUseCase(
-      db,
-      issuer,
-      authorization,
-      clock,
-      new FakeLogger(),
-      TEST_AUTH_TTLS,
-      TEST_REALM,
-    );
+    refresh = new RefreshUseCase(db, issuer, clock, new FakeLogger(), TEST_AUTH_TTLS, TEST_REALM);
     await seedActiveUser(db, hasher, { email: 'rita@dealroute.de', password: 'pw' });
   });
 

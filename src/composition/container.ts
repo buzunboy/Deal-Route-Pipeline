@@ -274,7 +274,6 @@ export class Container {
       this.db,
       this.passwordHasher,
       this.tokenIssuer,
-      this.authorization,
       this.clock,
       this.logger,
       config.auth.ttls,
@@ -284,7 +283,6 @@ export class Container {
     this.refreshSession = new RefreshUseCase(
       this.db,
       this.tokenIssuer,
-      this.authorization,
       this.clock,
       this.logger,
       config.auth.ttls,

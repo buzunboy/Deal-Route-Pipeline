@@ -95,6 +95,10 @@ const ConfigSchema = z.object({
     // statement can't hold a connection forever.
     pool: z.object({
       max: z.coerce.number().int().positive(),
+      // Warm connections kept open even when idle — so the auth path's first checkout
+      // after a quiet spell doesn't pay a cold connect (which counts against the
+      // connect-timeout). 0 keeps the old fully-lazy behaviour.
+      min: z.coerce.number().int().nonnegative(),
       idleTimeoutMillis: z.coerce.number().int().nonnegative(),
       connectionTimeoutMillis: z.coerce.number().int().positive(),
       statementTimeoutMillis: z.coerce.number().int().positive(),
@@ -282,8 +286,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       url: env.DATABASE_URL ?? '',
       pool: {
         max: env.DB_POOL_MAX ?? '10',
+        min: env.DB_POOL_MIN ?? '2',
         idleTimeoutMillis: env.DB_POOL_IDLE_TIMEOUT_MS ?? '30000',
-        connectionTimeoutMillis: env.DB_POOL_CONNECTION_TIMEOUT_MS ?? '10000',
+        // 2.5s, not 10s: a saturated checkout should fail FAST (→ 503) instead of pinning
+        // the request for 10s. The wait never helped — under sustained auth load the pool
+        // stays full, so a long wait just stacks more in-flight requests. See KNOWN_ISSUES
+        // "IdP /auth/{login,refresh} intermittently hang".
+        connectionTimeoutMillis: env.DB_POOL_CONNECTION_TIMEOUT_MS ?? '2500',
         statementTimeoutMillis: env.DB_STATEMENT_TIMEOUT_MS ?? '30000',
       },
       retry: {

@@ -23,6 +23,7 @@ import type {
   RolePermissionRepository,
   RefreshTokenRepository,
   AuthMetaRepository,
+  ClaimInputs,
 } from '../../../application/ports/index.js';
 import {
   ChangeSchema,
@@ -89,6 +90,7 @@ type Db = NodePgDatabase<typeof schema>;
 export interface PostgresDbOptions {
   pool: {
     max: number;
+    min: number;
     idleTimeoutMillis: number;
     connectionTimeoutMillis: number;
     statementTimeoutMillis: number;
@@ -106,8 +108,9 @@ export interface PostgresDbOptions {
 const DEFAULT_OPTIONS: PostgresDbOptions = {
   pool: {
     max: 10,
+    min: 2,
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 2_500,
     statementTimeoutMillis: 30_000,
   },
   retry: { retries: 3, baseDelayMs: 100 },
@@ -148,8 +151,8 @@ export class PostgresDb implements Database {
 
   private constructor(
     private readonly pool: pg.Pool,
-    db: Db,
-    retrier: DbRetrier,
+    private readonly db: Db,
+    private readonly retrier: DbRetrier,
   ) {
     this.sources = new PgSourceRepo(db, retrier);
     // The deal repo reaches the source repo so listPublished can blend a source's
@@ -182,6 +185,9 @@ export class PostgresDb implements Database {
     const pool = new pg.Pool({
       connectionString,
       max: options.pool.max,
+      // Keep `min` warm connections so a checkout after an idle spell doesn't pay a cold
+      // connect against the connect-timeout — the auth path's first read benefits most.
+      min: options.pool.min,
       idleTimeoutMillis: options.pool.idleTimeoutMillis,
       connectionTimeoutMillis: options.pool.connectionTimeoutMillis,
       // Caps any single statement server-side so a wedged query frees its
@@ -205,6 +211,39 @@ export class PostgresDb implements Database {
 
   async close(): Promise<void> {
     await this.pool.end();
+  }
+
+  /**
+   * The three claim-minting reads (role permissions, role name, perm_version) in ONE
+   * transaction — so login/refresh hold a single pool connection here instead of three.
+   * Routed through the retrier like every other op (the whole transaction retries as a
+   * unit on a transient). Deny-by-default: an unknown role → `{ [], '', permVersion }`.
+   */
+  async claimInputsForRole(roleId: string): Promise<ClaimInputs> {
+    return this.retrier.run('auth.claimInputsForRole', () =>
+      this.db.transaction(async (tx) => {
+        const grants = await tx
+          .select({ key: schema.rolePermissions.permissionKey })
+          .from(schema.rolePermissions)
+          .where(eq(schema.rolePermissions.roleId, roleId));
+        const roleRows = await tx
+          .select({ name: schema.roles.name })
+          .from(schema.roles)
+          .where(eq(schema.roles.id, roleId))
+          .limit(1);
+        const metaRows = await tx
+          .select({ value: schema.authMeta.value })
+          .from(schema.authMeta)
+          .where(eq(schema.authMeta.key, PERM_VERSION_KEY))
+          .limit(1);
+        return {
+          // Re-validate the free-text key column at the boundary (reject a non-enum key).
+          permissions: grants.map((r) => Permission.parse(r.key)),
+          roleName: roleRows[0]?.name ?? '',
+          permVersion: metaRows[0] ? Number(metaRows[0].value) : 0,
+        };
+      }),
+    );
   }
 }
 
@@ -1619,14 +1658,16 @@ function rowToRefresh(r: typeof schema.refreshTokens.$inferSelect): StoredRefres
   });
 }
 
+/** The single `auth_meta` row key holding the global permission-version counter. */
+const PERM_VERSION_KEY = 'perm_version';
+
 class PgAuthMetaRepo extends PgRepo implements AuthMetaRepository {
-  private static readonly PERM_VERSION_KEY = 'perm_version';
   async getPermVersion(): Promise<number> {
     const rows = await this.run('authMeta.getPermVersion', () =>
       this.db
         .select({ value: schema.authMeta.value })
         .from(schema.authMeta)
-        .where(eq(schema.authMeta.key, PgAuthMetaRepo.PERM_VERSION_KEY))
+        .where(eq(schema.authMeta.key, PERM_VERSION_KEY))
         .limit(1),
     );
     return rows[0] ? Number(rows[0].value) : 0;
@@ -1639,7 +1680,7 @@ class PgAuthMetaRepo extends PgRepo implements AuthMetaRepository {
       () =>
         this.db
           .insert(schema.authMeta)
-          .values({ key: PgAuthMetaRepo.PERM_VERSION_KEY, value: '1' })
+          .values({ key: PERM_VERSION_KEY, value: '1' })
           .onConflictDoUpdate({
             target: schema.authMeta.key,
             set: { value: sql`(${schema.authMeta.value}::int + 1)::text` },

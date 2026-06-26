@@ -78,7 +78,6 @@ describe('ReviewApi — Users & Roles admin (Phase 3)', () => {
       db,
       hasher,
       issuer,
-      authorization,
       clock,
       new FakeLogger(),
       TEST_AUTH_TTLS,

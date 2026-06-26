@@ -105,7 +105,6 @@ describe('ReviewApi — per-user JWT guard (Phase 5: JWT-only)', () => {
       db,
       hasher,
       issuer,
-      authorization,
       clock,
       new FakeLogger(),
       TEST_AUTH_TTLS,

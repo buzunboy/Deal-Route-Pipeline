@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { DbRetrier, isTransientDbError, isPrimaryKeyViolation } from './db-resilience.js';
+import {
+  DbRetrier,
+  isTransientDbError,
+  isPrimaryKeyViolation,
+  isPoolTimeoutError,
+} from './db-resilience.js';
 import { FakeLogger } from '../../../../test/fakes/fakes.js';
 
 /** Build a fake Postgres-style error carrying a SQLSTATE/socket `code` (+ optional constraint). */
@@ -51,8 +56,44 @@ describe('isPrimaryKeyViolation', () => {
   });
 });
 
+describe('isPoolTimeoutError', () => {
+  // The EXACT code-less messages pg-pool throws on a saturated / slow checkout.
+  it('detects pg-pool checkout-saturation timeout (code-less Error)', () => {
+    expect(isPoolTimeoutError(new Error('timeout exceeded when trying to connect'))).toBe(true);
+  });
+  it('detects pg-pool connect-establish timeout (code-less Error)', () => {
+    expect(isPoolTimeoutError(new Error('Connection terminated due to connection timeout'))).toBe(
+      true,
+    );
+  });
+  it('does NOT match a coded pg error (those route to the transient/retry path)', () => {
+    // A 53300 too_many_connections IS coded → handled by isTransientDbError, not here.
+    expect(isPoolTimeoutError(pgError('53300'))).toBe(false);
+    expect(isPoolTimeoutError(pgError('08006'))).toBe(false);
+  });
+  it('does NOT match an unrelated code-less error or a non-error', () => {
+    expect(isPoolTimeoutError(new Error('some other bug'))).toBe(false);
+    expect(isPoolTimeoutError('Connection terminated due to connection timeout')).toBe(false);
+    expect(isPoolTimeoutError(null)).toBe(false);
+  });
+});
+
 describe('DbRetrier', () => {
   const config = { retries: 3, baseDelayMs: 0 }; // 0 delay keeps the test instant
+
+  it('does NOT retry a pool-timeout (code-less) — it surfaces immediately for a 503', async () => {
+    // The root-cause regression: a saturated-pool timeout is a code-less Error, so it must
+    // NOT be retried (the 10s/2.5s wait already happened) and must surface for the 503 map.
+    const r = new DbRetrier(config, new FakeLogger());
+    let calls = 0;
+    await expect(
+      r.run('op', async () => {
+        calls++;
+        throw new Error('timeout exceeded when trying to connect');
+      }),
+    ).rejects.toThrow('timeout exceeded when trying to connect');
+    expect(calls).toBe(1); // no retry
+  });
 
   it('returns the result without retrying on success', async () => {
     const r = new DbRetrier(config, new FakeLogger());

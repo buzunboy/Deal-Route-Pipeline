@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { AuthenticateUseCase } from './authenticate.js';
-import { AuthorizationUseCase } from './authorization.js';
 import { InMemoryDb } from '../../adapters/db/in-memory/in-memory-db.js';
 import { JoseTokenIssuer } from '../../adapters/security/jose-token-issuer.js';
 import {
@@ -51,12 +50,10 @@ describe('AuthenticateUseCase', () => {
     hasher = new FakePasswordHasher();
     clock = new MovableClock(T0);
     const issuer = makeIssuer(clock);
-    const authorization = new AuthorizationUseCase(db);
     uc = new AuthenticateUseCase(
       db,
       hasher,
       issuer,
-      authorization,
       clock,
       new FakeLogger(),
       TEST_AUTH_TTLS,
@@ -109,7 +106,6 @@ describe('AuthenticateUseCase', () => {
       db,
       counting,
       makeIssuer(clock),
-      new AuthorizationUseCase(db),
       clock,
       new FakeLogger(),
       TEST_AUTH_TTLS,
@@ -221,7 +217,6 @@ describe('AuthenticateUseCase', () => {
       db,
       newHasher,
       makeIssuer(clock),
-      new AuthorizationUseCase(db),
       clock,
       new FakeLogger(),
       TEST_AUTH_TTLS,

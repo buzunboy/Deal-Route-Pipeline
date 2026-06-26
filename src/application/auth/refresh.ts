@@ -9,7 +9,6 @@ import {
 import type { Database, TokenIssuer, Clock, Logger } from '../ports/index.js';
 import { randomUUID } from 'node:crypto';
 import { newRefreshToken, hashRefreshToken } from '../shared/refresh-token-crypto.js';
-import { AuthorizationUseCase } from './authorization.js';
 import type { AuthSession, AuthTtls, AuthClaimRealm } from './authenticate.js';
 
 /** Inputs to a refresh. `userAgent`/`ip` are best-effort metadata for the new row. */
@@ -32,7 +31,6 @@ export class RefreshUseCase {
   constructor(
     private readonly db: Database,
     private readonly tokenIssuer: TokenIssuer,
-    private readonly authorization: AuthorizationUseCase,
     private readonly clock: Clock,
     private readonly logger: Logger,
     private readonly ttls: AuthTtls,
@@ -82,13 +80,17 @@ export class RefreshUseCase {
     now: Date,
     meta: { userAgent?: string; ip?: string },
   ): Promise<AuthSession> {
-    const perms = await this.authorization.permissionsForUser(user.id);
-    const permVersion = await this.db.authMeta.getPermVersion();
-    const role = await this.db.roles.getById(user.role_id);
+    // Coalesce the three claim-minting reads (perms + role name + perm_version) into ONE
+    // connection checkout — refresh's `rotate` already pins a slot for its transaction, so
+    // shrinking the surrounding reads matters most here. `user` is in hand, so key off
+    // `user.role_id` (no redundant users.getById). Perms/perm_version stay RE-RESOLVED, so a
+    // mid-token role/permission change is still honoured on the next access token.
+    const { permissions, roleName, permVersion } = await this.db.claimInputsForRole(user.role_id);
+    const perms = new Set(permissions);
     const claims = buildAccessClaims({
       user,
       perms,
-      roleName: role?.name ?? '',
+      roleName,
       permVersion,
       now,
       ttlSeconds: this.ttls.accessSeconds,
@@ -120,7 +122,7 @@ export class RefreshUseCase {
       refreshToken: rawRefresh,
       refreshTokenExpires: refreshExpiresAt.getTime(),
       permissions: [...perms].sort(),
-      user: { id: user.id, email: user.email, name: user.name, role: role?.name ?? '' },
+      user: { id: user.id, email: user.email, name: user.name, role: roleName },
     };
   }
 }

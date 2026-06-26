@@ -1,12 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { AddressInfo } from 'node:net';
 import { AuthApi } from './auth-api.js';
-import {
-  AuthenticateUseCase,
-  RefreshUseCase,
-  LogoutUseCase,
-  AuthorizationUseCase,
-} from '../../application/index.js';
+import { AuthenticateUseCase, RefreshUseCase, LogoutUseCase } from '../../application/index.js';
 import { JoseTokenIssuer } from '../security/jose-token-issuer.js';
 import { InMemoryDb } from '../db/in-memory/in-memory-db.js';
 import { FakePasswordHasher, FakeLogger } from '../../../test/fakes/fakes.js';
@@ -37,12 +32,10 @@ describe('AuthApi (HTTP integration)', () => {
     hasher = new FakePasswordHasher();
     const clock = new FixedClock(new Date('2026-06-19T00:00:00.000Z'));
     const issuer = makeIssuer(clock);
-    const authorization = new AuthorizationUseCase(db);
     const login = new AuthenticateUseCase(
       db,
       hasher,
       issuer,
-      authorization,
       clock,
       new FakeLogger(),
       TEST_AUTH_TTLS,
@@ -52,7 +45,6 @@ describe('AuthApi (HTTP integration)', () => {
     const refresh = new RefreshUseCase(
       db,
       issuer,
-      authorization,
       clock,
       new FakeLogger(),
       TEST_AUTH_TTLS,
@@ -175,6 +167,53 @@ describe('AuthApi (HTTP integration)', () => {
     it('missing refreshToken → 400', async () => {
       expect((await post('/auth/refresh', {})).status).toBe(400);
     });
+
+    it('a DB pool-timeout → 503 + Retry-After (NOT a generic 500)', async () => {
+      // Root-cause regression: when the pool can't hand out a connection in time, the read
+      // throws pg-pool's CODE-LESS `Error('timeout exceeded when trying to connect')`. That
+      // must map to 503 (transient unavailability) with a Retry-After — never a 500 that
+      // reads as "the request is broken". Wire a DB whose first refresh read throws it.
+      const clock = new FixedClock(new Date('2026-06-19T00:00:00.000Z'));
+      const issuer = makeIssuer(clock);
+      const poolTimeoutDb = new Proxy(db, {
+        get(target, prop, receiver) {
+          if (prop === 'refreshTokens') {
+            return {
+              ...target.refreshTokens,
+              findByHash: () => {
+                throw new Error('timeout exceeded when trying to connect');
+              },
+            };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      });
+      const refresh = new RefreshUseCase(
+        poolTimeoutDb,
+        issuer,
+        clock,
+        new FakeLogger(),
+        TEST_AUTH_TTLS,
+        TEST_REALM,
+      );
+      // Only /auth/refresh is exercised here — the login/logout use-cases are never
+      // reached, so they're left unset (the router never dispatches to them).
+      const api503 = new AuthApi(null as never, refresh, null as never, issuer, new FakeLogger());
+      await api503.listen(0);
+      try {
+        // @ts-expect-error reach into the underlying server for the assigned port
+        const port = (api503['server'].address() as AddressInfo).port;
+        const res = await fetch(`http://127.0.0.1:${port}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ refreshToken: 'anything' }),
+        });
+        expect(res.status).toBe(503);
+        expect(res.headers.get('retry-after')).not.toBeNull();
+      } finally {
+        await api503.close();
+      }
+    });
   });
 
   describe('POST /auth/logout', () => {
@@ -227,12 +266,10 @@ describe('AuthApi (HTTP integration)', () => {
     beforeEach(async () => {
       const clock = new FixedClock(new Date('2026-06-19T00:00:00.000Z'));
       const issuer = makeIssuer(clock);
-      const authorization = new AuthorizationUseCase(db);
       const login = new AuthenticateUseCase(
         db,
         hasher,
         issuer,
-        authorization,
         clock,
         new FakeLogger(),
         TEST_AUTH_TTLS,
@@ -242,7 +279,6 @@ describe('AuthApi (HTTP integration)', () => {
       const refresh = new RefreshUseCase(
         db,
         issuer,
-        authorization,
         clock,
         new FakeLogger(),
         TEST_AUTH_TTLS,

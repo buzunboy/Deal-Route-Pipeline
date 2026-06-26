@@ -68,7 +68,6 @@ async function buildAuthForTests(
     db,
     hasher,
     issuer,
-    authorization,
     clock,
     new FakeLogger(),
     TEST_AUTH_TTLS,

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { AuthenticateUseCase } from './authenticate.js';
 import { LogoutUseCase } from './logout.js';
-import { AuthorizationUseCase } from './authorization.js';
 import { InMemoryDb } from '../../adapters/db/in-memory/in-memory-db.js';
 import type { JoseTokenIssuer } from '../../adapters/security/jose-token-issuer.js';
 import type { Clock } from '../ports/index.js';
@@ -36,7 +35,6 @@ describe('LogoutUseCase', () => {
       db,
       hasher,
       makeIssuer(clock),
-      new AuthorizationUseCase(db),
       clock,
       new FakeLogger(),
       TEST_AUTH_TTLS,

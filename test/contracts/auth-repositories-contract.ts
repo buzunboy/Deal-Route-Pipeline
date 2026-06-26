@@ -325,5 +325,35 @@ export function authRepositoriesContract(
       expect(await db.authMeta.bumpPermVersion()).toBe(2);
       expect(await db.authMeta.getPermVersion()).toBe(2);
     });
+
+    // ── claimInputsForRole (the coalesced login/refresh read) ──
+    it('claimInputsForRole: resolves perms + role name + perm_version for a seeded role', async () => {
+      const db = await makeDb();
+      const inputs = await db.claimInputsForRole(SYSTEM_ROLE_ADMIN_ID);
+      expect(inputs.roleName).toBe('admin');
+      expect(inputs.permissions.sort()).toEqual([...ALL_PERMISSIONS].sort());
+      expect(inputs.permVersion).toBe(0);
+      const reviewer = await db.claimInputsForRole(SYSTEM_ROLE_REVIEWER_ID);
+      expect(reviewer.roleName).toBe('reviewer');
+      expect(reviewer.permissions.sort()).toEqual([...REVIEWER_PERMISSIONS].sort());
+    });
+
+    it('claimInputsForRole: reflects a perm_version bump (same value the separate read returns)', async () => {
+      const db = await makeDb();
+      await db.authMeta.bumpPermVersion();
+      await db.authMeta.bumpPermVersion();
+      const inputs = await db.claimInputsForRole(SYSTEM_ROLE_REVIEWER_ID);
+      expect(inputs.permVersion).toBe(2);
+      expect(inputs.permVersion).toBe(await db.authMeta.getPermVersion());
+    });
+
+    it('claimInputsForRole: deny-by-default for an unknown role (empty perms, empty name)', async () => {
+      const db = await makeDb();
+      const inputs = await db.claimInputsForRole(randomUUID());
+      expect(inputs.permissions).toEqual([]);
+      expect(inputs.roleName).toBe('');
+      // perm_version is global, not role-scoped — still returned for an unknown role.
+      expect(inputs.permVersion).toBe(0);
+    });
   });
 }

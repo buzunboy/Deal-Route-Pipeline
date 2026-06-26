@@ -128,6 +128,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /auth/refresh:
     post:
@@ -171,6 +172,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /auth/logout:
     post:
@@ -1726,6 +1728,18 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     TooLarge:
       description: Request body exceeds the 64 KiB cap.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ServiceUnavailable:
+      description: >-
+        The database connection pool was momentarily saturated (or the DB was briefly
+        unreachable), so the request could not be served. Transient — retry after a short
+        backoff (see `Retry-After`). Not a request error.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema: { type: integer }
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

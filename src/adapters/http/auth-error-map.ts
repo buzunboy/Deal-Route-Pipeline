@@ -13,6 +13,7 @@ import {
   LastAdminError,
 } from '../../domain/index.js';
 import { sendError } from './http-helpers.js';
+import { isPoolTimeoutError } from '../db/postgres/db-resilience.js';
 
 /**
  * Map a thrown auth/IAM `DomainError` to its HTTP status + a SAFE client message, or
@@ -77,6 +78,15 @@ export function tryMapAuthError(res: ServerResponse, err: unknown): boolean {
   }
   if (err instanceof UserNotFoundError) {
     sendError(res, 404, 'user not found');
+    return true;
+  }
+  // The DB pool couldn't hand out a connection in time (saturated / DB momentarily
+  // unreachable). That's a transient UNAVAILABILITY, not a server bug — answer 503 with a
+  // short Retry-After so the client (and the panel) can back off, instead of a generic 500
+  // that reads as "the request is broken". Last branch: a real typed error wins above.
+  if (isPoolTimeoutError(err)) {
+    res.setHeader('retry-after', '1'); // back off ~1s before retrying
+    sendError(res, 503, 'service temporarily unavailable; please retry');
     return true;
   }
   return false;

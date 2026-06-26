@@ -66,6 +66,7 @@ import type {
   RolePermissionRepository,
   RefreshTokenRepository,
   AuthMetaRepository,
+  ClaimInputs,
 } from '../../../application/ports/index.js';
 
 /**
@@ -124,6 +125,20 @@ export class InMemoryDb implements Database {
       });
       this.rolePermissions.seed(role.id, [...role.permissions]);
     }
+  }
+
+  /**
+   * The claim-minting inputs for a role (LSP twin of the Postgres single-transaction
+   * read). No connection concept here, so it just composes the three repo reads;
+   * deny-by-default: an unknown role → `{ permissions: [], roleName: '', permVersion }`.
+   */
+  async claimInputsForRole(roleId: string): Promise<ClaimInputs> {
+    const [permissions, role, permVersion] = await Promise.all([
+      this.rolePermissions.permissionsForRole(roleId),
+      this.roles.getById(roleId),
+      this.authMeta.getPermVersion(),
+    ]);
+    return { permissions, roleName: role?.name ?? '', permVersion };
   }
 }
 

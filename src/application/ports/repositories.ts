@@ -429,6 +429,20 @@ export interface AuthMetaRepository {
   bumpPermVersion(): Promise<number>;
 }
 
+/**
+ * The three reads a claim-minter (login + refresh) needs given a user's `role_id`:
+ * the role's permission keys, its display name, and the global `perm_version`. Bundled
+ * so {@link Database.claimInputsForRole} can resolve them in ONE connection checkout
+ * (Postgres: one transaction) instead of three independent ones — the auth path is the
+ * pool's heaviest consumer, so coalescing here is the highest-leverage relief.
+ */
+export interface ClaimInputs {
+  permissions: Permission[];
+  /** The role's display name (empty string when the role is unknown — deny-by-default). */
+  roleName: string;
+  permVersion: number;
+}
+
 /** Aggregate handed to the composition root; groups the focused repositories. */
 export interface Database {
   sources: SourceRepository;
@@ -451,4 +465,11 @@ export interface Database {
   rolePermissions: RolePermissionRepository;
   refreshTokens: RefreshTokenRepository;
   authMeta: AuthMetaRepository;
+  /**
+   * Resolve the claim-minting inputs for a role in ONE connection checkout (the three
+   * reads — role permissions, role name, perm_version — that login/refresh would
+   * otherwise do as three separate checkouts). Deny-by-default: an unknown role yields
+   * `{ permissions: [], roleName: '', permVersion }`. Both adapters identical (LSP).
+   */
+  claimInputsForRole(roleId: string): Promise<ClaimInputs>;
 }

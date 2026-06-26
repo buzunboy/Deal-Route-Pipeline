@@ -63,6 +63,26 @@ export function isTransientDbError(err: unknown): boolean {
 }
 
 /**
+ * pg-pool throws these CODE-LESS plain `Error`s when a checkout can't be served within
+ * `connectionTimeoutMillis` (pool saturated, or the new connection itself couldn't
+ * establish in time). They carry no SQLSTATE, so `isTransientDbError` (which keys off
+ * `err.code`) does NOT match them — and they should not retry (the wait already happened).
+ * They mean "the DB is momentarily unreachable from here", i.e. a 503, not a 500. Matched
+ * by the exact message strings node-postgres uses (pg-pool's API contract). See
+ * KNOWN_ISSUES "IdP /auth/{login,refresh} intermittently hang".
+ */
+const POOL_TIMEOUT_MESSAGES = new Set<string>([
+  'timeout exceeded when trying to connect',
+  'Connection terminated due to connection timeout',
+]);
+
+export function isPoolTimeoutError(err: unknown): boolean {
+  return (
+    err instanceof Error && pgCode(err) === undefined && POOL_TIMEOUT_MESSAGES.has(err.message)
+  );
+}
+
+/**
  * A unique violation on the row's own PRIMARY KEY — and ONLY the PK. The
  * retry-time swallow ("the prior attempt committed") is only sound for the
  * client-generated PK, which is identical across retries. A violation of some
