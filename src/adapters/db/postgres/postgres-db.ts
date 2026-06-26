@@ -62,6 +62,7 @@ import type {
   Change,
   DealStatus,
   ReviewRecord,
+  AuditReviewRow,
   SourceReviewRecord,
   TeamMember,
   AlertRecord,
@@ -962,22 +963,34 @@ class PgReviewRepo extends PgRepo implements ReviewRepository {
     dealId?: string;
     since?: Date;
     limit: number;
-  }): Promise<ReviewRecord[]> {
+  }): Promise<AuditReviewRow[]> {
     const predicates: SQL[] = [];
     if (filter.approver !== undefined)
       predicates.push(eq(schema.reviews.approver, filter.approver));
     if (filter.dealId !== undefined) predicates.push(eq(schema.reviews.dealId, filter.dealId));
     if (filter.since) predicates.push(gte(schema.reviews.decidedAt, filter.since.toISOString()));
     const where = predicates.length > 0 ? and(...predicates) : undefined;
+    // LEFT JOIN deals so each audit row carries the decided deal's service/provider
+    // for the panel's `detail` label. LEFT (not INNER) keeps decisions whose deal was
+    // hard-deleted — they still count, just with null label fields (ACR-7).
     const rows = await this.run('reviews.listRecent', () =>
       this.db
-        .select()
+        .select({
+          review: schema.reviews,
+          service: schema.deals.service,
+          provider: schema.deals.provider,
+        })
         .from(schema.reviews)
+        .leftJoin(schema.deals, eq(schema.reviews.dealId, schema.deals.id))
         .where(where)
         .orderBy(desc(schema.reviews.decidedAt), desc(schema.reviews.id))
         .limit(filter.limit),
     );
-    return rows.map((r) => rowToReview(r));
+    return rows.map((r) => ({
+      ...rowToReview(r.review),
+      deal_service: r.service,
+      deal_provider: r.provider,
+    }));
   }
   async countByApprover(): Promise<Map<string, number>> {
     const rows = await this.run('reviews.countByApprover', () =>

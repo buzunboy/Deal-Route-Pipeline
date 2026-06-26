@@ -503,7 +503,13 @@ describe('ReviewUseCase', () => {
   // ── auditFeed (ACR-7) ─────────────────────────────────────────────────────
   describe('auditFeed', () => {
     it('projects recent review rows newest-first, filtered by actor/entity, capped', async () => {
-      const dealId = randomUUID();
+      // Seed a real deal so the audit feed's deals-join can resolve the `detail` label
+      // (ACR-7: `detail` is the deal's "<service> · <provider>", not the reason).
+      const deal = await makeCandidate(db, randomUUID(), {
+        service: 'Audible',
+        provider: 'Amazon Prime',
+      });
+      const dealId = deal.id;
       const mk = (deal_id: string, approver: string, action: 'approve' | 'reject', at: string) =>
         db.reviews.insert({
           id: randomUUID(),
@@ -523,9 +529,11 @@ describe('ReviewUseCase', () => {
         '2026-06-19T05:00:00.000Z',
         '2026-06-19T01:00:00.000Z',
       ]);
-      // Projected shape: initials + entity_id + detail.
+      // Projected shape: initials + entity_id + detail (the deal label, even on the
+      // approve row that has no reason — the regression this guards).
       expect(all[0]!.initials).toBe('BO');
-      expect(all[1]!.detail).toBe('no good');
+      expect(all[1]!.detail).toBe('Audible · Amazon Prime');
+      expect(all[2]!.detail).toBe('Audible · Amazon Prime');
       expect(all[1]!.entity_id).toBe(dealId);
 
       // Filtered by actor.

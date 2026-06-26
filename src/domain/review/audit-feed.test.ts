@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toAuditEntry, initialsOf } from './audit-feed.js';
-import type { ReviewRecord } from './review-record.js';
+import { toAuditEntry, initialsOf, type AuditReviewRow } from './audit-feed.js';
 
 describe('audit-feed projection', () => {
   describe('initialsOf', () => {
@@ -24,23 +23,61 @@ describe('audit-feed projection', () => {
     });
   });
 
+  const row = (over: Partial<AuditReviewRow>): AuditReviewRow => ({
+    id: 'rev-1',
+    deal_id: '00000000-0000-4000-8000-000000000001',
+    action: 'approve',
+    approver: 'alice@dealroute',
+    reason: null,
+    decided_at: '2026-06-19T08:00:00.000Z',
+    deal_service: null,
+    deal_provider: null,
+    ...over,
+  });
+
   it('toAuditEntry maps a review row into the panel entry shape', () => {
-    const review: ReviewRecord = {
-      id: 'rev-1',
-      deal_id: '00000000-0000-4000-8000-000000000001',
-      action: 'reject',
-      approver: 'alice@dealroute',
-      reason: 'not a bundle',
-      decided_at: '2026-06-19T08:00:00.000Z',
-    };
-    expect(toAuditEntry(review)).toEqual({
+    expect(
+      toAuditEntry(
+        row({ action: 'reject', deal_service: 'Audible', deal_provider: 'Amazon Prime' }),
+      ),
+    ).toEqual({
       id: 'rev-1',
       initials: 'AL',
       actor: 'alice@dealroute',
       action: 'reject',
-      detail: 'not a bundle',
+      detail: 'Audible · Amazon Prime',
       entity_id: '00000000-0000-4000-8000-000000000001',
       at: '2026-06-19T08:00:00.000Z',
+    });
+  });
+
+  describe('detail label (ACR-7) — the deal "<service> · <provider>", not the reason', () => {
+    it('an APPROVE row (no reason) gets the deal label, not a blank', () => {
+      // The regression: approvals carry no `reason`, so `detail` used to be null and
+      // the panel row showed only a UUID. It must now read "<service> · <provider>".
+      expect(toAuditEntry(row({ deal_service: 'Deezer', deal_provider: 'Orange' })).detail).toBe(
+        'Deezer · Orange',
+      );
+    });
+
+    it('the deal label wins over a present reason (reject rows show the deal, per the fixture)', () => {
+      const entry = toAuditEntry(
+        row({
+          action: 'reject',
+          reason: 'evidence missing',
+          deal_service: 'Max',
+          deal_provider: 'AT&T',
+        }),
+      );
+      expect(entry.detail).toBe('Max · AT&T');
+    });
+
+    it('falls back to service alone, then to the reason, then null', () => {
+      expect(toAuditEntry(row({ deal_service: 'Spotify', deal_provider: null })).detail).toBe(
+        'Spotify',
+      );
+      expect(toAuditEntry(row({ action: 'reject', reason: 'dupe' })).detail).toBe('dupe');
+      expect(toAuditEntry(row({})).detail).toBeNull();
     });
   });
 });

@@ -1,5 +1,18 @@
 import type { ReviewRecord, ReviewAction } from './review-record.js';
 
+/**
+ * A review audit row enriched with the decided deal's human-readable label fields
+ * ({@link toAuditEntry} turns these into the panel's `detail`). The label fields are
+ * nullable: the deal may have been hard-deleted, so the join/lookup can miss (the
+ * decision still counts — we just fall back to the row's own `reason`).
+ */
+export type AuditReviewRow = ReviewRecord & {
+  /** The decided deal's `service`, or null if the deal can't be resolved. */
+  deal_service: string | null;
+  /** The decided deal's `provider`, or null if the deal can't be resolved. */
+  deal_provider: string | null;
+};
+
 /** Default page size for the audit feed when the caller doesn't specify one. */
 export const AUDIT_DEFAULT_LIMIT = 50;
 /** Hard ceiling on a single audit-feed page (bound the gated read's work). */
@@ -34,16 +47,29 @@ export interface AuditEntry {
 }
 
 /** Project a review audit row into a panel audit-feed entry (pure). */
-export function toAuditEntry(review: ReviewRecord): AuditEntry {
+export function toAuditEntry(review: AuditReviewRow): AuditEntry {
   return {
     id: review.id,
     initials: initialsOf(review.approver),
     actor: review.approver,
     action: review.action,
-    detail: review.reason,
+    // ACR-7: `detail` is the human-readable deal label ("<service> · <provider>")
+    // for EVERY action — approvals (which carry no reason) included. The reason is
+    // only the fallback when the deal can't be resolved (hard-deleted).
+    detail: dealLabel(review.deal_service, review.deal_provider) ?? review.reason,
     entity_id: review.deal_id,
     at: review.decided_at,
   };
+}
+
+/**
+ * Build the panel's deal label from the decided deal's service/provider:
+ * `"<service> · <provider>"` when both exist, `service` alone when only it does,
+ * else null (no deal resolved → the caller falls back to the row's `reason`).
+ */
+function dealLabel(service: string | null, provider: string | null): string | null {
+  if (service && provider) return `${service} · ${provider}`;
+  return service || null;
 }
 
 /**

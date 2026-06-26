@@ -2096,7 +2096,13 @@ components:
           description: 1–2 letter uppercase initials derived from the actor (avatar chip).
         actor: { type: string }
         action: { $ref: '#/components/schemas/ReviewAction' }
-        detail: { type: [string, 'null'] }
+        detail:
+          type: [string, 'null']
+          description: >-
+            The decided deal's human-readable label "<service> · <provider>" (service
+            alone if the provider is absent) — shown for EVERY action, approvals
+            included. Falls back to the review's free-text reason only when the deal
+            can't be resolved (hard-deleted), else null.
         entity_id: { type: string, format: uuid }
         at: { type: string, format: date-time }
       additionalProperties: false

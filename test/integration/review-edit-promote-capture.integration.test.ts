@@ -254,7 +254,11 @@ suite('review edit / promote / manual-capture (Container + Postgres)', () => {
   it('auditFeed projects approve/reject/edit rows newest-first over real SQL (ACR-7)', async () => {
     container = makeContainer(overrides);
     // Drive REAL review actions so the reviews audit rows are written by the use-case.
-    const deal = await seedCandidate({ headline: 'before' });
+    const deal = await seedCandidate({
+      headline: 'before',
+      service: 'Audible',
+      provider: 'Amazon Prime',
+    });
     await container.review.editCandidate(deal.id, 'alice@dealroute', { headline: 'after' });
     await container.review.approve(deal.id, 'bob@dealroute');
 
@@ -263,6 +267,9 @@ suite('review edit / promote / manual-capture (Container + Postgres)', () => {
     expect(feed.map((e) => e.action)).toEqual(['approve', 'edit']);
     expect(feed.every((e) => e.entity_id === deal.id)).toBe(true);
     expect(feed.find((e) => e.action === 'approve')!.initials).toBe('BO');
+    // ACR-7: `detail` is the deal label, resolved over the real reviews→deals SQL JOIN
+    // — proves the join selects service/provider (the approve row has no reason).
+    expect(feed.find((e) => e.action === 'approve')!.detail).toBe('Audible · Amazon Prime');
 
     // actor filter narrows to one reviewer.
     const byAlice = await container.review.auditFeed({ actor: 'alice@dealroute' });

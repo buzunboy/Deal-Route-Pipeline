@@ -8,6 +8,7 @@ import type {
   Evidence,
   DealStatus,
   ReviewRecord,
+  AuditReviewRow,
   SourceReviewRecord,
   SubscriptionCatalogEntry,
   CostSummary,
@@ -239,17 +240,20 @@ export interface ReviewRepository {
     since: Date,
   ): Promise<{ action: ReviewAction; latencySeconds: number | null }[]>;
   /**
-   * Recent review decisions across ALL deals (the audit feed, ACR-7), newest first.
-   * Optional filters: `approver` (exact actor), `dealId` (exact entity), `since`
-   * (decided_at >= since). Capped at `limit`. Ordering is `decided_at` desc then
-   * `id` desc (deterministic tiebreaker) — both adapters identical (LSP).
+   * Recent review decisions across ALL deals (the audit feed, ACR-7), newest first,
+   * each enriched with the decided deal's `service`/`provider` (LEFT-joined — null
+   * when the deal was hard-deleted) so the projection can build the panel's
+   * human-readable `detail` label. Optional filters: `approver` (exact actor),
+   * `dealId` (exact entity), `since` (decided_at >= since). Capped at `limit`.
+   * Ordering is `decided_at` desc then `id` desc (deterministic tiebreaker) — both
+   * adapters identical (LSP).
    */
   listRecent(filter: {
     approver?: string;
     dealId?: string;
     since?: Date;
     limit: number;
-  }): Promise<ReviewRecord[]>;
+  }): Promise<AuditReviewRow[]>;
   /**
    * Total review decisions made by each approver — `approver` → count, in ONE query.
    * Powers the Team screen's derived `review_count` (ACR-10) without an N+1 per

@@ -29,6 +29,7 @@ import {
   type Change,
   type DealStatus,
   type ReviewRecord,
+  type AuditReviewRow,
   type SourceReviewRecord,
   type SubscriptionCatalogEntry,
   type PublishedQuery,
@@ -599,12 +600,12 @@ class InMemoryReviewRepo implements ReviewRepository {
     dealId?: string;
     since?: Date;
     limit: number;
-  }): Promise<ReviewRecord[]> {
+  }): Promise<AuditReviewRow[]> {
     // Optional actor/entity/since filters, newest first (decided_at desc, seq desc as
     // the equal-timestamp tiebreaker) — mirrors the Postgres adapter (id desc there;
     // seq is the in-memory stand-in for monotonic insertion order).
     const sinceMs = filter.since?.getTime();
-    return this.reviews
+    const page = this.reviews
       .filter((e) => {
         if (filter.approver !== undefined && e.review.approver !== filter.approver) return false;
         if (filter.dealId !== undefined && e.review.deal_id !== filter.dealId) return false;
@@ -612,8 +613,19 @@ class InMemoryReviewRepo implements ReviewRepository {
         return true;
       })
       .sort((a, b) => b.review.decided_at.localeCompare(a.review.decided_at) || b.seq - a.seq)
-      .slice(0, filter.limit)
-      .map((e) => ({ ...e.review }));
+      .slice(0, filter.limit);
+    // Enrich each row with the decided deal's service/provider for the panel's `detail`
+    // label — null when the deal is gone (mirrors the Postgres LEFT JOIN; ACR-7).
+    return Promise.all(
+      page.map(async (e) => {
+        const deal = await this.deals.getById(e.review.deal_id);
+        return {
+          ...e.review,
+          deal_service: deal?.service ?? null,
+          deal_provider: deal?.provider ?? null,
+        };
+      }),
+    );
   }
   async countByApprover(): Promise<Map<string, number>> {
     const counts = new Map<string, number>();
