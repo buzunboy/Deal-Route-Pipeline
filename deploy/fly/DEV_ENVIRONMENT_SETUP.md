@@ -151,8 +151,14 @@ fly secrets set -a dealroute-api-dev \
 
 ## Step 3 — DEPLOYED (2026-06-24)
 - [x] `fly deploy -a dealroute-api-dev -c deploy/fly/fly.toml` — pulled the SAME
-  `ghcr.io/buzunboy/deal-route-pipeline:edge` image prod runs (revision `2fb4317`). 2
-  machines in `fra`, both `started`, 1/1 health checks passing.
+  `ghcr.io/buzunboy/deal-route-pipeline:edge` image prod runs (revision `2fb4317`).
+  > **First deploy creates 2 machines** (Fly's HA default). Dev only needs 1. After every
+  > deploy, pin the count so a redundant machine doesn't sit awake billing 24/7:
+  > ```sh
+  > fly scale count 1 -a dealroute-api-dev --yes
+  > ```
+  > (`min_machines_running = 1` in `fly.toml` is only a floor, not a ceiling — `fly deploy`
+  > preserves whatever count exists, so it never trims the extra on its own.)
 - [x] Migrations ran on boot (entrypoint runs them before `serve`): **19 tables** in
   `dealroute_dev` incl. `deals`/`sources`/`reviews`/`users`/`settings`/`crawl_runs`.
 - [x] `https://dealroute-api-dev.fly.dev/v1/health` → `200 {"ok":true}`.

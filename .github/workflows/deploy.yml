@@ -140,6 +140,13 @@ jobs:
             --image "$IMAGE" \
             --env "DEPLOYMENT_ID=$DEPLOYMENT_ID"
 
+      - name: Pin machine count to 1
+        shell: bash
+        # `fly deploy` preserves the existing machine count — it never trims extras.
+        # Pin to exactly 1 so a stray scaled-up machine can't sit awake billing forever.
+        # Bump this (and min_machines_running in fly.toml) if the API ever needs HA.
+        run: flyctl scale count 1 -a "$APP" --yes
+
       - name: Show status
         if: always()
         run: flyctl status -a "$APP" || true
