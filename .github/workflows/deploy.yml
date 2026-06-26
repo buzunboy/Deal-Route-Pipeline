@@ -3,46 +3,61 @@ name: Deploy API to Fly
 # Deploys the always-on `serve` API (gated /api/* for the admin panel + public
 # /v1/* feed) to Fly.io by running `flyctl deploy -c deploy/fly/fly.toml` with a
 # prebuilt GHCR image tag. This is the deploy counterpart to run-lane-fly.yml
-# (which runs the short-lived cron lanes) — same app, same FLY_API_TOKEN secret.
+# (which runs the short-lived cron lanes) — same apps, same FLY_API_TOKEN secret.
 #
 # It does NOT build: release.yml ("Release image") already built + pushed the image
 # to GHCR (ghcr.io/buzunboy/deal-route-pipeline:edge + :sha-<short>). This workflow
-# only points the live app at the chosen tag and triggers a rolling deploy. The
+# only points the live app(s) at the chosen tag and triggers a rolling deploy. The
 # image entrypoint applies DB migrations before `serve` starts, so a deploy also
 # runs any pending migrations.
 #
+# TWO ENVIRONMENTS, ONE WORKFLOW (mirrors run-lane-fly.yml's env→app mapping):
+#   Production  → dealroute-api
+#   Development → dealroute-api-dev
+#
 # Two ways in:
 #   1. AUTO (release flow) — on every successful "Release image" run on master, this
-#      auto-deploys the EXACT image that run just built, by its immutable
-#      sha-<short> tag (NOT the floating :edge — so two near-simultaneous merges can't
-#      race over a moving tag). DEPLOYMENT_ID is set to that same sha so the settings
-#      store's queued-budget override self-clears on the next deploy (see fly.toml).
-#   2. MANUAL — pick any image tag and click "Run workflow" to ship an ad-hoc build
-#      (rollback to an older sha, deploy a vX.Y.Z tag, re-deploy :edge, …).
+#      auto-deploys the EXACT image that run just built (by its immutable sha-<short>
+#      tag, NOT the floating :edge) to BOTH apps: prod AND dev. They share the same
+#      image, so dev tracks master automatically. DEPLOYMENT_ID is set to that same
+#      sha so the settings store's queued-budget override self-clears (see fly.toml).
+#   2. MANUAL — pick the environment (Development / Production) and an image tag, then
+#      "Run workflow" to ship an ad-hoc build to ONE app (rollback to an older sha,
+#      deploy a vX.Y.Z tag, re-deploy :edge, test on dev only, …).
 # Both paths run through the `production` Environment, so if you configure required
 # reviewers there, even an auto-deploy waits for a human click.
 #
 # SETUP (one-time):
-#   1. Create a Fly deploy token scoped to the app (same token run-lane-fly uses):
-#        fly tokens create deploy -a dealroute-api
+#   1. Create a Fly deploy token. An ORG-WIDE token covers both apps:
+#        fly tokens create deploy           # (or `-a dealroute-api` per-app)
 #   2. Add it as the repo secret FLY_API_TOKEN
 #        (Settings → Secrets and variables → Actions → New repository secret).
-#   The app already holds DATABASE_URL / REVIEW_API_TOKEN / S3_* / CORS as Fly
-#   secrets (see deploy/fly/README.md §4.2) — those are NOT set here.
-#   The GHCR package must be pullable by Fly: make it public, or configure a pull
-#   secret on the app (deploy/fly/README.md §3).
+#      OPTIONAL: if your token is app-scoped, add per-app secrets
+#      FLY_API_TOKEN_DEALROUTE_API_DEV / FLY_API_TOKEN_DEALROUTE_API; each app prefers
+#      its own, falling back to FLY_API_TOKEN.
+#   The apps already hold DATABASE_URL / AUTH_JWT_PRIVATE_KEY / S3_* / CORS as Fly
+#   secrets (see deploy/fly/README.md §4.2) — those are NOT set here. The GHCR package
+#   must be pullable by Fly: make it public, or configure a pull secret on the app.
 
 on:
   # AUTO: fire when the image build finishes. `workflow_run` triggers on COMPLETION
-  # (success OR failure) — the job's `if` below gates on success so we never deploy a
-  # failed/partial build. `branches` filters on the release run's HEAD branch.
+  # (success OR failure) — the setup job's `if` below gates on success so we never
+  # deploy a failed/partial build. `branches` filters on the release run's HEAD branch.
   workflow_run:
     workflows: ['Release image']
     types: [completed]
     branches: [master]
-  # MANUAL: pick the image tag and click "Run workflow".
+  # MANUAL: pick the environment + image tag and click "Run workflow".
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'API Environment'
+        required: true
+        default: Development
+        type: choice
+        # GitHub renders the raw value as the label; the setup job maps
+        # Development → dealroute-api-dev, Production → dealroute-api.
+        options: [Development, Production]
       image_tag:
         description: 'GHCR image tag to deploy (e.g. edge, sha-abc1234, v1.2.3)'
         required: true
@@ -52,37 +67,27 @@ permissions:
   contents: read
 
 concurrency:
-  # Never overlap two deploys of the same app — a second trigger waits for the first
-  # (an auto-deploy from a fresh merge queues behind an in-flight one rather than
-  # racing it).
-  group: deploy-fly
+  # Never overlap two deploys of the same target. The group is keyed by trigger so an
+  # auto (both-app) run and a manual (single-app) run don't block each other; back-to-
+  # back auto runs from two merges queue rather than race.
+  group: deploy-fly-${{ github.event_name }}-${{ inputs.environment || 'all' }}
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  # Resolve the image tag once, and decide which app(s) this run targets:
+  #   auto   → both apps (prod + dev track the same master image)
+  #   manual → the single app the operator picked
+  setup:
     runs-on: ubuntu-latest
     # Skip entirely when the trigger is a FAILED release run. On manual dispatch
     # there's no workflow_run context, so the conclusion check is bypassed.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
-    # Gate behind the `production` Environment so a human can be required to approve
-    # (configure required reviewers on the Environment in repo Settings → Environments).
-    environment: production
-    timeout-minutes: 20
-    env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-      APP: dealroute-api
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      apps: ${{ steps.apps.outputs.apps }}
     steps:
-      - name: Guard — require the Fly token
-        run: |
-          if [ -z "$FLY_API_TOKEN" ]; then
-            echo "::error::FLY_API_TOKEN secret is not set. Create one with"
-            echo "::error::  fly tokens create deploy -a dealroute-api"
-            echo "::error::and add it as the repo secret FLY_API_TOKEN (see this workflow's header)."
-            exit 1
-          fi
-
       - name: Resolve image tag
         id: tag
         shell: bash
@@ -113,6 +118,71 @@ jobs:
           echo "Resolved image tag: $TAG (trigger: $EVENT_NAME)"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve target app(s)
+        id: apps
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # Manual: the one app for the chosen environment.
+            case "$ENVIRONMENT" in
+              Development) APPS='["dealroute-api-dev"]' ;;
+              Production)  APPS='["dealroute-api"]' ;;
+              *) echo "::error::unknown environment '$ENVIRONMENT'"; exit 1 ;;
+            esac
+          else
+            # Auto (master release): both apps track the same image.
+            APPS='["dealroute-api","dealroute-api-dev"]'
+          fi
+          echo "Target app(s): $APPS"
+          echo "apps=$APPS" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: setup
+    runs-on: ubuntu-latest
+    # Gate behind the `production` Environment so a human can be required to approve
+    # (configure required reviewers on the Environment in repo Settings → Environments).
+    environment: production
+    timeout-minutes: 20
+    strategy:
+      # Deploy each target app independently; one app failing doesn't abort the other.
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.setup.outputs.apps) }}
+    env:
+      APP: ${{ matrix.app }}
+      TAG: ${{ needs.setup.outputs.tag }}
+      # Pass every candidate token in as env so the resolve step can pick one without
+      # referencing a maybe-undefined secret inline. Per-app tokens are OPTIONAL — set
+      # one only if your FLY_API_TOKEN is app-scoped and can't reach the other app.
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_API_TOKEN_DEALROUTE_API_DEV: ${{ secrets.FLY_API_TOKEN_DEALROUTE_API_DEV }}
+      FLY_API_TOKEN_DEALROUTE_API: ${{ secrets.FLY_API_TOKEN_DEALROUTE_API }}
+    steps:
+      - name: Resolve Fly token for ${{ matrix.app }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A per-app FLY_API_TOKEN_<APP> (set only when your token is app-scoped) wins;
+          # otherwise fall back to the shared FLY_API_TOKEN. An org-wide token Just Works,
+          # and a dev-scoped token can be added later with no edit here.
+          case "$APP" in
+            dealroute-api-dev) TOKEN="${FLY_API_TOKEN_DEALROUTE_API_DEV:-$FLY_API_TOKEN}" ;;
+            dealroute-api)     TOKEN="${FLY_API_TOKEN_DEALROUTE_API:-$FLY_API_TOKEN}" ;;
+            *) echo "::error::unknown app '$APP'"; exit 1 ;;
+          esac
+          if [ -z "$TOKEN" ]; then
+            echo "::error::No Fly token for '$APP'. Add repo secret FLY_API_TOKEN (org-wide,"
+            echo "::error::covers both apps) — or per-app FLY_API_TOKEN_${APP^^} with dashes as"
+            echo "::error::underscores. Create one with: fly tokens create deploy -a $APP"
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          echo "FLY_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v5
 
       - name: Set up flyctl
@@ -121,11 +191,11 @@ jobs:
       - name: Deploy to Fly
         shell: bash
         env:
-          IMAGE: ghcr.io/buzunboy/deal-route-pipeline:${{ steps.tag.outputs.tag }}
+          IMAGE: ghcr.io/buzunboy/deal-route-pipeline:${{ needs.setup.outputs.tag }}
           # DEPLOYMENT_ID must change every release so a queued daily_budget override is
           # adopted then self-cleared on the next boot (see fly.toml [env] + KNOWN_ISSUES).
           # The image tag is per-release and immutable on the auto path, so reuse it.
-          DEPLOYMENT_ID: ${{ steps.tag.outputs.tag }}
+          DEPLOYMENT_ID: ${{ needs.setup.outputs.tag }}
         run: |
           set -euo pipefail
           echo "Deploying $IMAGE to app '$APP' via deploy/fly/fly.toml (DEPLOYMENT_ID=$DEPLOYMENT_ID)"
@@ -144,7 +214,7 @@ jobs:
         shell: bash
         # `fly deploy` preserves the existing machine count — it never trims extras.
         # Pin to exactly 1 so a stray scaled-up machine can't sit awake billing forever.
-        # Bump this (and min_machines_running in fly.toml) if the API ever needs HA.
+        # Bump this (and min_machines_running in fly.toml) if an app ever needs HA.
         run: flyctl scale count 1 -a "$APP" --yes
 
       - name: Show status
