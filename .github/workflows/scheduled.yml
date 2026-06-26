@@ -113,6 +113,18 @@ jobs:
           SEARCH_PROVIDER: ${{ steps.lane.outputs.lane == 'discover' && 'api' || 'stub' }}
           SEARCH_API_KEY: ${{ secrets.SEARCH_API_KEY }}
           DAILY_BUDGET_EUR: '10.00'
+          # Evidence store. This runner has no fly.toml `[env]`, so EVIDENCE_STORE is
+          # unset → the image defaults to `local` (config.ts) and a crawl writes evidence
+          # to the container's throwaway FS, lost on `--rm` (the bucket stays empty while
+          # the lane "succeeds"). To PERSIST evidence, set the S3_* secrets on the
+          # `production` Environment; this then flips the store to s3 and passes them
+          # through. Without S3_BUCKET it stays `local` (intentional — a DB-only run).
+          EVIDENCE_STORE: ${{ secrets.S3_BUCKET != '' && 's3' || 'local' }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_REGION: ${{ secrets.S3_REGION }}
+          S3_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          S3_CDN_BASE_URL: ${{ secrets.S3_CDN_BASE_URL }}
         run: |
           set -euo pipefail
           IMAGE="${REGISTRY}/${IMAGE_NAME}:${{ steps.lane.outputs.tag }}"
@@ -121,4 +133,5 @@ jobs:
           docker run --rm \
             -e DATABASE_URL -e ANTHROPIC_API_KEY -e AGENT -e SEARCH_PROVIDER -e SEARCH_API_KEY \
             -e DAILY_BUDGET_EUR -e NODE_ENV=production \
+            -e EVIDENCE_STORE -e S3_BUCKET -e S3_REGION -e S3_ACCESS_KEY_ID -e S3_SECRET_ACCESS_KEY -e S3_CDN_BASE_URL \
             "$IMAGE" ${{ steps.lane.outputs.args }}

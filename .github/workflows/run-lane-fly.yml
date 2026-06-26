@@ -166,12 +166,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Build the -e overrides. The app's secrets (DATABASE_URL, ANTHROPIC_API_KEY,
-          # S3_*) are inherited automatically; we only override the lane-specific env:
+          # Build the -e overrides. The app's SECRETS (DATABASE_URL, ANTHROPIC_API_KEY,
+          # S3_*) are inherited automatically; the app's fly.toml `[env]` block is NOT
+          # (`fly machine run` does not read fly.toml — see deploy/fly/README.md), so any
+          # NON-secret config the lane needs must be re-passed here explicitly:
+          #   - EVIDENCE_STORE=s3: lives in fly.toml `[env]`, so an ephemeral lane machine
+          #     would otherwise default to `local` (config.ts) and write evidence to the
+          #     container's throwaway ./.evidence dir — lost on `--rm`, leaving the S3
+          #     bucket empty while the crawl "succeeds". Re-pass it so blobs land in S3.
           #   - LLM_PROVIDER=anthropic for lanes that call the model (the app runs `stub`),
           #   - RUN_MIGRATIONS=false (the schema is already applied by the live API),
           #   - discover also needs AGENT=search + SEARCH_PROVIDER (kept off otherwise).
-          EXTRA_ENV=(-e RUN_MIGRATIONS=false)
+          EXTRA_ENV=(-e RUN_MIGRATIONS=false -e EVIDENCE_STORE=s3)
           if [ "${{ steps.cmd.outputs.needs_llm }}" = "1" ]; then
             EXTRA_ENV+=(-e LLM_PROVIDER=anthropic)
           fi

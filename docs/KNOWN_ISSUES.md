@@ -529,6 +529,13 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
   scope the CDN per `ARCHITECTURE.md`) before un-suspending any lane. Optionally add a startup
   preflight that asserts the S3 creds are present when `EVIDENCE_STORE=s3`.
 - **Logged**: 2026-06-20
+- **Update 2026-06-26**: the k8s ConfigMap defaults `EVIDENCE_STORE=s3`, but the two **GitHub Actions**
+  lane runners did NOT pass it — and `fly machine run` / `docker run` do not read `fly.toml`'s `[env]`,
+  so a CI crawl ran with `EVIDENCE_STORE` unset → defaulted to `local` → wrote evidence to the
+  container's throwaway FS, lost on exit. The crawl "succeeded" but the S3 bucket stayed empty (this
+  is exactly why `dealroute-evidence-dev` had no objects after a CI crawl). Fixed: `run-lane-fly.yml`
+  now passes `-e EVIDENCE_STORE=s3` (S3_* inherited as Fly secrets); `scheduled.yml` passes
+  `EVIDENCE_STORE` + the `S3_*` env (flips to `s3` when `secrets.S3_BUCKET` is set, else stays `local`).
 
 ### No rate-limiting on the public unauthenticated `/v1/` API
 - **Severity**: medium
