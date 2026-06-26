@@ -126,4 +126,29 @@ describe('ReviewUseCase.search (unified search)', () => {
     const out = await uc.search({ q: 'apple', limit: 3, permissions: perms() });
     expect(out.candidates).toHaveLength(3);
   });
+
+  it('finds a match that sits AFTER `limit` non-matching rows (filter before cap)', async () => {
+    // Regression: the in-memory adapter must scan the full store and filter by `q`
+    // BEFORE capping at `limit` — exactly like Postgres' `WHERE ilike LIMIT`. With a
+    // limit-before-filter bug, these 6 non-matching rows ahead of the one match would
+    // hide it (the cap is consumed by non-matches), diverging from Postgres (LSP).
+    for (let i = 0; i < 6; i++) {
+      await db.deals.insert(
+        makeDeal({
+          status: 'candidate',
+          service: `Netflix ${i}`,
+          provider: 'Netflix',
+          country: 'DE',
+        }),
+      );
+    }
+    await db.deals.insert(
+      makeDeal({ status: 'candidate', service: 'Apple TV+', provider: 'Apple', country: 'DE' }),
+    );
+
+    const out = await uc.search({ q: 'apple', limit: 5, permissions: perms() });
+    expect(out.candidates).toEqual([
+      { id: expect.any(String), title: 'Apple TV+', subtitle: 'Apple · DE' },
+    ]);
+  });
 });

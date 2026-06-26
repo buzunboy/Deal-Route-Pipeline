@@ -260,6 +260,12 @@ export class PostgresDb implements Database {
    * Fine at the current corpus (a handful of reviewers, low-thousands of rows). Upgrade path
    * when it bites: a generated tsvector column + GIN index (or pg_trgm GIN for substring),
    * matched with `@@`/`%` instead of ILIKE — same projection, swap the WHERE.
+   *
+   * The title/subtitle FORMATS below are composed in SQL (so the row already carries the
+   * contract shape) and MUST mirror the pure projectors in `domain/search/search-projection.ts`
+   * — `dealToSearchItem` ("provider · country"), `sourceToSearchItem` ("Tier N · status"),
+   * `captureToSearchItem` ("reason · status"). Those projectors are the source of truth for the
+   * in-memory adapter; keep these `sql` expressions in lockstep if a format ever changes.
    */
   async search(opts: {
     q: string;

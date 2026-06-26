@@ -167,16 +167,21 @@ export class InMemoryDb implements Database {
     const take = <T>(rows: T[], project: (r: T) => SearchResultItem): SearchResultItem[] =>
       rows.slice(0, limit).map(project);
 
+    // Scan the FULL store per status, filter by `q`, THEN cap — matching the
+    // Postgres adapter's `WHERE ilike(...) ... LIMIT` order. Passing `limit` into
+    // listByStatus would truncate BEFORE the text filter, so non-matching early
+    // rows could eat the budget and the two adapters would diverge (LSP).
+    const ALL = Number.POSITIVE_INFINITY;
     const out: SearchResults = {};
     if (resources.has('candidates')) {
       const rows = [
-        ...(await this.deals.listByStatus('candidate', limit)),
-        ...(await this.deals.listByStatus('in_review', limit)),
+        ...(await this.deals.listByStatus('candidate', ALL)),
+        ...(await this.deals.listByStatus('in_review', ALL)),
       ].filter((d) => has(d.service, d.provider, d.headline));
       out.candidates = take(rows, dealToSearchItem);
     }
     if (resources.has('published')) {
-      const rows = (await this.deals.listByStatus('published', limit)).filter((d) =>
+      const rows = (await this.deals.listByStatus('published', ALL)).filter((d) =>
         has(d.service, d.provider, d.headline),
       );
       out.published = take(rows, dealToSearchItem);
