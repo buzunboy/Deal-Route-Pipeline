@@ -98,10 +98,25 @@ describe('RefreshUseCase', () => {
     );
   });
 
-  it('REUSE of a rotated-out token revokes the whole family', async () => {
+  it('a concurrent replay WITHIN the grace window re-issues without revoking the family', async () => {
     const { refreshToken: first } = await loginOnce();
-    const second = await refresh.refresh({ refreshToken: first }); // first now rotated out
-    // Replaying the rotated-out `first` is reuse → family-revoke + 401.
+    const second = await refresh.refresh({ refreshToken: first }); // first rotated out at T0
+    // A racing request replays `first` ~1s later (within the 10s grace) — a benign concurrent
+    // refresh, not theft. It gets a fresh working session, the family survives.
+    clock.set(new Date(T0.getTime() + 1000));
+    const racing = await refresh.refresh({ refreshToken: first });
+    expect(racing.refreshToken).not.toBe(first);
+    expect(racing.refreshToken).not.toBe(second.refreshToken);
+    // The legitimate successor is still usable: the family was NOT revoked.
+    const third = await refresh.refresh({ refreshToken: second.refreshToken });
+    expect(third.accessToken).toBeTruthy();
+  });
+
+  it('a LATE replay of a rotated-out token (past the grace window) revokes the whole family', async () => {
+    const { refreshToken: first } = await loginOnce();
+    const second = await refresh.refresh({ refreshToken: first }); // first rotated out at T0
+    // Replaying `first` well past the grace window is theft → family-revoke + 401.
+    clock.set(new Date(T0.getTime() + 60_000));
     await expect(refresh.refresh({ refreshToken: first })).rejects.toBeInstanceOf(
       RefreshReuseDetectedError,
     );

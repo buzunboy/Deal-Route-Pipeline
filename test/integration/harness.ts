@@ -91,6 +91,25 @@ export async function seedAuthBaseline(pool: pg.Pool): Promise<void> {
 }
 
 /**
+ * Backdate the `revoked_at` of every revoked refresh_tokens row by `seconds`, so a test can
+ * exercise the refresh-reuse grace window against real Postgres without a controllable clock
+ * (the Container uses a real clock). Returns the rows touched.
+ */
+export async function ageRefreshRevocation(seconds: number): Promise<number> {
+  const pool = new pg.Pool({ connectionString: DB_URL });
+  try {
+    const res = await pool.query(
+      `UPDATE refresh_tokens SET revoked_at = revoked_at - ($1 || ' seconds')::interval
+         WHERE revoked_at IS NOT NULL`,
+      [String(seconds)],
+    );
+    return res.rowCount ?? 0;
+  } finally {
+    await pool.end();
+  }
+}
+
+/**
  * Build a real Container against the test Postgres, with deterministic adapter
  * overrides. `usePersistence` is true so the real PostgresDb is used; pg-boss is
  * never started here (the queue isn't exercised by these flows). Evidence uses a

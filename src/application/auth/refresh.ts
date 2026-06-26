@@ -24,7 +24,10 @@ export interface RefreshInput {
  * rotated token, when replayed, is recognised as a revoked family member and the WHOLE
  * family is revoked (theft response → every session in that lineage dies). It also
  * re-checks `status` + `token_version`, so a user disabled mid-session can't refresh back
- * in. The decision (`ok`/`expired`/`reuse`/`unknown`) is the pure `validateRefreshRotation`
+ * in. A racing replay of a just-rotated token (two tabs / a retry / a StrictMode double-
+ * fire) is recognised as `concurrent`: a fresh member is minted into the same family
+ * instead of revoking it, so benign concurrency can't force a logout. The decision
+ * (`ok`/`concurrent`/`expired`/`reuse`/`unknown`) is the pure `validateRefreshRotation`
  * rule; this use-case wires the DB effects around it.
  */
 export class RefreshUseCase {
@@ -53,7 +56,11 @@ export class RefreshUseCase {
       throw new RefreshReuseDetectedError();
     }
 
-    // verdict === 'ok' — `stored` is a current, unexpired row.
+    // verdict === 'ok' or 'concurrent' — `stored` is the row to mint a successor from.
+    // For 'concurrent' the row is already rotated-out within the grace window (a racing
+    // tab/retry presented the same valid token); we issue a fresh family member rather
+    // than revoke, so legitimate concurrency can't force a logout. `stored` itself stays
+    // revoked — we don't re-stamp it.
     const current = stored!;
     const user = await this.db.users.getById(current.user_id);
     if (user === null || user.status !== 'active') {
@@ -62,29 +69,33 @@ export class RefreshUseCase {
       throw new AccountDisabledError();
     }
 
-    // Mint the new pair, rotating the old row (same family) atomically.
-    const session = await this.rotate(current, user, now, input);
-    this.logger.info('token refreshed', { email: user.email });
+    // 'ok' → atomically rotate (stamp the predecessor + insert the successor). 'concurrent'
+    // → the row is already rotated-out within the grace window (a racing tab/retry beat this
+    // one); we don't re-stamp it, we just INSERT a fresh family member so the racing caller
+    // gets a working session instead of a forced logout. The live successor stays untouched.
+    const concurrent = verdict === 'concurrent';
+    const session = await this.mintFamilyMember(current, user, now, input, (successor) =>
+      concurrent
+        ? this.db.refreshTokens.issue(successor)
+        : this.db.refreshTokens.rotate(current.id, successor),
+    );
+    this.logger.info('token refreshed', { email: user.email, concurrent });
     return session;
   }
 
   /**
-   * Build the successor refresh row + a fresh access token, then atomically rotate (stamp
-   * the predecessor `revoked_at`/`replaced_by` and insert the successor). Perms +
-   * perm_version are RE-RESOLVED from the DB so a mid-token role/permission change is
-   * honoured on the next access token.
+   * Build a fresh access token + a new refresh row in `current`'s family, persist it via
+   * `persist`, and return the session. Perms + perm_version are RE-RESOLVED from the DB so
+   * a mid-token role/permission change is honoured on the next access token. The reads are
+   * coalesced into ONE connection checkout (the auth path is the pool's heaviest consumer).
    */
-  private async rotate(
+  private async mintFamilyMember(
     current: StoredRefresh,
     user: NonNullable<Awaited<ReturnType<Database['users']['getById']>>>,
     now: Date,
     meta: { userAgent?: string; ip?: string },
+    persist: (successor: StoredRefresh) => Promise<void>,
   ): Promise<AuthSession> {
-    // Coalesce the three claim-minting reads (perms + role name + perm_version) into ONE
-    // connection checkout — refresh's `rotate` already pins a slot for its transaction, so
-    // shrinking the surrounding reads matters most here. `user` is in hand, so key off
-    // `user.role_id` (no redundant users.getById). Perms/perm_version stay RE-RESOLVED, so a
-    // mid-token role/permission change is still honoured on the next access token.
     const { permissions, roleName, permVersion } = await this.db.claimInputsForRole(user.role_id);
     const perms = new Set(permissions);
     const claims = buildAccessClaims({
@@ -114,7 +125,7 @@ export class RefreshUseCase {
       user_agent: meta.userAgent ?? null,
       ip: meta.ip ?? null,
     };
-    await this.db.refreshTokens.rotate(current.id, successor);
+    await persist(successor);
 
     return {
       accessToken,

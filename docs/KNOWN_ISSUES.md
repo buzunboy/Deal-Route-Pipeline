@@ -31,6 +31,15 @@ never "low"). Always include a concrete **Location** (`file:line` or area) and a
 
 ## Open findings
 
+### Refresh-reuse grace window slightly widens the theft-detection gate (deliberate)
+- **Severity**: low (deliberate security/UX tradeoff; theft response for late replays is unchanged)
+- **Area**: auth
+- **Location**: `src/domain/auth/rules.ts` (`REFRESH_REUSE_GRACE_SECONDS = 10`, `validateRefreshRotation` `concurrent` branch); `src/application/auth/refresh.ts` (the `concurrent ? issue : rotate` branch + `mintFamilyMember`).
+- **What**: to stop benign concurrent refreshes (two tabs / a retry / a StrictMode double-fire) from tripping reuse-detection and force-logging-out the whole family, a rotated-out token replayed **within 10s** of its rotation now re-issues a fresh family member instead of revoking. A token stolen and replayed *inside that 10s window* would therefore also get a working session, instead of triggering the family-revoke. Replays past the window still nuke the family (full theft response, unchanged).
+- **Why deferred**: this fixes the actual reported symptom (frequent spurious logouts). The exposure is tiny — a 10s window, and the legitimate client's live successor is untouched, so the attacker and victim simply both hold valid tokens until the next rotation; no privilege escalation, no persistence beyond normal rotation. Each concurrent replay also mints an extra live family member (harmless; all expire normally).
+- **Fix-when**: if a stricter theft posture is needed — tighten `REFRESH_REUSE_GRACE_SECONDS`, or replace the "re-issue in family" approach with returning the *existing* live successor (requires storing the successor's raw token server-side or a short-lived idempotency cache keyed by presented-token-hash), which closes the window entirely without re-introducing the logout race.
+- **Logged**: 2026-06-26
+
 ### Ingest-community: a failed triage call's LLM cost is not credited to the budget tally
 - **Severity**: low
 - **Area**: ingest / cost

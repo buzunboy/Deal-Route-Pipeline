@@ -122,25 +122,50 @@ export function buildAccessClaims(input: BuildAccessClaimsInput): AccessClaims {
 }
 
 /** The outcome of evaluating a presented refresh token against its stored row. */
-export type RefreshRotationVerdict = 'ok' | 'expired' | 'reuse' | 'unknown';
+export type RefreshRotationVerdict = 'ok' | 'expired' | 'reuse' | 'concurrent' | 'unknown';
+
+/**
+ * The grace window (seconds) within which a just-rotated token replayed by a RACING
+ * request is treated as a benign concurrent refresh, not theft. Two tabs, a retry, or a
+ * StrictMode double-fire can present the same valid refresh token near-simultaneously;
+ * the first wins the rotation, the others arrive a few hundred ms later to find the row
+ * already `replaced_by`-stamped. Without a grace window that trips reuse-detection and
+ * revokes the whole family → a spurious forced logout. Kept short: a token stolen and
+ * replayed beyond this window is still theft and still nukes the family.
+ */
+export const REFRESH_REUSE_GRACE_SECONDS = 10;
 
 /**
  * The pure heart of rotating-refresh + reuse-detection. The hash lookup already
  * happened (the adapter does the constant-time compare); this decides the verdict:
- * - `unknown` — no stored row (the hash matched nothing) ⇒ invalid (401).
- * - `reuse`   — the row exists but is already revoked/replaced (a rotated-out token
- *               was replayed) ⇒ the use-case revokes the whole `family_id` (401).
- *               Checked BEFORE `expired` so a replayed-but-expired token still trips
- *               theft-response, not a benign expiry.
- * - `expired` — current row, but `now >= expires_at` ⇒ invalid (401).
- * - `ok`      — current (not revoked/replaced) and unexpired ⇒ rotate + issue successor.
+ * - `unknown`    — no stored row (the hash matched nothing) ⇒ invalid (401).
+ * - `concurrent` — the row was rotated out (`replaced_by` set, NOT independently revoked)
+ *                  within {@link REFRESH_REUSE_GRACE_SECONDS} ⇒ a benign racing refresh;
+ *                  the use-case re-issues off the live successor instead of revoking.
+ * - `reuse`      — the row is revoked, or rotated out longer ago than the grace window
+ *                  (a rotated-out token replayed late = theft) ⇒ revoke the whole
+ *                  `family_id` (401). Checked BEFORE `expired` so a replayed-but-expired
+ *                  token still trips theft-response, not a benign expiry.
+ * - `expired`    — current row, but `now >= expires_at` ⇒ invalid (401).
+ * - `ok`         — current (not revoked/replaced) and unexpired ⇒ rotate + issue successor.
  */
 export function validateRefreshRotation(
   stored: StoredRefresh | null,
   now: Date,
 ): RefreshRotationVerdict {
   if (stored === null) return 'unknown';
-  if (stored.revoked_at !== null || stored.replaced_by !== null) return 'reuse';
+  if (stored.revoked_at !== null || stored.replaced_by !== null) {
+    // A clean rotation stamps BOTH revoked_at and replaced_by. A grace-window replay is only
+    // benign when the row was rotated out (has a successor) AND was revoked within the window
+    // — a revoke-without-successor (logout / theft response), or a late replay, is reuse. Both
+    // fail closed to reuse: an absent revoked_at ⇒ Infinity, a malformed one ⇒ NaN, and
+    // neither satisfies `<= grace`.
+    const sinceRevokeMs =
+      stored.revoked_at !== null ? now.getTime() - Date.parse(stored.revoked_at) : Infinity;
+    return stored.replaced_by !== null && sinceRevokeMs <= REFRESH_REUSE_GRACE_SECONDS * 1000
+      ? 'concurrent'
+      : 'reuse';
+  }
   if (now.getTime() >= Date.parse(stored.expires_at)) return 'expired';
   return 'ok';
 }
