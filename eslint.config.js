@@ -10,7 +10,10 @@ export default [
     // CloudFront edge Function) — not app source: it isn't built or imported, and the
     // CloudFront Function intentionally defines a global `handler` the edge runtime
     // invokes (which the app's `no-unused-vars`/module rules would misflag).
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'drizzle/**', 'deploy/**'],
+    // `.claude/**` holds gitignored Claude Code worktree copies (stale checkouts of the
+    // whole repo) — linting them double-counts every file and floods `eslint .` with
+    // errors from their own scripts; the real tree is src/test/scripts.
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'drizzle/**', 'deploy/**', '.claude/**'],
   },
   eslint.configs.recommended,
   {
